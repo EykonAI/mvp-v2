@@ -160,7 +160,7 @@ export default function MapView({ aircraft, vessels, conflicts, infrastructure }
   return (
     <div className="w-full h-full relative">
       <DeckGL
-        viewState={viewState}
+        viewState={viewState as any}
         onViewStateChange={({ viewState: vs }: any) => setViewState(vs)}
         layers={layers}
         controller={true}
