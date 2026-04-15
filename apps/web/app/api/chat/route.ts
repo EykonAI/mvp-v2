@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
       iterations++;
 
       // Collect tool use blocks from response
-      const toolUseBlocks = response.content.filter((b: any) => b.type === 'tool_use');
+      const toolUseBlocks = response.content.filter((b): b is { type: 'tool_use'; id: string; name: string; input: unknown } => b.type === 'tool_use');
       const textBlocks = response.content.filter((b: any) => b.type === 'text');
 
       // Add assistant response (with tool_use blocks) to conversation
