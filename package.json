@@ -1,0 +1,15 @@
+{
+  "name": "eykon-platform",
+  "private": true,
+  "scripts": {
+    "dev": "cd apps/web && npm run dev",
+    "build": "cd apps/web && npm run build",
+    "start": "cd apps/web && npm start",
+    "supervisor": "node services/supervisor/index.js",
+    "install:all": "npm install && cd apps/web && npm install",
+    "db:migrate": "node supabase/migrate.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
