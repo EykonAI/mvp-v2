@@ -18,10 +18,10 @@ const nextConfig = {
     '@deck.gl/react',
   ],
   webpack: (config) => {
-    // Fix maplibre-gl worker
+    // Fix maplibre-gl worker — alias only the JS entry, not the CSS
     config.resolve.alias = {
       ...config.resolve.alias,
-      'maplibre-gl': 'maplibre-gl/dist/maplibre-gl.js',
+      'maplibre-gl$': 'maplibre-gl/dist/maplibre-gl.js',
     };
     return config;
   },
