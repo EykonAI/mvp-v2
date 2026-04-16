@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
 
     // Initial Claude call with tools
     let response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-5-20241022',
       max_tokens: 4096,
       system: CONVERSATIONAL_SYSTEM_PROMPT,
       tools: CLAUDE_TOOLS,
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
 
       // Continue the conversation
       response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-5-20241022',
         max_tokens: 4096,
         system: CONVERSATIONAL_SYSTEM_PROMPT,
         tools: CLAUDE_TOOLS,

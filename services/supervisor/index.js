@@ -87,7 +87,7 @@ async function dispatchSubAgent(domain, taskPayload) {
 
   try {
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-5-20241022',
       max_tokens: 2048,
       system: agent.system,
       messages: [{

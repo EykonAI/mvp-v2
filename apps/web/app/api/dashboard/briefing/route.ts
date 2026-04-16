@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     // Generate briefing with Claude
     const anthropic = getAnthropic();
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-5-20241022',
       max_tokens: 2048,
       system: `You are the eYKON.ai daily briefing generator. Create a concise, structured intelligence briefing based on the user's watchlist and recent events. Format with clear sections, bullet points, and severity indicators. Be factual, cite sources, and highlight actionable intelligence.`,
       messages: [{

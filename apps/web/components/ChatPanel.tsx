@@ -90,7 +90,7 @@ export default function ChatPanel() {
             <div className="w-2 h-2 rounded-full bg-eykon-teal pulse-dot" />
             <span className="text-sm font-semibold text-white">Intelligence Analyst</span>
           </div>
-          <span className="text-[10px] text-eykon-muted">Claude Sonnet 4.6</span>
+          <span className="text-[10px] text-eykon-muted">Claude Sonnet 4.5</span>
         </div>
       </div>
 

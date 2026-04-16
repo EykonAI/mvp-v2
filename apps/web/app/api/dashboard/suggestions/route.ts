@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
 
     const anthropic = getAnthropic();
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-5-20241022',
       max_tokens: 300,
       system: `You generate 3 short, specific geopolitical query suggestions for eYKON.ai users. Each suggestion should be a natural-language question that the Claude analyst can answer using live data tools (vessel queries, aircraft queries, conflict queries, infrastructure queries). Return ONLY a JSON array of 3 strings. No other text.`,
       messages: [{
