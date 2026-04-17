@@ -1,14 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+const ACLED_TOKEN_URL = 'https://acleddata.com/oauth/token';
+const ACLED_READ_URL = 'https://acleddata.com/api/acled/read';
+
 // ACLED token cache
 let acledToken: { access: string; refresh: string; expires: number } | null = null;
 
-async function getAcledToken(): Promise<string> {
-  const email = process.env.ACLED_EMAIL;
-  const password = process.env.ACLED_API_KEY;
-  if (!email || !password) throw new Error('ACLED credentials not configured');
+async function postForm(url: string, fields: Record<string, string>): Promise<Response> {
+  const body = new URLSearchParams(fields).toString();
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+}
 
-  // Check if token is still valid (with 5-min buffer)
+async function getAcledToken(): Promise<string> {
+  const username = process.env.ACLED_EMAIL;
+  const password = process.env.ACLED_API_KEY;
+  if (!username || !password) throw new Error('ACLED credentials not configured');
+
+  // Reuse cached token if still valid (with 5-min buffer)
   if (acledToken && Date.now() < acledToken.expires - 300_000) {
     return acledToken.access;
   }
@@ -16,34 +28,39 @@ async function getAcledToken(): Promise<string> {
   // Try refresh first
   if (acledToken?.refresh) {
     try {
-      const res = await fetch('https://api.acleddata.com/auth/refresh', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${acledToken.refresh}` },
+      const res = await postForm(ACLED_TOKEN_URL, {
+        grant_type: 'refresh_token',
+        refresh_token: acledToken.refresh,
+        client_id: 'acled',
       });
       if (res.ok) {
         const data = await res.json();
         acledToken = {
           access: data.access_token,
           refresh: data.refresh_token || acledToken.refresh,
-          expires: Date.now() + 24 * 3600_000,
+          expires: Date.now() + (data.expires_in ?? 86400) * 1000,
         };
         return acledToken.access;
       }
     } catch {}
   }
 
-  // Full login
-  const res = await fetch('https://api.acleddata.com/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+  // Full password-grant login
+  const res = await postForm(ACLED_TOKEN_URL, {
+    username,
+    password,
+    grant_type: 'password',
+    client_id: 'acled',
   });
-  if (!res.ok) throw new Error(`ACLED login failed: ${res.status}`);
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`ACLED login failed: ${res.status} ${text.slice(0, 200)}`);
+  }
   const data = await res.json();
   acledToken = {
     access: data.access_token,
     refresh: data.refresh_token,
-    expires: Date.now() + 24 * 3600_000,
+    expires: Date.now() + (data.expires_in ?? 86400) * 1000,
   };
   return acledToken.access;
 }
@@ -78,7 +95,7 @@ export async function GET(req: NextRequest) {
       queryParams.set('longitude_where', 'BETWEEN');
     }
 
-    const res = await fetch(`https://api.acleddata.com/acled/read?${queryParams.toString()}`, {
+    const res = await fetch(`${ACLED_READ_URL}?${queryParams.toString()}`, {
       headers: { Authorization: `Bearer ${token}` },
       next: { revalidate: 300 },
     });
