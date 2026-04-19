@@ -1,0 +1,17 @@
+{
+  "model": "logistic_regression",
+  "version": "v1.0.0-2026-04-19",
+  "features": [
+    { "key": "ais_gap_hours_log",      "weight": 0.68,  "clip": [0, 10],   "note": "log1p(gap_hours). Max-clipped at 10 days." },
+    { "key": "flag_changes_90d",       "weight": 0.54,  "clip": [0, 5],    "note": "Count of flag changes in last 90d." },
+    { "key": "cargo_mismatch_score",   "weight": 0.47,  "clip": [0, 1],    "note": "AIS declared vs actual (imagery) mismatch." },
+    { "key": "port_call_anomaly",      "weight": 0.42,  "clip": [0, 1],    "note": "Density-based anomaly vs historical port-call pattern." },
+    { "key": "beneficial_owner_opaque","weight": 0.36,  "clip": [0, 1],    "note": "1 if BO chain terminates at a shell/unknown." },
+    { "key": "flag_of_convenience",    "weight": 0.23,  "clip": [0, 1],    "note": "Binary: current flag in FOC list." },
+    { "key": "vessel_age_years",       "weight": 0.14,  "clip": [0, 40],   "note": "Age in years; monotonically up to 25." }
+  ],
+  "intercept": -2.4,
+  "threshold_alert": 0.6,
+  "threshold_review": 0.4,
+  "notes": "Coefficients learned offline on labelled post-sanctions vessel dataset (Feb 2022 – Mar 2026). Recalibrate quarterly. Replace this file to hot-swap the model."
+}

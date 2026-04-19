@@ -1,0 +1,58 @@
+{
+  "groups": [
+    {
+      "slug": "battery",
+      "label": "BATTERY",
+      "minerals": [
+        { "slug": "cobalt",   "label": "Cobalt",   "china_refining_share": 0.78, "risk_band": "red" },
+        { "slug": "lithium",  "label": "Lithium",  "china_refining_share": 0.63, "risk_band": "amber" },
+        { "slug": "nickel",   "label": "Nickel",   "china_refining_share": 0.42, "risk_band": "amber" },
+        { "slug": "graphite", "label": "Graphite", "china_refining_share": 0.92, "risk_band": "red" }
+      ]
+    },
+    {
+      "slug": "rare-earth",
+      "label": "RARE EARTH",
+      "minerals": [
+        { "slug": "neodymium",  "label": "Neodymium",  "china_refining_share": 0.89, "risk_band": "red" },
+        { "slug": "dysprosium", "label": "Dysprosium", "china_refining_share": 0.89, "risk_band": "red" },
+        { "slug": "terbium",    "label": "Terbium",    "china_refining_share": 0.89, "risk_band": "red" }
+      ]
+    }
+  ],
+  "refining_dominance": [
+    { "mineral": "Co", "share": 0.78 },
+    { "mineral": "Gr", "share": 0.92 },
+    { "mineral": "REE","share": 0.89 },
+    { "mineral": "Li", "share": 0.63 },
+    { "mineral": "Mn", "share": 0.58 },
+    { "mineral": "Ni", "share": 0.42 },
+    { "mineral": "Cu", "share": 0.38 },
+    { "mineral": "W",  "share": 0.82 }
+  ],
+  "mines": [
+    { "mineral": "cobalt",   "name": "Tenke Fungurume", "country": "CD", "owner": "CMOC",        "tonnage_pct": 0.21, "status": "running" },
+    { "mineral": "cobalt",   "name": "Mutanda",         "country": "CD", "owner": "Glencore",    "tonnage_pct": 0.14, "status": "running" },
+    { "mineral": "cobalt",   "name": "Kisanfu",         "country": "CD", "owner": "CMOC",        "tonnage_pct": 0.09, "status": "permit-review" },
+    { "mineral": "lithium",  "name": "Greenbushes",     "country": "AU", "owner": "Talison",     "tonnage_pct": 0.22, "status": "running" },
+    { "mineral": "lithium",  "name": "Salar de Atacama","country": "CL", "owner": "SQM",         "tonnage_pct": 0.17, "status": "running" },
+    { "mineral": "lithium",  "name": "Thacker Pass",    "country": "US", "owner": "Lithium Americas", "tonnage_pct": 0.04, "status": "permit-review" },
+    { "mineral": "nickel",   "name": "Sulawesi Block",  "country": "ID", "owner": "Harita",      "tonnage_pct": 0.19, "status": "running" },
+    { "mineral": "graphite", "name": "Luobei",          "country": "CN", "owner": "BTR",         "tonnage_pct": 0.33, "status": "running" },
+    { "mineral": "neodymium","name": "Bayan Obo",       "country": "CN", "owner": "Baogang",     "tonnage_pct": 0.54, "status": "running" }
+  ],
+  "supply_risk_index": [
+    { "mineral": "Cobalt",    "band": "red" },
+    { "mineral": "Graphite",  "band": "red" },
+    { "mineral": "Neodymium", "band": "red" },
+    { "mineral": "Dysprosium","band": "red" },
+    { "mineral": "Terbium",   "band": "red" },
+    { "mineral": "Tungsten",  "band": "red" },
+    { "mineral": "Lithium",   "band": "amber" },
+    { "mineral": "Nickel",    "band": "amber" },
+    { "mineral": "Manganese", "band": "amber" },
+    { "mineral": "Copper",    "band": "green" },
+    { "mineral": "Zinc",      "band": "green" },
+    { "mineral": "Aluminium", "band": "green" }
+  ]
+}

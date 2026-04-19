@@ -1,0 +1,25 @@
+{
+  "chokepoints": [
+    { "slug": "hormuz",        "label": "Strait of Hormuz",    "throughput_mbd": 21.0, "baseline_brent_usd": 82, "elasticity_closure_full": 0.38, "elasticity_closure_partial": 0.18, "elasticity_transit_tax": 0.09, "reroute_lag_hours_default": 48 },
+    { "slug": "bab-el-mandeb", "label": "Bab-el-Mandeb",       "throughput_mbd": 8.8,  "baseline_brent_usd": 82, "elasticity_closure_full": 0.16, "elasticity_closure_partial": 0.08, "elasticity_transit_tax": 0.04, "reroute_lag_hours_default": 48 },
+    { "slug": "malacca",       "label": "Strait of Malacca",   "throughput_mbd": 16.0, "baseline_brent_usd": 82, "elasticity_closure_full": 0.22, "elasticity_closure_partial": 0.11, "elasticity_transit_tax": 0.06, "reroute_lag_hours_default": 72 },
+    { "slug": "bosphorus",     "label": "Bosphorus",           "throughput_mbd": 2.4,  "baseline_brent_usd": 82, "elasticity_closure_full": 0.06, "elasticity_closure_partial": 0.03, "elasticity_transit_tax": 0.02, "reroute_lag_hours_default": 36 },
+    { "slug": "suez",          "label": "Suez Canal",          "throughput_mbd": 9.2,  "baseline_brent_usd": 82, "elasticity_closure_full": 0.19, "elasticity_closure_partial": 0.10, "elasticity_transit_tax": 0.05, "reroute_lag_hours_default": 48 },
+    { "slug": "panama",        "label": "Panama Canal",        "throughput_mbd": 1.1,  "baseline_brent_usd": 82, "elasticity_closure_full": 0.04, "elasticity_closure_partial": 0.02, "elasticity_transit_tax": 0.01, "reroute_lag_hours_default": 60 }
+  ],
+  "receiving_clusters": [
+    { "slug": "nw-europe", "label": "NW Europe",    "import_share": 0.22 },
+    { "slug": "n-asia",    "label": "N Asia",       "import_share": 0.31 },
+    { "slug": "mediterranean", "label": "Mediterranean", "import_share": 0.14 },
+    { "slug": "north-america", "label": "North America", "import_share": 0.18 },
+    { "slug": "latam", "label": "LatAm",            "import_share": 0.06 },
+    { "slug": "other", "label": "Other",            "import_share": 0.09 }
+  ],
+  "assumption_multipliers": {
+    "spr_release": 0.85,
+    "opec_plus_compensatory": 0.88,
+    "asia_demand_elastic": 0.92,
+    "shipping_rate_contagion": 1.12
+  },
+  "notes": "Elasticity coefficients are anchored on the March 2021 Suez episode (Ever Given) — a 6-day full closure that moved spot Brent by ~4%."
+}

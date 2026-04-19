@@ -7,7 +7,8 @@
     "start": "cd apps/web && npm start",
     "supervisor": "node services/supervisor/index.js",
     "install:all": "npm install && cd apps/web && npm install",
-    "db:migrate": "node supabase/migrate.js"
+    "db:migrate": "node supabase/migrate.js",
+    "db:seed": "node supabase/seed.js"
   },
   "engines": {
     "node": ">=18.0.0"

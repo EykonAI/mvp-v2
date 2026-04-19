@@ -1,0 +1,74 @@
+{
+  "generated_at": "2026-04-19T00:00:00Z",
+  "theatres": [
+    {
+      "slug": "red-sea",
+      "label": "Red Sea",
+      "bbox": { "lat_min": 12, "lat_max": 30, "lon_min": 32, "lon_max": 44 },
+      "composite": 0.74,
+      "trend": "up",
+      "air": 0.62,
+      "sea": 0.81,
+      "conflict": 0.78,
+      "grid": 0.44,
+      "imagery": 0.56,
+      "precursor_match_id": null,
+      "precursor_similarity": 0.62,
+      "last_30d_composite": [0.56, 0.58, 0.57, 0.59, 0.60, 0.61, 0.63, 0.65, 0.64, 0.66, 0.67, 0.69, 0.68, 0.70, 0.71, 0.71, 0.72, 0.73, 0.72, 0.73, 0.73, 0.74, 0.74, 0.73, 0.74, 0.74, 0.74, 0.74, 0.74, 0.74]
+    },
+    {
+      "slug": "hormuz",
+      "label": "Strait of Hormuz",
+      "bbox": { "lat_min": 24, "lat_max": 28, "lon_min": 54, "lon_max": 58 },
+      "composite": 0.62,
+      "trend": "flat",
+      "air": 0.55,
+      "sea": 0.78,
+      "conflict": 0.34,
+      "grid": 0.50,
+      "imagery": 0.62,
+      "last_30d_composite": [0.58, 0.60, 0.61, 0.62, 0.62, 0.62, 0.60, 0.61, 0.62, 0.62, 0.63, 0.62, 0.62, 0.61, 0.62, 0.62, 0.63, 0.62, 0.62, 0.62, 0.62, 0.62, 0.62, 0.62, 0.62, 0.62, 0.62, 0.62, 0.62, 0.62]
+    },
+    {
+      "slug": "black-sea",
+      "label": "Black Sea",
+      "bbox": { "lat_min": 40, "lat_max": 47, "lon_min": 27, "lon_max": 42 },
+      "composite": 0.81,
+      "trend": "up",
+      "air": 0.74,
+      "sea": 0.80,
+      "conflict": 0.90,
+      "grid": 0.72,
+      "imagery": 0.82,
+      "precursor_match_id": "feb-2022-pre-invasion",
+      "precursor_similarity": 0.88,
+      "last_30d_composite": [0.70, 0.71, 0.72, 0.72, 0.73, 0.74, 0.74, 0.74, 0.75, 0.76, 0.77, 0.77, 0.78, 0.78, 0.79, 0.79, 0.80, 0.80, 0.80, 0.80, 0.81, 0.81, 0.81, 0.81, 0.81, 0.81, 0.81, 0.81, 0.81, 0.81]
+    },
+    {
+      "slug": "taiwan-strait",
+      "label": "Taiwan Strait",
+      "bbox": { "lat_min": 22, "lat_max": 26, "lon_min": 117, "lon_max": 121 },
+      "composite": 0.40,
+      "trend": "flat",
+      "air": 0.55,
+      "sea": 0.42,
+      "conflict": 0.18,
+      "grid": 0.40,
+      "imagery": 0.44,
+      "last_30d_composite": [0.37, 0.38, 0.39, 0.39, 0.39, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40, 0.40]
+    },
+    {
+      "slug": "gulf-of-guinea",
+      "label": "Gulf of Guinea",
+      "bbox": { "lat_min": -2, "lat_max": 6, "lon_min": -5, "lon_max": 10 },
+      "composite": 0.28,
+      "trend": "flat",
+      "air": 0.20,
+      "sea": 0.41,
+      "conflict": 0.30,
+      "grid": 0.18,
+      "imagery": 0.28,
+      "last_30d_composite": [0.26, 0.27, 0.27, 0.27, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28]
+    }
+  ]
+}
