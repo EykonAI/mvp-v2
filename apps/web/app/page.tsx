@@ -4,30 +4,28 @@ import dynamic from 'next/dynamic';
 import TopNav from '@/components/TopNav';
 import ChatPanel from '@/components/ChatPanel';
 import LayerControls from '@/components/LayerControls';
-import Dashboard from '@/components/Dashboard';
 import { POLL_INTERVALS } from '@/lib/constants';
 import type { LayerState } from '@/lib/types';
 
 // Dynamic import for Deck.gl (no SSR — requires WebGL)
 const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
 
-type ViewMode = 'globe' | 'dashboard';
-
 const initialLayerState = (): LayerState => ({
-  visible: true, loading: false, error: null, count: 0, lastFetch: null,
+  visible: true,
+  loading: false,
+  error: null,
+  count: 0,
+  lastFetch: null,
 });
 
 export default function Home() {
-  const [mode, setMode] = useState<ViewMode>('globe');
   const [chatOpen, setChatOpen] = useState(true);
 
-  // Layer data
   const [aircraft, setAircraft] = useState<any[]>([]);
   const [vessels, setVessels] = useState<any[]>([]);
   const [conflicts, setConflicts] = useState<any[]>([]);
   const [infrastructure, setInfrastructure] = useState<any[]>([]);
 
-  // Layer status
   const [layers, setLayers] = useState<Record<string, LayerState>>({
     aircraft: initialLayerState(),
     vessels: initialLayerState(),
@@ -37,45 +35,45 @@ export default function Home() {
 
   const intervalsRef = useRef<Record<string, NodeJS.Timeout>>({});
 
-  // ─── Data Fetchers ───
-  const fetchLayer = useCallback(async (
-    name: string,
-    url: string,
-    setter: (d: any[]) => void
-  ) => {
-    setLayers(prev => ({ ...prev, [name]: { ...prev[name], loading: true, error: null } }));
-    try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`${res.status}`);
-      const json = await res.json();
-      const data = json.data || json || [];
-      setter(data);
-      setLayers(prev => ({
-        ...prev,
-        [name]: {
-          ...prev[name],
-          loading: false,
-          count: data.length,
-          lastFetch: new Date().toISOString(),
-        },
-      }));
-    } catch (err: any) {
-      setLayers(prev => ({
-        ...prev,
-        [name]: { ...prev[name], loading: false, error: err.message },
-      }));
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.body.classList.add('globe-view');
+      document.body.classList.remove('intel-view');
+      return () => document.body.classList.remove('globe-view');
     }
   }, []);
 
-  // ─── Initial Load + Polling ───
+  const fetchLayer = useCallback(
+    async (name: string, url: string, setter: (d: any[]) => void) => {
+      setLayers(prev => ({ ...prev, [name]: { ...prev[name], loading: true, error: null } }));
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`${res.status}`);
+        const json = await res.json();
+        const data = json.data || json || [];
+        setter(data);
+        setLayers(prev => ({
+          ...prev,
+          [name]: {
+            ...prev[name],
+            loading: false,
+            count: data.length,
+            lastFetch: new Date().toISOString(),
+          },
+        }));
+      } catch (err: any) {
+        setLayers(prev => ({ ...prev, [name]: { ...prev[name], loading: false, error: err.message } }));
+      }
+    },
+    []
+  );
+
   useEffect(() => {
-    // Fetch all layers immediately
     fetchLayer('aircraft', '/api/aircraft', setAircraft);
     fetchLayer('vessels', '/api/vessels', setVessels);
     fetchLayer('conflicts', '/api/conflicts', setConflicts);
     fetchLayer('infrastructure', '/api/infrastructure', setInfrastructure);
 
-    // Set up polling for dynamic layers
     intervalsRef.current.aircraft = setInterval(
       () => fetchLayer('aircraft', '/api/aircraft', setAircraft),
       POLL_INTERVALS.aircraft
@@ -95,43 +93,28 @@ export default function Home() {
   }, [fetchLayer]);
 
   const toggleLayer = (name: string) => {
-    setLayers(prev => ({
-      ...prev,
-      [name]: { ...prev[name], visible: !prev[name].visible },
-    }));
+    setLayers(prev => ({ ...prev, [name]: { ...prev[name], visible: !prev[name].visible } }));
   };
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden">
-      {/* Top Navigation */}
-      <TopNav
-        mode={mode}
-        onModeChange={setMode}
-        chatOpen={chatOpen}
-        onChatToggle={() => setChatOpen(!chatOpen)}
-      />
+      <TopNav chatOpen={chatOpen} onChatToggle={() => setChatOpen(!chatOpen)} />
 
-      {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Map or Dashboard */}
         <div className="flex-1 relative">
-          {mode === 'globe' ? (
-            <>
-              <MapView
-                aircraft={layers.aircraft.visible ? aircraft : []}
-                vessels={layers.vessels.visible ? vessels : []}
-                conflicts={layers.conflicts.visible ? conflicts : []}
-                infrastructure={layers.infrastructure.visible ? infrastructure : []}
-              />
-              <LayerControls layers={layers} onToggle={toggleLayer} />
-            </>
-          ) : (
-            <Dashboard />
-          )}
+          <MapView
+            aircraft={layers.aircraft.visible ? aircraft : []}
+            vessels={layers.vessels.visible ? vessels : []}
+            conflicts={layers.conflicts.visible ? conflicts : []}
+            infrastructure={layers.infrastructure.visible ? infrastructure : []}
+          />
+          <LayerControls layers={layers} onToggle={toggleLayer} />
         </div>
 
-        {/* Chat Panel (slides in/out) */}
-        <div className={`transition-all duration-300 ease-in-out ${chatOpen ? 'w-[380px]' : 'w-0'} overflow-hidden border-l border-eykon-border`}>
+        <div
+          className={`transition-all duration-300 ease-in-out ${chatOpen ? 'w-[380px]' : 'w-0'} overflow-hidden`}
+          style={{ borderLeft: '1px solid var(--rule-soft)' }}
+        >
           {chatOpen && <ChatPanel />}
         </div>
       </div>

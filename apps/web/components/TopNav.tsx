@@ -1,72 +1,163 @@
 'use client';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 
 interface TopNavProps {
-  mode: 'globe' | 'dashboard';
-  onModeChange: (m: 'globe' | 'dashboard') => void;
-  chatOpen: boolean;
-  onChatToggle: () => void;
+  chatOpen?: boolean;
+  onChatToggle?: () => void;
 }
 
-export default function TopNav({ mode, onModeChange, chatOpen, onChatToggle }: TopNavProps) {
+/**
+ * Global top bar. Mounts above both the globe view (/) and the
+ * Intelligence Center (/intel/**). Renders a brand mark, a Globe/Intel
+ * toggle (Next.js links — path-driven highlight), a LIVE pill, and a
+ * chat toggle when the parent provides one.
+ */
+export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
+  const pathname = usePathname();
+  const isIntel = pathname?.startsWith('/intel') ?? false;
+
   return (
-    <nav className="h-12 bg-eykon-card border-b border-eykon-border flex items-center justify-between px-4 shrink-0 z-50">
-      {/* Logo */}
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-1.5">
-          {/* Eye icon */}
-          <svg width="24" height="16" viewBox="0 0 24 16" fill="none" className="opacity-90">
-            <path d="M12 0C5 0 0 8 0 8s5 8 12 8 12-8 12-8S19 0 12 0z" stroke="#1AB2A6" strokeWidth="1.5" fill="none"/>
-            <circle cx="12" cy="8" r="3" stroke="#1AB2A6" strokeWidth="1.5" fill="none"/>
-            <circle cx="12" cy="8" r="1" fill="#1AB2A6"/>
+    <nav
+      className="flex items-center gap-7 px-6 py-3 sticky top-0 z-30 backdrop-blur"
+      style={{
+        background: 'rgba(10, 18, 32, 0.9)',
+        borderBottom: '1px solid var(--rule-soft)',
+      }}
+    >
+      {/* Brand */}
+      <div className="flex items-center gap-2.5">
+        <div className="relative" style={{ width: 28, height: 18 }}>
+          <svg viewBox="0 0 28 18" width="28" height="18">
+            <path
+              d="M2 9 L14 2 L26 9 L14 16 Z"
+              fill="none"
+              stroke="var(--teal)"
+              strokeWidth="1.4"
+            />
+            <circle cx="14" cy="9" r="1.8" fill="var(--teal)" />
           </svg>
-          <span className="text-white font-semibold text-sm tracking-wider">eYKON</span>
-          <span className="text-eykon-teal text-xs font-medium">.ai</span>
         </div>
-        <span className="text-eykon-muted text-xs hidden sm:inline">|</span>
-        <span className="text-eykon-muted text-xs hidden sm:inline">Geopolitical Intelligence</span>
+        <span
+          style={{
+            fontFamily: 'var(--f-display)',
+            fontSize: 18,
+            fontWeight: 500,
+            letterSpacing: '0.12em',
+            color: 'var(--ink)',
+          }}
+        >
+          eYKON
+          <sup
+            style={{
+              fontFamily: 'var(--f-mono)',
+              fontSize: 10,
+              color: 'var(--teal)',
+              letterSpacing: '0.15em',
+              marginLeft: 2,
+            }}
+          >
+            .ai
+          </sup>
+        </span>
       </div>
 
-      {/* Mode Switcher */}
-      <div className="flex items-center gap-1 bg-eykon-dark rounded-lg p-0.5">
-        <button
-          onClick={() => onModeChange('globe')}
-          className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
-            mode === 'globe'
-              ? 'bg-eykon-teal/20 text-eykon-teal'
-              : 'text-eykon-muted hover:text-white'
-          }`}
-        >
-          Globe
-        </button>
-        <button
-          onClick={() => onModeChange('dashboard')}
-          className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${
-            mode === 'dashboard'
-              ? 'bg-eykon-teal/20 text-eykon-teal'
-              : 'text-eykon-muted hover:text-white'
-          }`}
-        >
-          Dashboard
-        </button>
+      <div style={{ width: 1, height: 22, background: 'var(--rule-strong)' }} />
+
+      <span
+        className="hidden sm:inline"
+        style={{
+          fontFamily: 'var(--f-mono)',
+          fontSize: 10.5,
+          letterSpacing: '0.12em',
+          textTransform: 'uppercase',
+          color: 'var(--ink-dim)',
+        }}
+      >
+        Geopolitical Intelligence
+      </span>
+
+      {/* Mode toggle */}
+      <div
+        className="ml-auto mr-5 flex"
+        style={{
+          background: 'var(--bg-panel)',
+          border: '1px solid var(--rule)',
+          borderRadius: 3,
+          padding: 2,
+        }}
+      >
+        <ToggleLink href="/" label="Globe" active={!isIntel} />
+        <ToggleLink href="/intel" label="Intel" active={isIntel} />
       </div>
 
-      {/* Right Controls */}
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-1.5">
-          <div className="w-1.5 h-1.5 rounded-full bg-green-400 pulse-dot" />
-          <span className="text-xs text-eykon-muted">LIVE</span>
-        </div>
+      {/* LIVE pill */}
+      <span
+        className="inline-flex items-center gap-1.5"
+        style={{
+          fontFamily: 'var(--f-mono)',
+          fontSize: 10.5,
+          letterSpacing: '0.15em',
+          color: 'var(--ink-dim)',
+          textTransform: 'uppercase',
+        }}
+      >
+        <span
+          className="pulse-dot"
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            background: 'var(--teal)',
+            boxShadow: '0 0 8px var(--teal)',
+          }}
+        />
+        Live
+      </span>
+
+      {/* Chat toggle */}
+      {onChatToggle && (
         <button
           onClick={onChatToggle}
-          className={`px-2.5 py-1 text-xs rounded-md border transition-all ${
-            chatOpen
-              ? 'border-eykon-teal/40 text-eykon-teal bg-eykon-teal/10'
-              : 'border-eykon-border text-eykon-muted hover:text-white'
-          }`}
+          aria-label="Toggle AI chat"
+          style={{
+            fontFamily: 'var(--f-mono)',
+            fontSize: 11,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: chatOpen ? 'var(--teal)' : 'var(--ink)',
+            background: 'transparent',
+            border: `1px solid ${chatOpen ? 'var(--teal-dim)' : 'var(--rule-strong)'}`,
+            padding: '5px 12px',
+            borderRadius: 2,
+            cursor: 'pointer',
+          }}
         >
           AI Chat
         </button>
-      </div>
+      )}
     </nav>
+  );
+}
+
+function ToggleLink({ href, label, active }: { href: string; label: string; active: boolean }) {
+  return (
+    <Link
+      href={href}
+      style={{
+        fontFamily: 'var(--f-mono)',
+        fontSize: 11,
+        letterSpacing: '0.1em',
+        textTransform: 'uppercase',
+        color: active ? 'var(--bg-void)' : 'var(--ink-dim)',
+        background: active ? 'var(--teal)' : 'transparent',
+        fontWeight: active ? 500 : 400,
+        padding: '5px 14px',
+        borderRadius: 2,
+        textDecoration: 'none',
+      }}
+    >
+      {label}
+    </Link>
   );
 }
