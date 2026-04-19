@@ -1,0 +1,15 @@
+{
+  "notes": "Historical base-rates for post-listing flag hops (2018–2025 sanctions cohort).",
+  "destinations": [
+    { "flag_code": "COK", "label": "Cook Islands",  "share": 0.78 },
+    { "flag_code": "GAB", "label": "Gabon",         "share": 0.34 },
+    { "flag_code": "CMR", "label": "Cameroon",      "share": 0.22 },
+    { "flag_code": "PAN", "label": "Panama",        "share": 0.18 },
+    { "flag_code": "LBR", "label": "Liberia",       "share": 0.14 },
+    { "flag_code": "BRB", "label": "Barbados",      "share": 0.09 },
+    { "flag_code": "TGO", "label": "Togo",          "share": 0.08 },
+    { "flag_code": "SLE", "label": "Sierra Leone",  "share": 0.07 },
+    { "flag_code": "MNG", "label": "Mongolia",      "share": 0.05 },
+    { "flag_code": "UNK", "label": "Unknown/No Flag","share": 0.05 }
+  ]
+}

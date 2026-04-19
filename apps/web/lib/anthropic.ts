@@ -10,26 +10,37 @@ export function getAnthropic(): Anthropic {
   return anthropicClient;
 }
 
-// ─── Claude Tool Definitions for Conversational Layer ───
+// ─── Claude Tool Definitions ───────────────────────────────────
+//
+// The chat panel can reach every surface of the Intelligence Center.
+// Core live-data tools (vessels, aircraft, conflicts, infrastructure,
+// weather, agent reports) plus ten Intelligence-Center tools added
+// in Phase 8:
+//   query_posture_scores, query_convergences, query_shadow_fleet_leads,
+//   query_calibration, query_precursor_matches, run_chokepoint_scenario,
+//   run_sanctions_wargame, query_regime_shifts, query_entities,
+//   expand_actor_network.
 export const CLAUDE_TOOLS: Anthropic.Tool[] = [
+  // ── Core live-data ─────────────────────────────────────────
   {
     name: 'query_vessels',
-    description: 'Query AIS vessel positions within a geographic area and time window. Returns vessel name, MMSI, type, position, speed, heading, destination.',
+    description:
+      'Query AIS vessel positions within a geographic area and time window. Returns vessel name, MMSI, type, position, speed, heading, destination.',
     input_schema: {
       type: 'object' as const,
       properties: {
-        lat_min: { type: 'number', description: 'Minimum latitude of bounding box' },
-        lat_max: { type: 'number', description: 'Maximum latitude of bounding box' },
-        lon_min: { type: 'number', description: 'Minimum longitude of bounding box' },
-        lon_max: { type: 'number', description: 'Maximum longitude of bounding box' },
-        hours: { type: 'number', description: 'Look-back window in hours (default 24)' },
+        lat_min: { type: 'number' },
+        lat_max: { type: 'number' },
+        lon_min: { type: 'number' },
+        lon_max: { type: 'number' },
+        hours:   { type: 'number', description: 'Look-back window in hours (default 24)' },
       },
       required: ['lat_min', 'lat_max', 'lon_min', 'lon_max'],
     },
   },
   {
     name: 'query_aircraft',
-    description: 'Query ADS-B aircraft positions within a geographic area. Returns callsign, ICAO24, altitude, velocity, heading, country.',
+    description: 'Query ADS-B aircraft positions within a geographic area.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -37,32 +48,33 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
         lat_max: { type: 'number' },
         lon_min: { type: 'number' },
         lon_max: { type: 'number' },
-        altitude_min: { type: 'number', description: 'Minimum altitude in meters' },
-        altitude_max: { type: 'number', description: 'Maximum altitude in meters' },
+        altitude_min: { type: 'number' },
+        altitude_max: { type: 'number' },
       },
       required: ['lat_min', 'lat_max', 'lon_min', 'lon_max'],
     },
   },
   {
     name: 'query_conflicts',
-    description: 'Query ACLED armed conflict events by region, date range, event type, or actor. Returns event type, location, actors, fatalities, notes.',
+    description:
+      'Query armed-conflict events (GDELT-backed, with ACLED fallback when licensed) by region / date / event type / actor.',
     input_schema: {
       type: 'object' as const,
       properties: {
-        country: { type: 'string', description: 'Country name filter' },
+        country: { type: 'string' },
         lat_min: { type: 'number' },
         lat_max: { type: 'number' },
         lon_min: { type: 'number' },
         lon_max: { type: 'number' },
-        days: { type: 'number', description: 'Look-back window in days (default 30)' },
-        event_type: { type: 'string', description: 'ACLED event type filter' },
+        days: { type: 'number' },
+        event_type: { type: 'string' },
       },
       required: [],
     },
   },
   {
     name: 'query_infrastructure',
-    description: 'Query energy infrastructure (power plants, pipelines, refineries) within a bounding box. Returns name, type, capacity, fuel, status, owner.',
+    description: 'Query energy infrastructure (power plants, pipelines, refineries) within a bounding box.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -70,14 +82,14 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
         lat_max: { type: 'number' },
         lon_min: { type: 'number' },
         lon_max: { type: 'number' },
-        fuel_type: { type: 'string', description: 'Filter by fuel type (coal, gas, nuclear, wind, solar, hydro)' },
+        fuel_type: { type: 'string' },
       },
       required: ['lat_min', 'lat_max', 'lon_min', 'lon_max'],
     },
   },
   {
     name: 'query_weather',
-    description: 'Query current weather conditions for a specific location. Returns temperature, wind speed/direction, precipitation.',
+    description: 'Query current weather conditions for a specific location (Open-Meteo).',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -89,46 +101,171 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'query_agent_reports',
-    description: 'Retrieve recent intelligence reports generated by eYKON Sub-Agents. Returns structured reports with severity, narrative, and entity references.',
+    description:
+      'Retrieve recent intelligence reports generated by eYKON Sub-Agents. Returns structured reports with severity, narrative, and entity references.',
     input_schema: {
       type: 'object' as const,
       properties: {
-        domain: { type: 'string', description: 'Filter by domain: air_traffic, maritime, conflict_security, energy_infrastructure, satellite_imagery' },
-        severity: { type: 'string', description: 'Minimum severity: low, medium, high, critical' },
-        hours: { type: 'number', description: 'Look-back window in hours (default 48)' },
+        domain: { type: 'string', description: 'air_traffic, maritime, conflict_security, energy_infrastructure, satellite_imagery' },
+        severity: { type: 'string', description: 'low | medium | high | critical (minimum)' },
+        hours: { type: 'number', description: 'Look-back hours (default 48)' },
       },
       required: [],
     },
   },
+
+  // ── Intelligence Center ────────────────────────────────────
+  {
+    name: 'query_posture_scores',
+    description: 'Most recent posture_scores rows per theatre. Returns composite + 5-domain sub-scores.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        theatre_slug: { type: 'string', description: 'red-sea, hormuz, black-sea, taiwan-strait, gulf-of-guinea' },
+        limit: { type: 'number' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'query_convergences',
+    description: 'Recent convergence_events (anomaly-of-anomalies) with synthesis and contributing anomaly IDs.',
+    input_schema: {
+      type: 'object' as const,
+      properties: { hours: { type: 'number', description: 'Look-back hours (default 24)' } },
+      required: [],
+    },
+  },
+  {
+    name: 'query_shadow_fleet_leads',
+    description: 'Ranked shadow-fleet vessel leads. Filterable by commodity and minimum composite score.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        commodity: { type: 'string', description: 'oil | lng | grain' },
+        min_score: { type: 'number', description: 'Minimum composite score (default 0.4)' },
+        limit: { type: 'number' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'query_calibration',
+    description: 'Brier + log-loss aggregates for the given feature / window.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        feature: { type: 'string', description: 'posture_shift | conflict_escalation | trade_flow | energy_stress' },
+        window_days: { type: 'number', description: '7 | 30 | 90 (default 30)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'query_precursor_matches',
+    description: 'Nearest precursor_library entries for the given theatre, by cosine similarity.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        theatre_slug: { type: 'string' },
+        top_k: { type: 'number', description: 'Default 3' },
+        event_type: { type: 'string' },
+      },
+      required: ['theatre_slug'],
+    },
+  },
+  {
+    name: 'run_chokepoint_scenario',
+    description: 'Run a chokepoint closure scenario (same model as the Chokepoint Simulator). Returns the persisted scenario_run.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        chokepoint: { type: 'string', description: 'hormuz | bab-el-mandeb | malacca | bosphorus | suez | panama' },
+        closure_type: { type: 'string', description: 'partial_50 | full | transit_tax_30' },
+        duration_days: { type: 'number' },
+        diversion_lag_hours: { type: 'number' },
+        assumptions: { type: 'object' },
+      },
+      required: ['chokepoint', 'closure_type', 'duration_days'],
+    },
+  },
+  {
+    name: 'run_sanctions_wargame',
+    description: 'Run a sanctions propagation scenario.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        sanctioning_bodies: { type: 'array', items: { type: 'string' } },
+        preset: { type: 'string' },
+        target_entities: { type: 'array', items: { type: 'string' } },
+        depth: { type: 'number', description: '1 | 2 | 3' },
+      },
+      required: ['sanctioning_bodies', 'preset', 'target_entities'],
+    },
+  },
+  {
+    name: 'query_regime_shifts',
+    description: 'Active regime shifts (30d-vs-60d test) with p-values and effect sizes.',
+    input_schema: {
+      type: 'object' as const,
+      properties: { region: { type: 'string', description: 'Theatre slug or label' } },
+      required: [],
+    },
+  },
+  {
+    name: 'query_entities',
+    description: 'Search the entities registry (vessels, operators, owners, flags, ports, refineries, mines).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        q: { type: 'string' },
+        entity_type: { type: 'string' },
+        limit: { type: 'number' },
+      },
+      required: ['q'],
+    },
+  },
+  {
+    name: 'expand_actor_network',
+    description: 'Walk the fleet kinship graph from a seed entity. Returns the nodes and edges within N hops.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        entity_id: { type: 'string' },
+        hops: { type: 'number', description: '1 | 2 | 3 (default 2)' },
+      },
+      required: ['entity_id'],
+    },
+  },
 ];
 
-// ─── System Prompt for Conversational Claude ───
-export const CONVERSATIONAL_SYSTEM_PROMPT = `You are the eYKON.ai geopolitical intelligence analyst. You have access to live data on:
-- Aircraft positions (ADS-B) — civil and military
-- Vessel positions (AIS) — commercial and naval
-- Armed conflict events (ACLED) — battles, explosions, protests, violence against civilians
-- Energy infrastructure — power plants, pipelines, refineries (Global Energy Monitor)
-- Weather conditions (Open-Meteo) — temperature, wind, precipitation
-- Intelligence reports from eYKON's autonomous Sub-Agent monitoring system
+// ─── System Prompt ───────────────────────────────────────────
+export const CONVERSATIONAL_SYSTEM_PROMPT = `You are the eYKON.ai geopolitical-intelligence analyst. You have access to live feeds (aircraft, vessels, conflicts, infrastructure, weather, agent reports) AND to the Intelligence Center:
+  • posture scores per pinned theatre
+  • convergences (anomaly-of-anomalies)
+  • shadow-fleet vessel leads + indicator breakdowns
+  • calibration metrics (Brier / log-loss / calibration slope)
+  • precursor-library matches (cosine against labelled historical episodes)
+  • chokepoint closure + sanctions wargame + cascade scenario simulators
+  • regime-shift detector
+  • entities registry + N-hop actor expander
 
-When a user asks a question:
-1. Use your tools to query the relevant data sources. Always query data — never guess.
-2. Cross-reference across domains when a query spans multiple topics (e.g., vessel activity + conflict events near the same region).
-3. Provide concise, factual, analytical responses. Cite sources and dates.
-4. When presenting vessel or aircraft data, include identifying information (MMSI, callsign, type).
-5. For conflict data, note event type, actors involved, and fatality counts.
-6. Offer follow-up query suggestions based on what you found.
+Behaviour:
+1. ALWAYS prefer tools over guessing. When a user asks a factual question, call the tool(s) that answer it.
+2. Cross-reference across domains where it strengthens the claim.
+3. Cite provenance — source name + fetched-at timestamp — for every factual statement.
+4. If data is missing or insufficient, say so. Do not speculate.
+5. Persona overlay: if the user or the context names a persona (analyst, journalist, day-trader, commodities, NGO, citizen, corporate), frame your response accordingly.
+6. Keep responses short and dense. Analysts read in bullets, not paragraphs.
 
-You are NOT speculative. If data is unavailable or inconclusive, say so clearly.
-When the user mentions a region (e.g., "Red Sea", "Strait of Hormuz", "Black Sea"), translate it to approximate bounding box coordinates for your tool queries.
-
-Common region bounding boxes:
-- Red Sea: lat 12-30, lon 32-44
-- Strait of Hormuz: lat 24-28, lon 54-58
-- Taiwan Strait: lat 22-26, lon 117-121
-- Black Sea: lat 40-47, lon 27-42
-- South China Sea: lat 0-23, lon 100-121
-- Gulf of Aden: lat 10-16, lon 43-52
-- Mediterranean: lat 30-46, lon -6-36
-- Baltic Sea: lat 53-66, lon 10-30
-- Persian Gulf: lat 24-30, lon 48-56`;
+Region → bounding box translator (use when the user names a region):
+  Red Sea         lat 12-30   lon 32-44
+  Strait of Hormuz lat 24-28  lon 54-58
+  Taiwan Strait   lat 22-26   lon 117-121
+  Black Sea       lat 40-47   lon 27-42
+  South China Sea lat 0-23    lon 100-121
+  Gulf of Aden    lat 10-16   lon 43-52
+  Mediterranean   lat 30-46   lon -6-36
+  Baltic Sea      lat 53-66   lon 10-30
+  Persian Gulf    lat 24-30   lon 48-56
+  Gulf of Guinea  lat -2-6    lon -5-10`;

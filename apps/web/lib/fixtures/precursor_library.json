@@ -1,0 +1,28 @@
+{
+  "notes": "Seeded library — five labelled precursor episodes per event type. Expanded quarterly by analyst team.",
+  "episodes": [
+    { "id": "feb-2022-pre-invasion",    "event_type": "state_mobilisation",    "label": "Feb 2022 · Pre-invasion",       "window_start": "2022-01-15", "window_end": "2022-02-22", "signals": ["troop_build_up", "air_cargo_surge", "black_sea_exercises", "grid_spikes"] },
+    { "id": "aug-1990-kuwait",          "event_type": "state_mobilisation",    "label": "Aug 1990 · Kuwait buildup",      "window_start": "1990-07-01", "window_end": "1990-08-02", "signals": ["troop_build_up", "rhetoric_escalation", "oil_market_stress"] },
+    { "id": "oct-2023-gaza",            "event_type": "state_mobilisation",    "label": "Oct 2023 · Gaza",                "window_start": "2023-09-15", "window_end": "2023-10-07", "signals": ["rocket_stockpiling", "tunnel_activity", "airspace_closures"] },
+    { "id": "aug-2008-georgia",         "event_type": "state_mobilisation",    "label": "Aug 2008 · Georgia",             "window_start": "2008-07-15", "window_end": "2008-08-07", "signals": ["border_exercises", "cyber_intrusions", "flight_curtailment"] },
+    { "id": "feb-2014-crimea",          "event_type": "state_mobilisation",    "label": "Feb 2014 · Crimea",              "window_start": "2014-02-01", "window_end": "2014-02-27", "signals": ["unmarked_forces", "comms_jamming", "black_sea_surge"] },
+
+    { "id": "feb-2022-nordstream",      "event_type": "energy_crisis",         "label": "Feb 2022 · Nord Stream prelude", "window_start": "2021-10-01", "window_end": "2022-02-22", "signals": ["gas_storage_drawdown", "ttf_spike", "lng_diversion"] },
+    { "id": "mar-2021-suez",            "event_type": "energy_crisis",         "label": "Mar 2021 · Suez blockade",       "window_start": "2021-03-20", "window_end": "2021-03-30", "signals": ["canal_closure", "tanker_queue", "brent_spike"] },
+    { "id": "jan-2022-kazakh-unrest",   "event_type": "energy_crisis",         "label": "Jan 2022 · Kazakh unrest",       "window_start": "2022-01-02", "window_end": "2022-01-15", "signals": ["protests", "uranium_halts", "internet_blackout"] },
+    { "id": "oct-1973-opec",            "event_type": "energy_crisis",         "label": "Oct 1973 · OPEC embargo",        "window_start": "1973-10-15", "window_end": "1973-11-30", "signals": ["production_cut", "supply_shock", "rationing"] },
+    { "id": "feb-2021-texas-freeze",    "event_type": "energy_crisis",         "label": "Feb 2021 · Texas freeze",        "window_start": "2021-02-10", "window_end": "2021-02-20", "signals": ["winter_storm", "gas_well_freeze", "grid_collapse"] },
+
+    { "id": "apr-2022-shadow-fleet-r",  "event_type": "shadow_fleet_activation","label": "Apr 2022 · RU shadow fleet",    "window_start": "2022-03-01", "window_end": "2022-05-01", "signals": ["flag_hops", "ais_gaps", "obscure_ownership"] },
+    { "id": "oct-2019-iran-tankers",    "event_type": "shadow_fleet_activation","label": "Oct 2019 · Iran tanker surge",  "window_start": "2019-10-01", "window_end": "2019-12-01", "signals": ["stsx_transfers", "flag_hops", "port_diversions"] },
+    { "id": "dec-2018-venezuela",       "event_type": "shadow_fleet_activation","label": "Dec 2018 · Venezuela sanctions","window_start": "2018-11-01", "window_end": "2019-02-01", "signals": ["dark_tankers", "sts_transfers"] },
+    { "id": "jan-2024-houthi-diverts",  "event_type": "shadow_fleet_activation","label": "Jan 2024 · Red Sea diversions", "window_start": "2023-12-15", "window_end": "2024-02-15", "signals": ["cape_rerouting", "red_sea_avoidance", "insurance_spike"] },
+    { "id": "nov-2022-price-cap",       "event_type": "shadow_fleet_activation","label": "Nov 2022 · G7 price cap",       "window_start": "2022-10-15", "window_end": "2023-01-15", "signals": ["flag_hops", "opaque_insurance", "sts_transfers"] },
+
+    { "id": "mar-2023-banking-stress",  "event_type": "capital_flight",        "label": "Mar 2023 · US regional banks",   "window_start": "2023-03-08", "window_end": "2023-03-20", "signals": ["deposit_flight", "yield_curve", "gold_bid"] },
+    { "id": "aug-2015-cny-devaluation", "event_type": "capital_flight",        "label": "Aug 2015 · CNY devaluation",     "window_start": "2015-08-05", "window_end": "2015-08-25", "signals": ["pboc_fix_shift", "em_selloff", "outflows"] },
+    { "id": "sep-2022-gbp-crisis",      "event_type": "capital_flight",        "label": "Sep 2022 · GBP mini-budget",     "window_start": "2022-09-23", "window_end": "2022-10-05", "signals": ["gilt_rout", "gbp_collapse", "boe_intervene"] },
+    { "id": "jan-2022-turkey-lira",     "event_type": "capital_flight",        "label": "Jan 2022 · TRY stress",          "window_start": "2021-12-01", "window_end": "2022-01-15", "signals": ["lira_crash", "dollarisation", "capital_controls"] },
+    { "id": "jun-2025-em-stress",       "event_type": "capital_flight",        "label": "Jun 2025 · EM carry unwind",     "window_start": "2025-06-01", "window_end": "2025-07-15", "signals": ["jpy_strength", "em_fx_selloff", "oil_divergence"] }
+  ]
+}

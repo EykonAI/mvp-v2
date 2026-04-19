@@ -1,0 +1,34 @@
+{
+  "nodes": [
+    { "id": "rotterdam",   "tier": "delivery",   "label": "Rotterdam",        "throughput_kbd": 404,  "status": "warn" },
+    { "id": "jamnagar",    "tier": "processing", "label": "Jamnagar",         "throughput_kbd": 1240, "status": "ok" },
+    { "id": "ulsan",       "tier": "processing", "label": "Ulsan",            "throughput_kbd": 840,  "status": "ok" },
+    { "id": "paraguana",   "tier": "processing", "label": "Paraguaná",        "throughput_kbd": 940,  "status": "crit" },
+    { "id": "port-arthur", "tier": "processing", "label": "Port Arthur",      "throughput_kbd": 636,  "status": "ok" },
+    { "id": "ras-tanura",  "tier": "source",     "label": "Ras Tanura",       "throughput_kbd": 550,  "status": "ok" },
+    { "id": "basra",       "tier": "source",     "label": "Basra",            "throughput_kbd": 3200, "status": "ok" },
+    { "id": "kharg",       "tier": "source",     "label": "Kharg Island",     "throughput_kbd": 1400, "status": "ok" },
+    { "id": "hormuz-transit", "tier": "transit", "label": "Hormuz Transit",   "throughput_kbd": 21000, "status": "ok" },
+    { "id": "bab-transit",    "tier": "transit", "label": "Bab-el-Mandeb",    "throughput_kbd": 8800, "status": "ok" },
+    { "id": "suez-transit",   "tier": "transit", "label": "Suez Canal",       "throughput_kbd": 9200, "status": "ok" },
+    { "id": "primorsk",    "tier": "source",     "label": "Primorsk",         "throughput_kbd": 900,  "status": "ok" },
+    { "id": "novorossiysk","tier": "source",     "label": "Novorossiysk",     "throughput_kbd": 600,  "status": "ok" },
+    { "id": "singapore",   "tier": "delivery",   "label": "Singapore",        "throughput_kbd": 1500, "status": "ok" },
+    { "id": "yokohama",    "tier": "delivery",   "label": "Yokohama",         "throughput_kbd": 800,  "status": "ok" }
+  ],
+  "edges": [
+    { "from": "ras-tanura",   "to": "hormuz-transit", "flow_kbd": 550 },
+    { "from": "basra",        "to": "hormuz-transit", "flow_kbd": 1600 },
+    { "from": "kharg",        "to": "hormuz-transit", "flow_kbd": 1400 },
+    { "from": "hormuz-transit", "to": "jamnagar",     "flow_kbd": 1240 },
+    { "from": "hormuz-transit", "to": "ulsan",        "flow_kbd": 600 },
+    { "from": "hormuz-transit", "to": "rotterdam",    "flow_kbd": 400 },
+    { "from": "hormuz-transit", "to": "port-arthur",  "flow_kbd": 500 },
+    { "from": "primorsk",     "to": "rotterdam",      "flow_kbd": 600 },
+    { "from": "novorossiysk", "to": "bab-transit",    "flow_kbd": 400 },
+    { "from": "bab-transit",  "to": "suez-transit",   "flow_kbd": 1500 },
+    { "from": "suez-transit", "to": "rotterdam",      "flow_kbd": 1000 },
+    { "from": "jamnagar",     "to": "singapore",      "flow_kbd": 600 },
+    { "from": "ulsan",        "to": "yokohama",       "flow_kbd": 400 }
+  ]
+}

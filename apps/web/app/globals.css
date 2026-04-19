@@ -3,38 +3,99 @@
 @tailwind utilities;
 
 :root {
-  --eykon-teal: #1AB2A6;
-  --eykon-dark: #0E1621;
-  --eykon-card: #1A2332;
-  --eykon-panel: #141E2B;
-  --eykon-border: #2A3544;
-  --eykon-muted: #8899AA;
+  --bg-void: #05080F;
+  --bg-navy: #0A1220;
+  --bg-panel: #0F182A;
+  --bg-raised: #15203A;
+  --bg-hover: #1A2846;
+  --rule: #1E2C49;
+  --rule-soft: #15203A;
+  --rule-strong: #2B3A5C;
+  --ink: #E8EDF5;
+  --ink-dim: #98A3B5;
+  --ink-faint: #5A6478;
+  --ink-ghost: #3A4256;
+  --teal: #19D0B8;
+  --teal-dim: #0E9A88;
+  --teal-deep: #0A5E54;
+  --teal-glow: rgba(25, 208, 184, 0.14);
+  --amber: #D4A24C;
+  --red: #E05D50;
+  --green: #4ABF8A;
+  --violet: #8B7FD8;
+  --coral: #DE7F70;
+  --wheat: #D4A24C;
+  --scenario: #DE7F70;
+  --f-display: 'Jura', sans-serif;
+  --f-body: 'IBM Plex Sans', sans-serif;
+  --f-mono: 'IBM Plex Mono', monospace;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-body {
-  background: var(--eykon-dark);
-  color: #E8ECF0;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  overflow: hidden;
+html, body {
+  background: var(--bg-void);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  margin: 0;
+  padding: 0;
 }
 
-/* Scrollbar styling */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: var(--eykon-dark); }
-::-webkit-scrollbar-thumb { background: var(--eykon-border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--eykon-muted); }
+/* Globe-view body behaviour (no horizontal overflow) */
+body.globe-view { overflow: hidden; }
 
-/* MapLibre overrides */
+/* Intel views use horizontal scroll for 1440px min-width */
+body.intel-view {
+  min-width: 1440px;
+  overflow-x: auto;
+}
+
+/* ── Scrollbars (dark) ────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-void); }
+::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--rule-strong); }
+
+/* ── Typography utilities ─────────────────────────────────────── */
+.font-mono-tnum { font-family: var(--f-mono); font-feature-settings: "tnum"; }
+.font-display   { font-family: var(--f-display); letter-spacing: 0.04em; }
+.eyebrow {
+  font-family: var(--f-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-weight: 500;
+}
+.panel-title {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.panel-title .idx { color: var(--teal); margin-right: 6px; font-weight: 500; }
+.panel-meta {
+  font-family: var(--f-mono);
+  font-size: 9.5px;
+  color: var(--ink-faint);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.num-lg { font-family: var(--f-mono); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+/* ── MapLibre overrides (globe view) ──────────────────────────── */
 .maplibregl-ctrl-logo { display: none !important; }
 .maplibregl-ctrl-attrib { opacity: 0.5; font-size: 10px; }
 
-/* Chat markdown styling */
+/* ── Chat markdown styling ────────────────────────────────────── */
 .chat-content p { margin-bottom: 0.5rem; }
 .chat-content ul { margin-left: 1rem; margin-bottom: 0.5rem; }
 .chat-content li { margin-bottom: 0.25rem; }
-.chat-content strong { color: var(--eykon-teal); font-weight: 600; }
+.chat-content strong { color: var(--teal); font-weight: 600; }
 .chat-content code {
   background: rgba(255,255,255,0.08);
   padding: 0.125rem 0.375rem;
@@ -42,19 +103,21 @@ body {
   font-size: 0.85em;
 }
 .chat-content h1, .chat-content h2, .chat-content h3 {
-  color: #fff;
+  color: var(--ink);
   margin: 0.75rem 0 0.375rem;
   font-weight: 600;
 }
 
-/* Pulse animation for live indicators */
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+/* ── Keyframes ────────────────────────────────────────────────── */
+@keyframes eykon-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes eykon-pulse-ring {
+  0%   { opacity: 0.3; }
+  50%  { opacity: 1; }
+  100% { opacity: 0.3; }
 }
-.pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+.pulse-dot { animation: eykon-pulse 2s ease-in-out infinite; }
 
-/* Typing animation */
+/* Typing dots (chat) */
 @keyframes bounce-dot {
   0%, 80%, 100% { transform: translateY(0); }
   40% { transform: translateY(-6px); }
@@ -62,3 +125,45 @@ body {
 .typing-dot { animation: bounce-dot 1.4s infinite ease-in-out; }
 .typing-dot:nth-child(2) { animation-delay: 0.2s; }
 .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* ── Intel panel primitive ────────────────────────────────────── */
+.intel-panel {
+  display: flex; flex-direction: column;
+  border-bottom: 1px solid var(--rule-soft);
+  background: var(--bg-navy);
+}
+.intel-panel:last-child { border-bottom: 0; }
+.intel-panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px 8px 14px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.intel-panel-body { padding: 12px 14px; flex: 1; }
+.intel-panel-body.tight { padding: 10px 14px; }
+
+/* ── Intel grid + columns ─────────────────────────────────────── */
+.intel-main {
+  display: grid;
+  grid-template-columns: 300px 1fr 340px;
+  gap: 1px;
+  background: var(--rule-soft);
+  min-height: 820px;
+}
+.intel-col { background: var(--bg-navy); display: flex; flex-direction: column; }
+
+/* ── Radial accents on intel dashboard ────────────────────────── */
+.intel-bg {
+  background:
+    radial-gradient(ellipse 1200px 600px at 20% 0%, rgba(25, 208, 184, 0.03), transparent 60%),
+    radial-gradient(ellipse 900px 500px at 80% 20%, rgba(139, 127, 216, 0.02), transparent 60%),
+    var(--bg-void);
+  min-height: 100vh;
+}
+
+/* ── Scenario accent per workspace ─────────────────────────────── */
+.view-chokepoint { --scenario: #DE7F70; }
+.view-sanctions  { --scenario: #8B7FD8; }
+.view-cascade    { --scenario: #D4A24C; }
+.view-shadow     { --scenario: #E05D50; }
+.view-minerals   { --scenario: #8B7FD8; }
+.view-commodities{ --wheat:    #D4A24C; }

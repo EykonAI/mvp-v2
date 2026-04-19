@@ -87,7 +87,7 @@ async function dispatchSubAgent(domain, taskPayload) {
 
   try {
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5-20250929',
+      model: 'claude-sonnet-4-6',
       max_tokens: 2048,
       system: agent.system,
       messages: [{
@@ -120,6 +120,65 @@ async function dispatchSubAgent(domain, taskPayload) {
     console.error(`Sub-agent ${domain} error:`, err.message);
     return null;
   }
+}
+
+// ─── Convergence synthesis (Opus 4.7) ───
+async function synthesiseConvergences() {
+  // Read convergence_events created in the last heartbeat window that have no synthesis yet.
+  const since = new Date(Date.now() - 15 * 60_000).toISOString();
+  const rows = await supabaseQuery(
+    'convergence_events',
+    `created_at=gte.${encodeURIComponent(since)}&synthesis=is.null&limit=10`,
+  );
+  if (!Array.isArray(rows) || rows.length === 0) return 0;
+
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  let written = 0;
+  for (const row of rows) {
+    try {
+      const r = await anthropic.messages.create({
+        model: 'claude-opus-4-7',
+        max_tokens: 160,
+        system:
+          'You are the eYKON Supervisor. Write one short English sentence (≤ 35 words) describing what this cluster of anomalies means, in the voice of a senior analyst.',
+        messages: [
+          { role: 'user', content: JSON.stringify({ location: row.location, bbox: row.bounding_box, contributing: row.contributing_anomalies, p: row.joint_p_value }) },
+        ],
+      });
+      const txt = r.content.filter(b => b.type === 'text').map(b => b.text).join(' ').trim();
+      if (txt) {
+        await supabaseUpdate('convergence_events', row.id, { synthesis: txt });
+        written++;
+      }
+    } catch (err) {
+      console.error('synthesis error:', err.message);
+    }
+  }
+  return written;
+}
+
+// ─── Precursor-match alerts ───
+async function emitPrecursorAlerts() {
+  const since = new Date(Date.now() - 15 * 60_000).toISOString();
+  const scores = await supabaseQuery(
+    'posture_scores',
+    `computed_at=gte.${encodeURIComponent(since)}&precursor_similarity=gte.0.85&limit=20`,
+  );
+  if (!Array.isArray(scores)) return 0;
+  let emitted = 0;
+  for (const row of scores) {
+    try {
+      await supabaseInsert('notification_queue', {
+        channel: 'in_app',
+        title: `Precursor match · ${row.theatre_slug}`,
+        body: `cosine ${Number(row.precursor_similarity).toFixed(2)} to ${row.precursor_match_id}`,
+        payload: { type: 'precursor_match', theatre: row.theatre_slug, similarity: row.precursor_similarity, match_id: row.precursor_match_id },
+        severity: 'critical',
+      });
+      emitted++;
+    } catch {}
+  }
+  return emitted;
 }
 
 // ─── Supervisor Heartbeat ───
@@ -211,9 +270,17 @@ async function heartbeat() {
       await supabaseUpdate('anomaly_flags', flag.id, { processed: true });
     }
 
+    // Extended duties (Phase 7):
+    //  1. Synthesise new convergence_events with Opus 4.7.
+    //  2. Emit precursor-match alerts when cosine similarity ≥ 0.85.
+    const synthesised = await synthesiseConvergences();
+    const precursorAlerts = await emitPrecursorAlerts();
+
     await logExecution('supervisor', 'heartbeat', {
       flags_found: flags.length,
       watchlists_active: (watchlists || []).length,
+      synthesised,
+      precursor_alerts: precursorAlerts,
     }, Date.now() - start);
 
   } catch (err) {

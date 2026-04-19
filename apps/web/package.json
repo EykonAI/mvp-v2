@@ -6,7 +6,8 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -H 0.0.0.0",
-    "lint": "next lint"
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "next": "^14.2.15",
@@ -24,13 +25,22 @@
     "lucide-react": "^0.446.0",
     "date-fns": "^4.1.0",
     "recharts": "^2.13.0",
-    "adm-zip": "^0.5.16"
+    "adm-zip": "^0.5.16",
+    "d3": "^7.9.0",
+    "d3-force": "^3.0.0",
+    "d3-zoom": "^3.0.0",
+    "simple-statistics": "^7.8.3",
+    "pdfkit": "^0.15.0",
+    "zod": "^3.23.8",
+    "@tanstack/react-table": "^8.20.5"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.7",
     "@types/node": "^22.7.5",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
+    "@types/d3": "^7.4.3",
+    "@types/pdfkit": "^0.13.4",
     "typescript": "^5.6.3",
     "tailwindcss": "^3.4.13",
     "postcss": "^8.4.47",

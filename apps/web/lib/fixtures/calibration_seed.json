@@ -1,0 +1,12 @@
+{
+  "metrics": [
+    { "key": "brier",     "label": "Aggregate Brier",       "value": "—",   "trend": "flat", "spark": [0.18, 0.19, 0.18, 0.17, 0.18, 0.18] },
+    { "key": "posture",   "label": "Posture-Shift Monitor", "value": "—",   "trend": "flat", "spark": [0.22, 0.21, 0.22, 0.23, 0.22, 0.22] },
+    { "key": "conflict",  "label": "Conflict Escalation",   "value": "—",   "trend": "flat", "spark": [0.20, 0.20, 0.20, 0.20, 0.20, 0.20] },
+    { "key": "trade",     "label": "Trade-Flow Horizon",    "value": "—",   "trend": "flat", "spark": [0.17, 0.17, 0.17, 0.17, 0.17, 0.17] },
+    { "key": "precision", "label": "Alerts Precision@10",   "value": "—",   "trend": "flat", "spark": [0.60, 0.60, 0.60, 0.60, 0.60, 0.60] }
+  ],
+  "degraded": true,
+  "generated_at": "2026-04-19T00:00:00Z",
+  "note": "Prediction Register is warming up — a flat line is the correct degraded state until ~30 days of resolved predictions have accumulated."
+}

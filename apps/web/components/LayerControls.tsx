@@ -7,10 +7,10 @@ interface LayerControlsProps {
 }
 
 const LAYER_META: Record<string, { label: string; color: string; icon: string }> = {
-  aircraft: { label: 'Aircraft', color: 'text-yellow-400', icon: '✈' },
-  vessels: { label: 'Vessels', color: 'text-blue-400', icon: '🚢' },
-  conflicts: { label: 'Conflicts', color: 'text-red-400', icon: '⚔' },
-  infrastructure: { label: 'Infrastructure', color: 'text-green-400', icon: '⚡' },
+  aircraft:       { label: 'Aircraft',       color: 'var(--amber)', icon: '✈' },
+  vessels:        { label: 'Vessels',        color: 'var(--teal)',  icon: '⚓' },
+  conflicts:      { label: 'Conflicts',      color: 'var(--red)',   icon: '⚔' },
+  infrastructure: { label: 'Infrastructure', color: 'var(--green)', icon: '⚡' },
 };
 
 export default function LayerControls({ layers, onToggle }: LayerControlsProps) {
@@ -23,20 +23,26 @@ export default function LayerControls({ layers, onToggle }: LayerControlsProps) 
           <button
             key={name}
             onClick={() => onToggle(name)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
-              state.visible
-                ? 'bg-eykon-card/90 border-eykon-border backdrop-blur-sm'
-                : 'bg-eykon-dark/60 border-transparent opacity-50'
-            }`}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs transition-all"
+            style={{
+              background: state.visible ? 'rgba(15, 24, 42, 0.9)' : 'rgba(10, 18, 32, 0.6)',
+              border: `1px solid ${state.visible ? 'var(--rule)' : 'transparent'}`,
+              color: state.visible ? 'var(--ink)' : 'var(--ink-faint)',
+              backdropFilter: 'blur(6px)',
+              borderRadius: 2,
+              fontFamily: 'var(--f-mono)',
+              letterSpacing: '0.05em',
+              opacity: state.visible ? 1 : 0.6,
+            }}
           >
-            <span className={meta.color}>{meta.icon}</span>
-            <span className={state.visible ? 'text-gray-200' : 'text-gray-500'}>
-              {meta.label}
-            </span>
-            {state.loading && <span className="text-eykon-muted animate-pulse">...</span>}
-            {state.error && <span className="text-red-400">!</span>}
+            <span style={{ color: meta.color }}>{meta.icon}</span>
+            <span>{meta.label}</span>
+            {state.loading && <span style={{ color: 'var(--ink-faint)' }} className="animate-pulse">…</span>}
+            {state.error && <span style={{ color: 'var(--red)' }}>!</span>}
             {!state.loading && !state.error && state.count > 0 && (
-              <span className="text-eykon-muted ml-auto">{state.count.toLocaleString()}</span>
+              <span style={{ color: 'var(--ink-faint)', marginLeft: 'auto' }}>
+                {state.count.toLocaleString()}
+              </span>
             )}
           </button>
         );
