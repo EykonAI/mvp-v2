@@ -87,7 +87,7 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
           padding: 2,
         }}
       >
-        <ToggleLink href="/" label="Globe" active={!isIntel} />
+        <ToggleLink href="/app" label="Globe" active={!isIntel} />
         <ToggleLink href="/intel" label="Intel" active={isIntel} />
       </div>
 
