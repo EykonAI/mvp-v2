@@ -101,6 +101,12 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
             <Link href="/cookies" style={{ color: 'inherit', textDecoration: 'none' }}>
               Cookies
             </Link>
+            <Link href="/refund" style={{ color: 'inherit', textDecoration: 'none' }}>
+              Refund
+            </Link>
+            <Link href="/dpa" style={{ color: 'inherit', textDecoration: 'none' }}>
+              DPA
+            </Link>
             <a
               href="https://x.com/eykon"
               target="_blank"
