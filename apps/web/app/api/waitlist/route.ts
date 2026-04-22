@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import crypto from 'node:crypto';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { isValidReferralCode } from '@/lib/auth/referral';
+import { sendWaitlistConfirmation } from '@/lib/email/send';
 
 export const dynamic = 'force-dynamic';
 
@@ -82,7 +83,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Could not record waitlist entry.' }, { status: 500 });
   }
 
-  // TODO (Phase C): enqueue a confirmation email via notification_queue.
+  // Fire confirmation email. Deliberately best-effort — a failed email
+  // shouldn't break the waitlist signup, so we don't await-and-throw. The
+  // email_log table carries the send status for ops visibility.
+  void sendWaitlistConfirmation({
+    to: email,
+    email,
+    tier: tier as 'pro' | 'enterprise',
+  }).catch((err) => {
+    console.error('[waitlist] confirmation send failed', err);
+  });
+
   return NextResponse.json({
     ok: true,
     id: data.id,
