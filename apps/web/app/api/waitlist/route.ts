@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { isValidReferralCode } from '@/lib/auth/referral';
 import { sendWaitlistConfirmation } from '@/lib/email/send';
+import { captureServer } from '@/lib/analytics/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -92,6 +93,14 @@ export async function POST(request: NextRequest) {
     tier: tier as 'pro' | 'enterprise',
   }).catch((err) => {
     console.error('[waitlist] confirmation send failed', err);
+  });
+
+  // PostHog: waitlist entries have no auth user yet, so use the hashed
+  // email as a stable anonymous distinct_id. This surfaces intent on the
+  // funnel without storing raw PII in event properties.
+  void captureServer(`waitlist:${ipHash ?? email.slice(0, 3)}:${email.split('@')[1]}`, {
+    event: 'waitlist_joined',
+    tier: tier as 'pro' | 'enterprise',
   });
 
   return NextResponse.json({

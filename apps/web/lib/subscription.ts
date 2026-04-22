@@ -2,6 +2,11 @@ import type { Tier } from './pricing';
 import { getUserProfile } from './auth/session';
 
 export type { Tier } from './pricing';
+// Re-exported for backwards compat with any server callers that used to
+// read TIER_LABELS from here. Client components should import it from
+// '@/lib/pricing' directly (to avoid pulling in the server-only
+// getUserProfile dependency).
+export { TIER_LABELS } from './pricing';
 
 export const MODULE_SLUGS = [
   'calibration',
@@ -49,13 +54,6 @@ const TIER_ORDER: Record<Tier, number> = {
   pro: 1,
   desk: 2,
   enterprise: 3,
-};
-
-export const TIER_LABELS: Record<Tier, string> = {
-  citizen: 'Citizen',
-  pro: 'Pro',
-  desk: 'Desk',
-  enterprise: 'Enterprise',
 };
 
 export function tierMeetsRequirement(userTier: Tier, requirement: Tier): boolean {

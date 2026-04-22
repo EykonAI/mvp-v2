@@ -1,5 +1,6 @@
 import './globals.css';
 import type { Metadata } from 'next';
+import { PostHogProvider } from '@/components/analytics/PostHogProvider';
 
 export const metadata: Metadata = {
   title: 'eYKON.ai — Geopolitical Intelligence Platform',
@@ -19,7 +20,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           rel="stylesheet"
         />
       </head>
-      <body className="bg-eykon-bg-void text-eykon-ink antialiased">{children}</body>
+      <body className="bg-eykon-bg-void text-eykon-ink antialiased">
+        <PostHogProvider>{children}</PostHogProvider>
+      </body>
     </html>
   );
 }

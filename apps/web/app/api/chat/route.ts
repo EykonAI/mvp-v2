@@ -9,6 +9,7 @@ import {
   tierMeetsRequirement,
   type Tier,
 } from '@/lib/subscription';
+import { captureServer } from '@/lib/analytics/server';
 
 export const maxDuration = 60;
 
@@ -87,6 +88,14 @@ export async function POST(req: NextRequest) {
           { status: 429 },
         );
       }
+      // Fire ai_query only after the increment succeeds so PostHog counters
+      // match usage_counters exactly. Fire-and-forget so the chat hot path
+      // doesn't wait on PostHog's HTTP round-trip.
+      void captureServer(userId, {
+        event: 'ai_query',
+        tier,
+        queries_this_month: row?.new_value ?? undefined,
+      });
     }
 
     const anthropic = getAnthropic();

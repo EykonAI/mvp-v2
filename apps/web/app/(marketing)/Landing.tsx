@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import './landing.css';
+import { captureBrowser } from '@/lib/analytics/client';
 
 // Billing cycle state — drives prices and CTAs across the pricing grid.
 type Cycle = 'monthly' | 'annual' | 'annual-crypto';
@@ -70,6 +71,26 @@ export function Landing() {
   function openWaitlist(tier: 'pro' | 'enterprise') {
     setModalTier(tier);
     setModalOpen(true);
+    captureBrowser({
+      event: 'plan_selected',
+      plan: `${tier}_founding_${cycle === 'annual-crypto' ? 'annual' : cycle}`,
+      billing_cycle: cycle,
+      payment_method: cycle === 'annual-crypto' ? 'crypto' : 'fiat',
+    });
+  }
+
+  function trackCycleChange(nextCycle: Cycle) {
+    setCycle(nextCycle);
+    // Don't double-count monthly (the landing defaults there); only fire
+    // plan_selected when the user deliberately moves off the default.
+    if (nextCycle !== 'monthly') {
+      captureBrowser({
+        event: 'plan_selected',
+        plan: 'pricing_toggle',
+        billing_cycle: nextCycle,
+        payment_method: nextCycle === 'annual-crypto' ? 'crypto' : 'fiat',
+      });
+    }
   }
 
   function closeWaitlist() {
@@ -322,7 +343,7 @@ export function Landing() {
               type="button"
               role="tab"
               className={cycle === 'monthly' ? 'active' : undefined}
-              onClick={() => setCycle('monthly')}
+              onClick={() => trackCycleChange('monthly')}
             >
               Monthly
             </button>
@@ -330,7 +351,7 @@ export function Landing() {
               type="button"
               role="tab"
               className={cycle === 'annual' ? 'active' : undefined}
-              onClick={() => setCycle('annual')}
+              onClick={() => trackCycleChange('annual')}
             >
               Annual
             </button>
@@ -338,7 +359,7 @@ export function Landing() {
               type="button"
               role="tab"
               className={cycle === 'annual-crypto' ? 'active' : undefined}
-              onClick={() => setCycle('annual-crypto')}
+              onClick={() => trackCycleChange('annual-crypto')}
             >
               Annual + Crypto <span className="save-badge">−30%</span>
             </button>

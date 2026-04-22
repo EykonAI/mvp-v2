@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { captureServer, identifyServer } from '@/lib/analytics/server';
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -58,12 +59,33 @@ export async function GET(request: NextRequest) {
     },
   });
 
-  const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+  const { data: sessionData, error: exchangeError } =
+    await supabase.auth.exchangeCodeForSession(code);
 
   if (exchangeError) {
     const redirect = new URL('/auth/signin', origin);
     redirect.searchParams.set('error', exchangeError.message);
     return NextResponse.redirect(redirect);
+  }
+
+  // Attribute the signup in PostHog using the Supabase user id as the
+  // canonical distinct_id. The browser client's anonymous distinct_id is
+  // merged via the identify call when the next page_viewed fires in the
+  // browser after redirect.
+  const user = sessionData?.user;
+  if (user) {
+    const referralCode =
+      (user.user_metadata as Record<string, unknown> | undefined)?.referral_code;
+    await identifyServer(user.id, {
+      email: user.email,
+      created_at: user.created_at,
+      has_referrer: typeof referralCode === 'string' && referralCode.length > 0,
+    });
+    await captureServer(user.id, {
+      event: 'signup_completed',
+      plan: plan ?? null,
+      has_referrer: typeof referralCode === 'string' && referralCode.length > 0,
+    });
   }
 
   // Preserve ?plan for downstream checkout handoff (Phase 4/5).

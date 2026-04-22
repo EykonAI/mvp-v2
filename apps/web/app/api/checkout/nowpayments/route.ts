@@ -3,6 +3,7 @@ import { getCurrentUser, getServerSupabase } from '@/lib/auth/session';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { getCryptoVariant } from '@/lib/pricing';
 import { createNowpaymentsInvoice } from '@/lib/payments/nowpayments';
+import { captureServer } from '@/lib/analytics/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -123,6 +124,13 @@ export async function POST(request: NextRequest) {
       is_fee_paid_by_user: true,
     });
 
+    void captureServer(user.id, {
+      event: 'checkout_started',
+      plan: variant.id,
+      payment_method: 'crypto',
+      amount_usd_cents: variant.crypto_total_usd_cents,
+    });
+
     return NextResponse.json({
       invoice_url: invoice.invoice_url,
       invoice_id: invoice.id,
@@ -137,6 +145,12 @@ export async function POST(request: NextRequest) {
       .update({ status: 'failed', updated_at: new Date().toISOString() })
       .eq('id', pending.id);
     const message = err instanceof Error ? err.message : 'NOWPayments invoice creation failed';
+    void captureServer(user.id, {
+      event: 'checkout_failed',
+      plan: variant.id,
+      payment_method: 'crypto',
+      reason: message.slice(0, 200),
+    });
     return NextResponse.json({ error: message }, { status: 502 });
   }
 }

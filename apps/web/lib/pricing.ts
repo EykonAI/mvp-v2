@@ -10,6 +10,16 @@ export const ENTERPRISE_MIN_SEATS = 3;
 export type Tier = 'citizen' | 'pro' | 'desk' | 'enterprise';
 export type BillingCycle = 'monthly' | 'annual' | 'lifetime';
 
+// Client-safe tier label map. Lives here (not in lib/subscription.ts) so
+// client components can import it without pulling in the server-only
+// Supabase SSR helpers via lib/auth/session.
+export const TIER_LABELS: Record<Tier, string> = {
+  citizen: 'Citizen',
+  pro: 'Pro',
+  desk: 'Desk',
+  enterprise: 'Enterprise',
+};
+
 // Variant id format: <tier>_<founding|standard>_<cycle>
 // Crypto is annual-only, so only the four _annual variants are crypto-eligible.
 export type CryptoVariantId =

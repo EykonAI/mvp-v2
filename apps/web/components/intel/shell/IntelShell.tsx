@@ -1,9 +1,11 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import TopNav from '@/components/TopNav';
 import ChatPanel from '@/components/ChatPanel';
 import CalibrationStrip from '@/components/intel/shell/CalibrationStrip';
 import { PersonaProvider } from '@/components/intel/shell/PersonaContext';
+import { captureBrowser } from '@/lib/analytics/client';
 
 /**
  * Client-side /intel chrome: TopNav, calibration strip, chat panel, persona
@@ -12,6 +14,7 @@ import { PersonaProvider } from '@/components/intel/shell/PersonaContext';
  */
 export function IntelShell({ children }: { children: React.ReactNode }) {
   const [chatOpen, setChatOpen] = useState(false);
+  const pathname = usePathname();
 
   useEffect(() => {
     if (typeof document !== 'undefined') {
@@ -20,6 +23,15 @@ export function IntelShell({ children }: { children: React.ReactNode }) {
       return () => document.body.classList.remove('intel-view');
     }
   }, []);
+
+  // Capture module_opened on every intel-subpath change. The generic
+  // page_viewed also fires; this is the denormalised signal dashboards
+  // actually want when comparing workspace retention vs. other paths.
+  useEffect(() => {
+    if (!pathname || !pathname.startsWith('/intel/')) return;
+    const slug = pathname.replace(/^\/intel\//, '').split('/')[0];
+    if (slug) captureBrowser({ event: 'module_opened', module_slug: slug });
+  }, [pathname]);
 
   return (
     <PersonaProvider>

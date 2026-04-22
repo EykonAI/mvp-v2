@@ -10,6 +10,7 @@ import {
   type NowpaymentsIpnPayload,
   extractCryptoTxHash,
 } from '@/lib/payments/nowpayments';
+import { captureServer } from '@/lib/analytics/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -100,6 +101,20 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: error.message }, { status: 500 });
       }
       await markWebhookProcessed(admin, webhookRowId);
+
+      // data is the SETOF returned by complete_crypto_purchase; grab the
+      // single row and fire the conversion event.
+      const completion = Array.isArray(data) ? data[0] : data;
+      if (completion?.user_id) {
+        void captureServer(completion.user_id, {
+          event: 'checkout_succeeded',
+          plan: completion.variant_id ?? '',
+          payment_method: 'crypto',
+          amount_usd_cents: actuallyPaidCents,
+          founding_locked: completion.granted_founding === true,
+        });
+      }
+
       return NextResponse.json({ status: 'completed', result: data });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'RPC threw';

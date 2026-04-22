@@ -1,5 +1,7 @@
+'use client';
 import Link from 'next/link';
-import { TIER_LABELS, type Tier } from '@/lib/subscription';
+import { TIER_LABELS, type Tier } from '@/lib/pricing';
+import { captureBrowser } from '@/lib/analytics/client';
 
 export function UpgradePrompt({
   requiredTier,
@@ -94,6 +96,14 @@ export function UpgradePrompt({
       <div style={{ display: 'flex', gap: 12, marginTop: 24, flexWrap: 'wrap' }}>
         <Link
           href={ctaHref}
+          onClick={() =>
+            captureBrowser({
+              event: 'upgrade_clicked',
+              from_tier: currentTier,
+              target_tier: requiredTier,
+              context: moduleLabel ?? 'paywall',
+            })
+          }
           style={{
             fontFamily: 'var(--f-mono)',
             fontSize: 12,
