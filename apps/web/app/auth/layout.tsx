@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
+import { RewardfulScript } from '@/components/referral/RewardfulScript';
 
 export const metadata: Metadata = {
   title: 'Sign in — eYKON.ai',
@@ -12,6 +13,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       className="min-h-screen flex flex-col items-center justify-between px-6 py-10"
       style={{ background: 'var(--bg-void)', color: 'var(--ink)' }}
     >
+      <RewardfulScript />
       <Link
         href="/"
         className="flex items-center gap-2.5 no-underline"

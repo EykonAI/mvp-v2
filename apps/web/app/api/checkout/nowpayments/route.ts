@@ -52,6 +52,15 @@ export async function POST(request: NextRequest) {
       ? String((body as { variant: unknown }).variant || '')
       : '';
 
+  // Optional Rewardful affiliate id passed from the browser. Persisted in
+  // the NOWPayments order_description so it survives the round-trip to the
+  // webhook; the complete_crypto_purchase flow can match it against an
+  // affiliate for Week-2 payout reconciliation.
+  const rewardfulReferral =
+    body && typeof body === 'object' && 'rewardful_referral' in body
+      ? String((body as { rewardful_referral: unknown }).rewardful_referral || '').slice(0, 64)
+      : '';
+
   const variant = getCryptoVariant(variantId);
   if (!variant) {
     return NextResponse.json(
@@ -111,12 +120,16 @@ export async function POST(request: NextRequest) {
   const successUrl = `${appUrl}/app?payment=crypto_success&variant=${variant.id}`;
   const cancelUrl = `${appUrl}/pricing?payment=cancelled`;
 
+  const orderDescription = rewardfulReferral
+    ? `eYKON.ai · ${variant.label} · rw:${rewardfulReferral}`
+    : `eYKON.ai · ${variant.label}`;
+
   try {
     const invoice = await createNowpaymentsInvoice({
       price_amount: priceMajorUnits,
       price_currency: variant.crypto_price_currency,
       order_id: pending.id,
-      order_description: `eYKON.ai · ${variant.label}`,
+      order_description: orderDescription,
       ipn_callback_url: ipnCallbackUrl,
       success_url: successUrl,
       cancel_url: cancelUrl,

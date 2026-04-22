@@ -6,6 +6,7 @@ import { AuthCard, FormError } from '@/components/auth/AuthCard';
 import { AuthInput, AuthButton, Divider } from '@/components/auth/AuthControls';
 import { OAuthButtons } from '@/components/auth/OAuthButtons';
 import { isValidReferralCode } from '@/lib/auth/referral';
+import { getRewardfulReferral } from '@/components/referral/RewardfulScript';
 
 export default function SignUpPage() {
   return (
@@ -49,6 +50,12 @@ function SignUpForm() {
 
     const metadata: Record<string, string> = {};
     if (referralCode) metadata.referral_code = referralCode;
+    // Rewardful runs independently: its JS sets a cookie when the visitor
+    // arrived via ?via=<affiliate-id>. We forward that id through
+    // user_metadata so the Week-2 Rewardful-LS webhook can match it to the
+    // paying user even if the internal eyk- referral code is absent.
+    const rewardful = getRewardfulReferral();
+    if (rewardful) metadata.rewardful_referral = rewardful;
 
     const { data, error: signUpError } = await supabase.auth.signUp({
       email,
