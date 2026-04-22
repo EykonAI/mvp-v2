@@ -1,16 +1,20 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import TopNav from '@/components/TopNav';
 import ChatPanel from '@/components/ChatPanel';
 import CalibrationStrip from '@/components/intel/shell/CalibrationStrip';
 import { PersonaProvider } from '@/components/intel/shell/PersonaContext';
+import { captureBrowser } from '@/lib/analytics/client';
 
 /**
- * /intel shell — top bar, calibration strip, persona provider, chat panel.
- * Every workspace page mounts inside this layout.
+ * Client-side /intel chrome: TopNav, calibration strip, chat panel, persona
+ * provider. Extracted from the old app/(app)/intel/layout.tsx so the layout
+ * itself can be a server component that runs the tier gate (Phase A).
  */
-export default function IntelLayout({ children }: { children: React.ReactNode }) {
+export function IntelShell({ children }: { children: React.ReactNode }) {
   const [chatOpen, setChatOpen] = useState(false);
+  const pathname = usePathname();
 
   useEffect(() => {
     if (typeof document !== 'undefined') {
@@ -19,6 +23,15 @@ export default function IntelLayout({ children }: { children: React.ReactNode })
       return () => document.body.classList.remove('intel-view');
     }
   }, []);
+
+  // Capture module_opened on every intel-subpath change. The generic
+  // page_viewed also fires; this is the denormalised signal dashboards
+  // actually want when comparing workspace retention vs. other paths.
+  useEffect(() => {
+    if (!pathname || !pathname.startsWith('/intel/')) return;
+    const slug = pathname.replace(/^\/intel\//, '').split('/')[0];
+    if (slug) captureBrowser({ event: 'module_opened', module_slug: slug });
+  }, [pathname]);
 
   return (
     <PersonaProvider>
