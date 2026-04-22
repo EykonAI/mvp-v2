@@ -1,0 +1,1027 @@
+/*
+ * eYKON landing page CSS — ported verbatim from
+ * `Marketing & Sales/Road to Market/2026 04 22_ eYKON_landing page v2.html`.
+ *
+ * All selectors are scoped under `.eykon-landing` so this file can be
+ * imported globally (CSS Modules would force rewriting every JSX class
+ * reference) without clobbering globals.css or the (app)/intel styles.
+ */
+
+.eykon-landing {
+  --bg-base:        #0A1020;
+  --bg-panel:       #0F1829;
+  --bg-panel-hi:    #152138;
+  --bg-panel-mute:  #0C1424;
+  --border:         #1F2E48;
+  --border-hi:      #2A3F5F;
+  --text-primary:   #E6EDF7;
+  --text-secondary: #8BA3B8;
+  --text-tertiary:  #566A82;
+  --cyan:           #19D0B8;
+  --cyan-dim:       #0E8A7A;
+  --cyan-soft:      rgba(25, 208, 184, 0.08);
+  --amber:          #E8A84C;
+  --red:            #E8724C;
+  --purple:         #8B6FB0;
+  --grid-line:      rgba(25, 208, 184, 0.06);
+
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  min-height: 100vh;
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 60px 60px;
+  overflow-x: hidden;
+  scroll-behavior: smooth;
+  scroll-padding-top: 72px;
+}
+.eykon-landing *, .eykon-landing *::before, .eykon-landing *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+.eykon-landing a { color: inherit; }
+
+/* ───── Nav ───── */
+.eykon-landing nav {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 32px;
+  background: rgba(10, 16, 32, 0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+.eykon-landing .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; }
+.eykon-landing .brand-mark {
+  width: 22px; height: 22px;
+  border: 1px solid var(--cyan);
+  border-radius: 3px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--cyan); font-size: 11px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+}
+.eykon-landing .brand-name {
+  font-family: 'Jura', sans-serif;
+  font-size: 13px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.eykon-landing .brand-name .dot { color: var(--cyan); }
+.eykon-landing nav .links {
+  display: flex; gap: 28px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+.eykon-landing nav .links a { color: var(--text-secondary); text-decoration: none; transition: color .2s; }
+.eykon-landing nav .links a:hover,
+.eykon-landing nav .links a.active { color: var(--cyan); }
+.eykon-landing nav .cta {
+  padding: 8px 16px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--cyan);
+  border: 1px solid var(--cyan);
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all .2s;
+  display: inline-block;
+}
+.eykon-landing nav .cta:hover { background: var(--cyan); color: var(--bg-base); }
+
+/* ───── Hero ───── */
+.eykon-landing .hero {
+  max-width: 1280px; margin: 0 auto;
+  padding: 80px 32px 72px;
+  text-align: center;
+}
+.eykon-landing .founding-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 14px;
+  background: var(--cyan-soft);
+  border: 1px solid var(--cyan);
+  border-radius: 20px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.8px;
+  color: var(--cyan);
+  margin-bottom: 28px;
+}
+.eykon-landing .founding-pill .dot {
+  width: 6px; height: 6px;
+  background: var(--cyan);
+  border-radius: 50%;
+  animation: eykon-landing-pulse 2s infinite;
+}
+@keyframes eykon-landing-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(25,208,184,0.6); }
+  50% { opacity: 0.7; box-shadow: 0 0 0 8px rgba(25,208,184,0); }
+}
+.eykon-landing h1.hero-title {
+  font-family: 'Jura', sans-serif;
+  font-size: 64px;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -1.5px;
+  margin-bottom: 20px;
+}
+.eykon-landing h1.hero-title .accent { color: var(--cyan); }
+.eykon-landing .hero-sub {
+  max-width: 680px; margin: 0 auto 16px;
+  color: var(--text-secondary);
+  font-size: 17px;
+  line-height: 1.6;
+}
+.eykon-landing .hero-meta {
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin-bottom: 36px;
+}
+.eykon-landing .hero-meta .count { color: var(--cyan); }
+.eykon-landing .hero-ctas {
+  display: flex; gap: 18px; justify-content: center; align-items: center;
+  flex-wrap: wrap;
+}
+.eykon-landing .btn-primary {
+  padding: 14px 28px;
+  background: var(--cyan);
+  color: var(--bg-base);
+  border: 1px solid var(--cyan);
+  border-radius: 4px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex; align-items: center; gap: 8px;
+  transition: all .2s;
+}
+.eykon-landing .btn-primary:hover { background: var(--cyan-dim); border-color: var(--cyan-dim); transform: translateY(-1px); }
+.eykon-landing .btn-text {
+  color: var(--text-secondary);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  text-decoration: none;
+  border-bottom: 1px dashed var(--border-hi);
+  padding-bottom: 2px;
+  transition: all .2s;
+}
+.eykon-landing .btn-text:hover { color: var(--cyan); border-color: var(--cyan); }
+
+/* ───── Section scaffolding ───── */
+.eykon-landing section[id] { scroll-margin-top: 72px; }
+.eykon-landing .section {
+  max-width: 1280px; margin: 0 auto;
+  padding: 80px 32px;
+}
+.eykon-landing .section-head { text-align: center; margin-bottom: 56px; }
+.eykon-landing .section-kicker {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin-bottom: 12px;
+}
+.eykon-landing .section-title {
+  font-family: 'Jura', sans-serif;
+  font-size: 44px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.8px;
+  margin-bottom: 12px;
+}
+.eykon-landing .section-title .accent { color: var(--cyan); }
+.eykon-landing .section-sub {
+  color: var(--text-secondary);
+  font-size: 16px;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+/* ───── Platform pillars ───── */
+.eykon-landing .pillars {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+.eykon-landing .pillar {
+  position: relative;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 28px 28px 26px;
+  transition: all .25s;
+}
+.eykon-landing .pillar:hover {
+  transform: translateY(-2px);
+  border-color: var(--cyan);
+  box-shadow: 0 20px 60px -30px rgba(25,208,184,0.25);
+}
+.eykon-landing .pillar-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.eykon-landing .pillar-title {
+  font-family: 'Jura', sans-serif;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  margin-bottom: 10px;
+  line-height: 1.25;
+}
+.eykon-landing .pillar-body {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.eykon-landing .stat-strip {
+  margin-top: 36px;
+  display: flex;
+  justify-content: center;
+  gap: 40px;
+  flex-wrap: wrap;
+  padding: 22px;
+  background: var(--bg-panel-mute);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.eykon-landing .stat {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-secondary);
+}
+.eykon-landing .stat .val { color: var(--cyan); font-weight: 600; font-size: 14px; }
+.eykon-landing .stat .sep { color: var(--text-tertiary); margin: 0 4px; }
+
+/* ───── Intelligence clusters ───── */
+.eykon-landing .intelligence-intro {
+  font-style: italic;
+  color: var(--text-secondary);
+  text-align: center;
+  max-width: 720px;
+  margin: -28px auto 48px;
+  font-size: 15px;
+}
+.eykon-landing .clusters {
+  display: flex; flex-direction: column;
+  gap: 28px;
+}
+.eykon-landing .cluster {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--cyan);
+  border-radius: 6px;
+  padding: 28px 32px;
+}
+.eykon-landing .cluster.foreground {
+  border-left-width: 5px;
+  background: var(--bg-panel-hi);
+  box-shadow: 0 0 0 1px rgba(25,208,184,0.3), 0 20px 60px -30px rgba(25,208,184,0.2);
+}
+.eykon-landing .cluster-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.eykon-landing .cluster-title {
+  font-family: 'Jura', sans-serif;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+.eykon-landing .cluster.foreground .cluster-title { font-size: 26px; color: var(--cyan); }
+.eykon-landing .cluster-code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.eykon-landing .cluster-lead {
+  font-style: italic;
+  color: var(--cyan);
+  font-size: 13px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px dashed var(--border-hi);
+}
+.eykon-landing .module-row {
+  display: grid;
+  grid-template-columns: 80px minmax(200px, 260px) 1fr;
+  gap: 18px;
+  padding: 12px 12px;
+  border-left: 2px solid transparent;
+  transition: all .15s;
+  align-items: baseline;
+}
+.eykon-landing .module-row:hover {
+  border-left-color: var(--cyan);
+  background: rgba(25,208,184,0.03);
+}
+.eykon-landing .module-code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--cyan);
+  letter-spacing: 1.5px;
+  font-weight: 500;
+}
+.eykon-landing .module-name {
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+.eykon-landing .module-desc {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.eykon-landing .see-in-action { text-align: center; margin-top: 40px; }
+.eykon-landing .see-in-action a {
+  color: var(--cyan);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  text-decoration: none;
+  border-bottom: 1px dashed var(--cyan);
+  padding-bottom: 2px;
+}
+.eykon-landing .see-in-action a:hover { color: var(--text-primary); border-color: var(--text-primary); }
+
+/* ───── Scarcity strip (pricing) ───── */
+.eykon-landing .scarcity-strip {
+  max-width: 1280px;
+  margin: 0 auto 20px;
+  padding: 0 32px;
+  text-align: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--text-secondary);
+}
+.eykon-landing .scarcity-strip .mark { color: var(--cyan); }
+.eykon-landing .scarcity-strip .count { color: var(--cyan); font-weight: 600; }
+
+/* ───── Billing toggle (3-state) ───── */
+.eykon-landing .billing-toggle {
+  display: inline-flex;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 36px;
+  flex-wrap: wrap;
+}
+.eykon-landing .billing-toggle button {
+  padding: 10px 20px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all .2s;
+  font-family: inherit;
+  font-size: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  white-space: nowrap;
+}
+.eykon-landing .billing-toggle button.active {
+  background: var(--cyan);
+  color: var(--bg-base);
+  font-weight: 600;
+}
+.eykon-landing .save-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 6px;
+  background: rgba(25, 208, 184, 0.15);
+  color: var(--cyan);
+  border-radius: 3px;
+  font-size: 10px;
+}
+.eykon-landing .billing-toggle button.active .save-badge {
+  background: rgba(10, 16, 32, 0.15);
+  color: var(--bg-base);
+}
+.eykon-landing .toggle-wrap { text-align: center; }
+
+/* ───── Pricing grid ───── */
+.eykon-landing .pricing-grid {
+  max-width: 1280px; margin: 0 auto;
+  padding: 0 32px 40px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+.eykon-landing .tier-card {
+  position: relative;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 32px 28px 28px;
+  display: flex; flex-direction: column;
+  transition: all .25s;
+}
+.eykon-landing .tier-card:hover { transform: translateY(-2px); border-color: var(--border-hi); }
+.eykon-landing .tier-card.muted { background: var(--bg-panel-mute); opacity: 0.94; }
+.eykon-landing .tier-card.highlight {
+  border-color: var(--cyan);
+  background: var(--bg-panel-hi);
+  box-shadow: 0 0 0 1px var(--cyan), 0 20px 60px -20px rgba(25, 208, 184, 0.3);
+}
+.eykon-landing .tier-card.highlight::before {
+  content: "MOST POPULAR";
+  position: absolute;
+  top: -11px; left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  background: var(--cyan);
+  color: var(--bg-base);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.eykon-landing .tier-code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.eykon-landing .tier-name {
+  font-family: 'Jura', sans-serif;
+  font-size: 28px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  letter-spacing: -0.5px;
+}
+.eykon-landing .tier-tag {
+  color: var(--text-secondary);
+  font-size: 13px;
+  min-height: 40px;
+  margin-bottom: 22px;
+  line-height: 1.45;
+}
+.eykon-landing .price-original {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  min-height: 22px;
+}
+.eykon-landing .price-original .strike {
+  text-decoration: line-through;
+  text-decoration-color: rgba(139, 163, 184, 0.55);
+  text-decoration-thickness: 1px;
+}
+.eykon-landing .price-original .save-pill {
+  display: inline-block;
+  padding: 2px 7px;
+  background: rgba(25, 208, 184, 0.14);
+  border: 1px solid rgba(25, 208, 184, 0.35);
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--cyan);
+  text-decoration: none;
+}
+.eykon-landing .price-block {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+.eykon-landing .price-amt {
+  font-family: 'Jura', sans-serif;
+  font-size: 48px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -2px;
+}
+.eykon-landing .price-per {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-family: 'IBM Plex Mono', monospace;
+}
+.eykon-landing .price-note {
+  color: var(--cyan);
+  font-size: 11px;
+  font-family: 'IBM Plex Mono', monospace;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 24px;
+  min-height: 16px;
+}
+.eykon-landing .price-note.dim { color: var(--text-tertiary); }
+.eykon-landing .tier-btn {
+  padding: 13px 16px;
+  border-radius: 4px;
+  border: 1px solid var(--border-hi);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  cursor: pointer;
+  text-decoration: none;
+  text-align: center;
+  transition: all .2s;
+  margin-bottom: 24px;
+  display: block;
+}
+.eykon-landing .tier-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+.eykon-landing .tier-btn.primary {
+  background: var(--cyan);
+  color: var(--bg-base);
+  border-color: var(--cyan);
+}
+.eykon-landing .tier-btn.primary:hover { background: var(--cyan-dim); border-color: var(--cyan-dim); color: var(--bg-base); }
+.eykon-landing .tier-features {
+  list-style: none;
+  display: flex; flex-direction: column; gap: 10px;
+  font-size: 13px;
+}
+.eykon-landing .tier-features li {
+  display: flex;
+  gap: 10px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+.eykon-landing .tier-features li::before {
+  content: "▸";
+  color: var(--cyan);
+  font-size: 11px;
+  line-height: 1.5;
+  flex-shrink: 0;
+}
+.eykon-landing .tier-features li.disabled { color: var(--text-tertiary); }
+.eykon-landing .tier-features li.disabled::before { content: "—"; color: var(--text-tertiary); }
+.eykon-landing .tier-features li strong { color: var(--text-primary); font-weight: 500; }
+.eykon-landing .tier-section-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 10px;
+}
+
+/* ───── Crypto callout ───── */
+.eykon-landing .crypto-callout {
+  max-width: 1280px; margin: 0 auto;
+  padding: 20px 32px 80px;
+}
+.eykon-landing .crypto-box {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 24px;
+  padding: 24px 28px;
+  background: linear-gradient(90deg, rgba(25,208,184,0.08) 0%, rgba(25,208,184,0.02) 100%);
+  border: 1px solid rgba(25, 208, 184, 0.3);
+  border-radius: 6px;
+}
+.eykon-landing .crypto-box .icon-block {
+  display: flex; align-items: center; gap: 14px;
+  flex: 1;
+}
+.eykon-landing .crypto-icon {
+  width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(25, 208, 184, 0.15);
+  border: 1px solid var(--cyan);
+  border-radius: 6px;
+  font-family: 'Jura', sans-serif;
+  font-size: 20px; font-weight: 700;
+  color: var(--cyan);
+  flex-shrink: 0;
+}
+.eykon-landing .crypto-txt { flex: 1; }
+.eykon-landing .crypto-txt h3 {
+  font-family: 'Jura', sans-serif;
+  font-size: 19px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-primary);
+}
+.eykon-landing .crypto-txt p { color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+.eykon-landing .crypto-txt .pct { color: var(--cyan); font-weight: 600; }
+.eykon-landing .crypto-coins {
+  display: flex; gap: 8px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  letter-spacing: 1px;
+  flex-wrap: wrap;
+}
+.eykon-landing .crypto-coins span {
+  padding: 4px 8px;
+  border: 1px solid var(--border-hi);
+  border-radius: 3px;
+}
+
+/* ───── Referral section ───── */
+.eykon-landing .referral-bg {
+  background: linear-gradient(180deg, var(--bg-base) 0%, var(--bg-panel-mute) 100%);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.eykon-landing .referral-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  margin-bottom: 36px;
+}
+.eykon-landing .step {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 28px 26px;
+  position: relative;
+  transition: all .2s;
+}
+.eykon-landing .step:hover { border-color: var(--cyan); transform: translateY(-2px); }
+.eykon-landing .step-num {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  background: var(--cyan-soft);
+  border: 1px solid var(--cyan);
+  color: var(--cyan);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Jura', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 18px;
+}
+.eykon-landing .step-title {
+  font-family: 'Jura', sans-serif;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  margin-bottom: 10px;
+}
+.eykon-landing .step-body {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.eykon-landing .referral-unlock {
+  text-align: center;
+  padding: 20px 24px;
+  background: var(--bg-panel);
+  border: 1px dashed var(--border-hi);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 28px;
+}
+.eykon-landing .referral-unlock strong {
+  color: var(--cyan); font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase;
+}
+.eykon-landing .referral-cta { text-align: center; }
+
+/* ───── FAQ ───── */
+.eykon-landing .faq {
+  max-width: 880px; margin: 0 auto;
+  padding: 40px 32px 120px;
+}
+.eykon-landing .faq h2 {
+  font-family: 'Jura', sans-serif;
+  font-size: 40px;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 44px;
+  letter-spacing: -0.5px;
+}
+.eykon-landing .faq h2 .accent { color: var(--cyan); }
+.eykon-landing .faq-item {
+  border-bottom: 1px solid var(--border);
+  padding: 20px 0;
+}
+.eykon-landing .faq-q {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 16px;
+  cursor: pointer;
+  font-family: 'Jura', sans-serif;
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--text-primary);
+  list-style: none;
+}
+.eykon-landing .faq-q::-webkit-details-marker { display: none; }
+.eykon-landing .faq-q::after {
+  content: "+";
+  color: var(--cyan);
+  font-size: 22px;
+  transition: transform .2s;
+  flex-shrink: 0;
+}
+.eykon-landing details[open] .faq-q::after { content: "−"; }
+.eykon-landing .faq-a {
+  padding-top: 14px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.eykon-landing .faq-a code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  background: var(--bg-panel);
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: var(--cyan);
+}
+.eykon-landing .faq-a strong { color: var(--text-primary); }
+
+/* ───── Footer ───── */
+.eykon-landing footer {
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel-mute);
+  padding: 56px 32px 20px;
+}
+.eykon-landing .footer-grid {
+  max-width: 1280px; margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 48px;
+  padding-bottom: 40px;
+  border-bottom: 1px solid var(--border);
+}
+.eykon-landing .footer-col h4 {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--text-tertiary);
+  margin-bottom: 16px;
+  font-weight: 500;
+}
+.eykon-landing .footer-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.eykon-landing .footer-tag { color: var(--text-secondary); font-size: 13px; margin-bottom: 14px; line-height: 1.55; }
+.eykon-landing .footer-copy { color: var(--text-tertiary); font-size: 12px; font-family: 'IBM Plex Mono', monospace; letter-spacing: 1px; }
+.eykon-landing .footer-col ul { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.eykon-landing .footer-col a { color: var(--text-secondary); text-decoration: none; font-size: 13px; transition: color .2s; }
+.eykon-landing .footer-col a:hover { color: var(--cyan); }
+.eykon-landing .compliance-strip {
+  max-width: 1280px; margin: 0 auto;
+  padding-top: 20px;
+  text-align: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.5px;
+  line-height: 1.6;
+}
+
+/* ───── Fiat waitlist strip (under pricing toggle) ───── */
+.eykon-landing .waitlist-strip {
+  max-width: 1280px;
+  margin: -8px auto 28px;
+  padding: 0 32px;
+  display: flex; justify-content: center;
+}
+.eykon-landing .waitlist-strip-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  background: rgba(232, 168, 76, 0.06);
+  border: 1px solid rgba(232, 168, 76, 0.35);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  max-width: 720px;
+  text-align: left;
+}
+.eykon-landing .waitlist-strip-icon {
+  font-family: 'Jura', sans-serif;
+  font-size: 16px;
+  color: var(--amber);
+  flex-shrink: 0;
+}
+.eykon-landing .waitlist-strip-txt strong { color: var(--text-primary); font-weight: 500; }
+.eykon-landing .waitlist-strip-txt .count { color: var(--amber); font-weight: 600; font-family: 'IBM Plex Mono', monospace; }
+
+/* ───── Waitlist modal ───── */
+.eykon-landing .modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(4, 8, 18, 0.78);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  opacity: 0;
+  transition: opacity .18s ease;
+}
+.eykon-landing .modal-backdrop.open { display: flex; opacity: 1; }
+.eykon-landing .modal-card {
+  position: relative;
+  background: var(--bg-panel);
+  border: 1px solid var(--cyan);
+  border-radius: 8px;
+  width: 100%;
+  max-width: 500px;
+  padding: 36px 32px 28px;
+  box-shadow: 0 30px 80px -20px rgba(25,208,184,0.25);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+.eykon-landing .modal-close {
+  position: absolute;
+  top: 10px; right: 12px;
+  width: 30px; height: 30px;
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all .15s;
+}
+.eykon-landing .modal-close:hover { color: var(--cyan); background: rgba(25,208,184,0.08); }
+.eykon-landing .modal-kicker {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin-bottom: 8px;
+}
+.eykon-landing .modal-title {
+  font-family: 'Jura', sans-serif;
+  font-size: 24px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  letter-spacing: -0.3px;
+  line-height: 1.2;
+}
+.eykon-landing .modal-sub {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 22px;
+}
+.eykon-landing .waitlist-form .form-row {
+  display: flex; flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.eykon-landing .waitlist-form label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.eykon-landing .waitlist-form input[type="email"],
+.eykon-landing .waitlist-form select,
+.eykon-landing .waitlist-form textarea {
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 14px;
+  transition: border-color .15s;
+  resize: vertical;
+}
+.eykon-landing .waitlist-form input[type="email"]:focus,
+.eykon-landing .waitlist-form select:focus,
+.eykon-landing .waitlist-form textarea:focus {
+  outline: none;
+  border-color: var(--cyan);
+}
+.eykon-landing .waitlist-form .form-optional { color: var(--text-tertiary); text-transform: none; letter-spacing: 0; }
+.eykon-landing .waitlist-form .form-consent {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-secondary);
+  margin: 8px 0 18px;
+  line-height: 1.45;
+  cursor: pointer;
+}
+.eykon-landing .waitlist-form .form-consent input { accent-color: var(--cyan); margin-top: 2px; flex-shrink: 0; }
+.eykon-landing .waitlist-form .modal-submit {
+  width: 100%;
+  justify-content: center;
+  text-align: center;
+}
+.eykon-landing .waitlist-form .form-msg {
+  margin-top: 12px;
+  font-size: 13px;
+  min-height: 18px;
+  text-align: center;
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+/* ───── Responsive ───── */
+@media (max-width: 1100px) {
+  .eykon-landing .pricing-grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "citizen citizen"
+      "pro enterprise";
+  }
+  .eykon-landing .tier-card.t-citizen { grid-area: citizen; }
+  .eykon-landing .tier-card.t-pro { grid-area: pro; }
+  .eykon-landing .tier-card.t-enterprise { grid-area: enterprise; }
+  .eykon-landing .crypto-box { flex-direction: column; align-items: flex-start; }
+  .eykon-landing h1.hero-title { font-size: 52px; }
+  .eykon-landing .section-title { font-size: 36px; }
+  .eykon-landing .referral-steps { grid-template-columns: 1fr; }
+  .eykon-landing .footer-grid { grid-template-columns: 1fr 1fr; gap: 32px; }
+}
+@media (max-width: 900px) {
+  .eykon-landing .pillars { grid-template-columns: 1fr; }
+  .eykon-landing .module-row { grid-template-columns: 70px 1fr; }
+  .eykon-landing .module-row .module-desc { grid-column: 1 / -1; padding-left: 88px; }
+}
+@media (max-width: 640px) {
+  .eykon-landing .pricing-grid { grid-template-columns: 1fr; grid-template-areas: none; }
+  .eykon-landing .tier-card.t-citizen,
+  .eykon-landing .tier-card.t-pro,
+  .eykon-landing .tier-card.t-enterprise { grid-area: auto; }
+  .eykon-landing h1.hero-title { font-size: 36px; }
+  .eykon-landing .hero { padding: 48px 20px 48px; }
+  .eykon-landing .section { padding: 56px 20px; }
+  .eykon-landing .section-title { font-size: 28px; }
+  .eykon-landing nav .links { display: none; }
+  .eykon-landing nav { padding: 12px 20px; }
+  .eykon-landing .price-amt { font-size: 38px; }
+  .eykon-landing .cluster { padding: 22px 20px; }
+  .eykon-landing .module-row { grid-template-columns: 1fr; gap: 4px; padding: 10px 4px; }
+  .eykon-landing .module-row .module-desc { padding-left: 0; }
+  .eykon-landing .footer-grid { grid-template-columns: 1fr; gap: 32px; }
+  .eykon-landing .billing-toggle { font-size: 11px; }
+  .eykon-landing .billing-toggle button { padding: 9px 12px; }
+  .eykon-landing .stat-strip { gap: 18px; padding: 16px; }
+  .eykon-landing .hero-ctas { flex-direction: column; gap: 14px; }
+  .eykon-landing .modal-card { padding: 28px 22px 22px; max-width: 100%; }
+  .eykon-landing .waitlist-strip { padding: 0 20px; }
+  .eykon-landing .waitlist-strip-inner { padding: 10px 14px; font-size: 12px; gap: 10px; }
+}
+@media (max-width: 400px) {
+  .eykon-landing h1.hero-title { font-size: 30px; }
+  .eykon-landing .section-title { font-size: 24px; }
+  .eykon-landing .billing-toggle { flex-direction: column; width: 100%; }
+  .eykon-landing .billing-toggle button { width: 100%; }
+}

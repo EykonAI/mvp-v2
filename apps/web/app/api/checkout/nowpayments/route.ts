@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
 
   // 2. Insert the pending purchase. Service-role client bypasses RLS.
   const admin = createServerSupabase();
-  const priceMajorUnits = variant.crypto_amount_eur_cents / 100;
+  const priceMajorUnits = variant.crypto_total_usd_cents / 100;
 
   const { data: pending, error: pendingErr } = await admin
     .from('purchases')
@@ -91,8 +91,8 @@ export async function POST(request: NextRequest) {
       variant_id: variant.id,
       kind: 'subscription_first',
       status: 'pending',
-      amount_cents: variant.crypto_amount_eur_cents,
-      currency: 'EUR',
+      amount_cents: variant.crypto_total_usd_cents,
+      currency: 'USD',
     })
     .select('id')
     .single();
@@ -127,7 +127,8 @@ export async function POST(request: NextRequest) {
       invoice_url: invoice.invoice_url,
       invoice_id: invoice.id,
       purchase_id: pending.id,
-      amount_eur: priceMajorUnits,
+      amount_usd: priceMajorUnits,
+      seats: variant.seats,
     });
   } catch (err) {
     // Roll the purchase back to status='failed' so we don't leave orphans.
