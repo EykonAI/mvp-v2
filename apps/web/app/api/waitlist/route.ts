@@ -20,6 +20,17 @@ export const dynamic = 'force-dynamic';
  * `already_on_waitlist: true` so the frontend treats it as a no-op success.
  */
 export async function POST(request: NextRequest) {
+  // Honour the launch-day kill switch — same env var that gates
+  // /api/checkout/*. If we have to pause signups, we also pause net-new
+  // waitlist commitments so the inbox doesn't fill with promises we can't
+  // immediately keep.
+  if (process.env.SIGNUPS_PAUSED === 'true') {
+    return NextResponse.json(
+      { error: 'Signups are temporarily paused. Please try again shortly.' },
+      { status: 503 },
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();
