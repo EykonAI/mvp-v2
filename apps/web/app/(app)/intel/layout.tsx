@@ -1,40 +1,38 @@
-'use client';
-import { useState, useEffect } from 'react';
 import TopNav from '@/components/TopNav';
-import ChatPanel from '@/components/ChatPanel';
-import CalibrationStrip from '@/components/intel/shell/CalibrationStrip';
-import { PersonaProvider } from '@/components/intel/shell/PersonaContext';
+import { IntelShell } from '@/components/intel/shell/IntelShell';
+import { UpgradePrompt } from '@/components/paywall/UpgradePrompt';
+import { getCurrentTier, tierMeetsRequirement } from '@/lib/subscription';
 
 /**
- * /intel shell — top bar, calibration strip, persona provider, chat panel.
- * Every workspace page mounts inside this layout.
+ * Server-side gate for the entire Intelligence Center. Runs the tier check
+ * before handing off to the IntelShell client component (TopNav, chat panel,
+ * calibration strip, persona provider).
+ *
+ * When the Phase-A tier check fails:
+ *   - Citizen → UpgradePrompt pointing to /pricing
+ *   - Unauthenticated (auth-enabled flag true but no session) never reaches
+ *     here; middleware redirects to /auth/signin first.
+ *
+ * When NEXT_PUBLIC_AUTH_ENABLED is still 'false' (dev), getCurrentTier()
+ * returns 'pro' and the shell renders normally, so the existing Intelligence
+ * Center UX stays explorable during development.
  */
-export default function IntelLayout({ children }: { children: React.ReactNode }) {
-  const [chatOpen, setChatOpen] = useState(false);
+export default async function IntelLayout({ children }: { children: React.ReactNode }) {
+  const tier = await getCurrentTier();
 
-  useEffect(() => {
-    if (typeof document !== 'undefined') {
-      document.body.classList.add('intel-view');
-      document.body.classList.remove('globe-view');
-      return () => document.body.classList.remove('intel-view');
-    }
-  }, []);
-
-  return (
-    <PersonaProvider>
-      <div className="min-h-screen flex flex-col intel-bg">
-        <TopNav chatOpen={chatOpen} onChatToggle={() => setChatOpen(v => !v)} />
-        <CalibrationStrip />
-        <div className="flex-1 flex" style={{ minHeight: 0 }}>
-          <main className="flex-1 min-w-0">{children}</main>
-          <aside
-            className={`transition-all duration-200 ease-in-out ${chatOpen ? 'w-[380px]' : 'w-0'} overflow-hidden`}
-            style={{ borderLeft: chatOpen ? '1px solid var(--rule-soft)' : 'none' }}
-          >
-            {chatOpen && <ChatPanel />}
-          </aside>
-        </div>
+  if (!tierMeetsRequirement(tier, 'pro')) {
+    return (
+      <div className="min-h-screen flex flex-col" style={{ background: 'var(--bg-void)' }}>
+        <TopNav />
+        <UpgradePrompt
+          requiredTier="pro"
+          currentTier={tier}
+          moduleLabel="The Intelligence Center"
+          contextLine="Nine compound-signal workspaces, the AI analyst, and real-time feeds are all included with Pro."
+        />
       </div>
-    </PersonaProvider>
-  );
+    );
+  }
+
+  return <IntelShell>{children}</IntelShell>;
 }
