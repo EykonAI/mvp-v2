@@ -35,6 +35,18 @@ export default function Home() {
 
   const intervalsRef = useRef<Record<string, NodeJS.Timeout>>({});
 
+  // Complete the upgrade handoff. The email-confirm callback and paywall flows
+  // land users on /app?plan=<variant>; bounce them to /pricing so the launcher
+  // can fire checkout. window.location.replace keeps /app out of history, so
+  // the NOWPayments hosted cancel doesn't loop back and re-trigger.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const plan = new URLSearchParams(window.location.search).get('plan');
+    if (plan) {
+      window.location.replace(`/pricing?plan=${encodeURIComponent(plan)}`);
+    }
+  }, []);
+
   useEffect(() => {
     if (typeof document !== 'undefined') {
       document.body.classList.add('globe-view');
