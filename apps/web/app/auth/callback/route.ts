@@ -18,7 +18,12 @@ type CookieToSet = { name: string; value: string; options: CookieOptions };
  * middleware.ts's exclusion list.
  */
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = request.nextUrl;
+  const { searchParams } = request.nextUrl;
+  // Trust NEXT_PUBLIC_APP_URL over request.nextUrl.origin: the web service
+  // binds to 0.0.0.0:3000 (`next start -H 0.0.0.0`), and on Railway that
+  // internal address leaks into request-derived origins, producing redirects
+  // to http://0.0.0.0:3000 that the user's browser cannot reach.
+  const origin = (process.env.NEXT_PUBLIC_APP_URL ?? request.nextUrl.origin).replace(/\/$/, '');
   const code = searchParams.get('code');
   const next = searchParams.get('next') ?? '/app';
   const plan = searchParams.get('plan');
