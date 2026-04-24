@@ -49,8 +49,12 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/auth/signin';
+    // Build the redirect against NEXT_PUBLIC_APP_URL, not a clone of
+    // request.nextUrl — the web service binds to 0.0.0.0:3000 and that leaks
+    // into request-derived origins on Railway, producing redirects the
+    // browser cannot follow. Same root cause as the auth/callback fix.
+    const base = (process.env.NEXT_PUBLIC_APP_URL ?? request.nextUrl.origin).replace(/\/$/, '');
+    const url = new URL('/auth/signin', base);
     url.searchParams.set('next', request.nextUrl.pathname);
     return NextResponse.redirect(url);
   }

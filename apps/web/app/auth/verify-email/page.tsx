@@ -27,6 +27,11 @@ function VerifyEmailView() {
     const supabase = getSupabaseBrowser();
     const callback = new URL('/auth/callback', window.location.origin);
     callback.searchParams.set('next', params.get('next') ?? '/app');
+    // Preserve ?plan= so the resend path keeps the checkout handoff alive.
+    // Without this, a user who resends their confirmation loses the plan
+    // selection that was baked into the first email.
+    const plan = params.get('plan');
+    if (plan) callback.searchParams.set('plan', plan);
     const { error: resendError } = await supabase.auth.resend({
       type: 'signup',
       email,
