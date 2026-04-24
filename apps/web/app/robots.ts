@@ -7,7 +7,7 @@ export default function robots(): MetadataRoute.Robots {
     rules: [
       {
         userAgent: '*',
-        allow: ['/', '/pricing', '/faq', '/terms', '/privacy', '/cookies', '/dpa', '/refund'],
+        allow: ['/', '/pricing', '/terms', '/privacy', '/cookies', '/dpa', '/refund'],
         // The (app) surface is gated behind auth and the auth surface
         // itself isn't useful in search results. Crawlers waste budget
         // there and risk surfacing private user pages from misconfigured
