@@ -87,13 +87,18 @@ export async function POST(request: NextRequest) {
 
   if (payload.payment_status === 'finished') {
     try {
-      const actuallyPaidCents = Math.round((payload.actually_paid ?? payload.price_amount) * 100);
+      // Use price_amount (the USD invoice total we locked at creation time —
+      // price_currency is always 'usd' for our variants), NOT actually_paid,
+      // which NOWPayments reports in the pay currency (crypto amount like
+      // 0.012 BTC). Multiplying a crypto amount by 100 would record nonsense
+      // cents on the purchase row.
+      const amountUsdCents = Math.round(payload.price_amount * 100);
       const { data, error } = await admin.rpc('complete_crypto_purchase', {
         p_purchase_id: payload.order_id,
         p_external_order_id: String(payload.payment_id),
         p_pay_currency: payload.pay_currency,
         p_tx_hash: extractCryptoTxHash(payload),
-        p_actually_paid_cents: actuallyPaidCents,
+        p_actually_paid_cents: amountUsdCents,
       });
       if (error) {
         await markWebhookFailed(admin, webhookRowId, error.message);
@@ -110,7 +115,7 @@ export async function POST(request: NextRequest) {
           event: 'checkout_succeeded',
           plan: completion.variant_id ?? '',
           payment_method: 'crypto',
-          amount_usd_cents: actuallyPaidCents,
+          amount_usd_cents: amountUsdCents,
           founding_locked: completion.granted_founding === true,
         });
       }
