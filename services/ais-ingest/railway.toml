@@ -1,0 +1,21 @@
+# ══════════════════════════════════════════════════════════════
+# eYKON.ai — AIS ingest worker (Railway service config)
+#
+# Per-service config; overrides the repo-root railway.toml which
+# is web-specific (`cd apps/web && npm run build` etc).
+#
+# In the Railway UI: Settings → Config-as-code → set the path
+# to `services/ais-ingest/railway.toml` so Railway reads this
+# file instead of the root one.
+# ══════════════════════════════════════════════════════════════
+
+[build]
+builder = "NIXPACKS"
+buildCommand = "npm install"
+
+[deploy]
+startCommand = "npm start"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+# No healthcheckPath — this is a long-running WebSocket worker,
+# it doesn't expose an HTTP server.
