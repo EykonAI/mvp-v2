@@ -79,7 +79,8 @@ Layer 4  — Next.js + Deck.gl (3D globe, dashboard, SSR)
 |--------|--------|------|-----|
 | adsb.lol | Air Traffic | DYNAMIC | Free |
 | OpenSky Network | Air Traffic | DYNAMIC | Free |
-| AIS Hub | Maritime | DYNAMIC | Free (feeder) |
+| AISStream.io | Maritime | DYNAMIC | Free (registered) |
+| AIS Hub | Maritime | DYNAMIC | Free (feeder, optional) |
 | ACLED | Conflict & Security | DYNAMIC | Free (registered) |
 | ENTSO-E | Energy & Utilities | DYNAMIC | Free (registered) |
 | Open-Meteo | Weather | DYNAMIC | Free |
@@ -93,8 +94,9 @@ Layer 4  — Next.js + Deck.gl (3D globe, dashboard, SSR)
 | `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project settings | Yes |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Your Supabase project settings | Yes |
 | `SUPABASE_SERVICE_ROLE_KEY` | Your Supabase project settings | Yes |
-| `AISHUB_API_KEY` | https://www.aishub.net/ | Yes (for vessels) |
-| `ACLED_EMAIL` + `ACLED_API_KEY` | https://developer.acleddata.com/ | Yes (for conflicts) |
+| `AISSTREAM_API_KEY` | https://aisstream.io/apikeys | Yes (for vessels) |
+| `AISHUB_API_KEY` | https://www.aishub.net/ | Optional (legacy provider) |
+| `ACLED_EMAIL` + `ACLED_API_KEY` | https://developer.acleddata.com/ | Optional (paid; GDELT is the default) |
 | `ENTSOE_API_KEY` | https://transparency.entsoe.eu/ | Optional |
 
 ## License
