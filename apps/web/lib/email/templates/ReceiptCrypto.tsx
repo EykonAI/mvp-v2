@@ -1,5 +1,6 @@
 import { Button, Link, Text } from '@react-email/components';
 import { EmailLayout, styles } from './EmailLayout';
+import { APP_URL } from '@/lib/url';
 
 export type ReceiptCryptoProps = {
   tierLabel: string;                 // 'Pro · Founding' etc.
@@ -77,17 +78,17 @@ export function ReceiptCrypto(props: ReceiptCryptoProps) {
         )}
       </div>
 
-      <Button href="https://mvp.eykon.ai/app" style={styles.button}>
+      <Button href={`${APP_URL}/app`} style={styles.button}>
         Open the platform →
       </Button>
 
       <Text style={styles.paragraph}>
         A few starting points worth the first five minutes: the{' '}
-        <Link href="https://mvp.eykon.ai/intel/chokepoint" style={{ color: '#19D0B8' }}>
+        <Link href={`${APP_URL}/intel/chokepoint`} style={{ color: '#19D0B8' }}>
           Chokepoint Monitor
         </Link>{' '}
         (IM-08) and the{' '}
-        <Link href="https://mvp.eykon.ai/intel/cascade" style={{ color: '#19D0B8' }}>
+        <Link href={`${APP_URL}/intel/cascade`} style={{ color: '#19D0B8' }}>
           Cascade Analyzer
         </Link>{' '}
         (IM-18) show the clearest signal-to-trade loop. Your AI analyst budget

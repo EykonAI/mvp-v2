@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { getUserProfile } from '@/lib/auth/session';
 import { TIER_LABELS } from '@/lib/pricing';
 import { ReferralCard } from '@/components/settings/ReferralCard';
+import { APP_URL } from '@/lib/url';
 
 export const metadata: Metadata = {
   title: 'Settings — eYKON.ai',
@@ -19,8 +20,7 @@ export default async function SettingsPage() {
   const displayTier = profile?.tier ?? 'pro';
   const referralCode = profile?.referral_code ?? 'eyk-preview1';
   const foundingLocked = profile?.founding_rate_locked ?? false;
-  const baseUrl =
-    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') || 'https://mvp.eykon.ai';
+  const baseUrl = APP_URL;
 
   return (
     <section

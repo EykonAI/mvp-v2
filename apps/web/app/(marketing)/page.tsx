@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Landing } from './Landing';
+import { APP_URL } from '@/lib/url';
 
 export const metadata: Metadata = {
   title: 'eYKON.ai — Geopolitical Intelligence for Fast Decisions',
@@ -10,7 +11,7 @@ export const metadata: Metadata = {
     description:
       'Maritime chokepoints, energy infrastructure, sanctions events, conflict escalation — a single screen from event to position idea in seconds.',
     type: 'website',
-    url: 'https://mvp.eykon.ai',
+    url: APP_URL,
     siteName: 'eYKON.ai',
   },
   twitter: {

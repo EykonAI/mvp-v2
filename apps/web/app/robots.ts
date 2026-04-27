@@ -1,6 +1,5 @@
 import type { MetadataRoute } from 'next';
-
-const baseUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') || 'https://mvp.eykon.ai';
+import { APP_URL as baseUrl } from '@/lib/url';
 
 export default function robots(): MetadataRoute.Robots {
   return {

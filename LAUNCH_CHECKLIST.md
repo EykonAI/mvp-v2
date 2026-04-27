@@ -72,7 +72,7 @@ NEXT_PUBLIC_SUPABASE_URL                  (required)
 NEXT_PUBLIC_SUPABASE_ANON_KEY             (required)
 SUPABASE_SERVICE_ROLE_KEY                 (required for webhooks + cron)
 POSTGRES_URL                              (db migrate / seed)
-NEXT_PUBLIC_APP_URL                       (https://mvp.eykon.ai)
+NEXT_PUBLIC_APP_URL                       (https://eykon.ai)
 
 CRON_SECRET                               (cron auth — same value pasted into every Railway trigger)
 NEXT_PUBLIC_AUTH_ENABLED=true             ← FLIP TO TRUE for launch
@@ -131,14 +131,14 @@ must already be configured on Railway — verify they are still present after
 the merge to `main`.
 
 ### External integrations
-- [ ] **NOWPayments** dashboard → IPN URL: `https://mvp.eykon.ai/api/webhooks/nowpayments`,
-      success: `https://mvp.eykon.ai/app?payment=crypto_success`,
-      cancel: `https://mvp.eykon.ai/pricing?payment=cancelled`.
-- [ ] **Resend** webhooks → `https://mvp.eykon.ai/api/webhooks/resend`,
+- [ ] **NOWPayments** dashboard → IPN URL: `https://eykon.ai/api/webhooks/nowpayments`,
+      success: `https://eykon.ai/app?payment=crypto_success`,
+      cancel: `https://eykon.ai/pricing?payment=cancelled`.
+- [ ] **Resend** webhooks → `https://eykon.ai/api/webhooks/resend`,
       events: sent / delivered / opened / clicked / bounced / complained.
 - [ ] **Supabase Auth** → Authentication → URL Configuration:
       add both `http://localhost:3000/auth/callback` and
-      `https://mvp.eykon.ai/auth/callback` to the redirect allowlist.
+      `https://eykon.ai/auth/callback` to the redirect allowlist.
       Enable Email + Google + GitHub + Magic Link providers.
 - [ ] **Termly** → publish all five policies; UUIDs pasted into env vars.
 - [ ] **PostHog** → confirm event ingestion with a test page view.
@@ -167,12 +167,12 @@ the merge to `main`.
 - [ ] On the same `/` page, click "Join fiat waitlist →" on Pro Monthly,
       submit the modal. Row lands in `fiat_waitlist`; `email_log` shows
       a `waitlist_confirmation` send.
-- [ ] `curl https://mvp.eykon.ai/api/health` → HTTP 200,
+- [ ] `curl https://eykon.ai/api/health` → HTTP 200,
       both `dependencies.supabase.ok` and `dependencies.anthropic.ok` true.
-- [ ] `curl -A "Googlebot" https://mvp.eykon.ai/` returns rendered HTML
+- [ ] `curl -A "Googlebot" https://eykon.ai/` returns rendered HTML
       with the hero copy in the response body (SEO).
-- [ ] `curl https://mvp.eykon.ai/robots.txt` returns the allow/disallow rules.
-- [ ] `curl https://mvp.eykon.ai/sitemap.xml` returns the marketing+legal URLs.
+- [ ] `curl https://eykon.ai/robots.txt` returns the allow/disallow rules.
+- [ ] `curl https://eykon.ai/sitemap.xml` returns the marketing+legal URLs.
 - [ ] Visit `/intel/chokepoint` as an authenticated Citizen user → see the
       UpgradePrompt; as Pro → see the workspace.
 
@@ -195,7 +195,7 @@ the merge to `main`.
       5 min — that drives the algorithmic visibility.
 - [ ] X/Twitter launch thread published.
 - [ ] OSINT DM batch sent (15 accounts).
-- [ ] `curl https://mvp.eykon.ai/api/health?shallow=1` every 5 min for
+- [ ] `curl https://eykon.ai/api/health?shallow=1` every 5 min for
       the first hour as a smoke check.
 
 ---
