@@ -9,6 +9,7 @@ import {
   Section,
   Text,
 } from '@react-email/components';
+import { APP_URL } from '@/lib/url';
 
 /**
  * Shared chrome for every eYKON transactional email. Matches the landing
@@ -45,15 +46,15 @@ export function EmailLayout({
               </Link>
             </Text>
             <Text style={footerLegal}>
-              <Link href="https://mvp.eykon.ai/privacy" style={footerLink}>
+              <Link href={`${APP_URL}/privacy`} style={footerLink}>
                 Privacy
               </Link>
               {'  ·  '}
-              <Link href="https://mvp.eykon.ai/terms" style={footerLink}>
+              <Link href={`${APP_URL}/terms`} style={footerLink}>
                 Terms
               </Link>
               {'  ·  '}
-              <Link href="https://mvp.eykon.ai/refund" style={footerLink}>
+              <Link href={`${APP_URL}/refund`} style={footerLink}>
                 Refund
               </Link>
             </Text>

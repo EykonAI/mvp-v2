@@ -1,5 +1,6 @@
 import { Button, Link, Text } from '@react-email/components';
 import { EmailLayout, styles } from './EmailLayout';
+import { APP_URL } from '@/lib/url';
 
 export type WaitlistConfirmationProps = {
   email: string;
@@ -55,8 +56,8 @@ export function WaitlistConfirmation({
       <Button
         href={
           tier === 'pro'
-            ? 'https://mvp.eykon.ai/auth/signup?plan=pro_founding_annual'
-            : 'https://mvp.eykon.ai/auth/signup?plan=enterprise_founding_annual'
+            ? `${APP_URL}/auth/signup?plan=pro_founding_annual`
+            : `${APP_URL}/auth/signup?plan=enterprise_founding_annual`
         }
         style={styles.button}
       >
@@ -72,8 +73,8 @@ export function WaitlistConfirmation({
 
       <Text style={styles.meta}>
         Prefer to read our refund &amp; cancellation terms first?{' '}
-        <Link href="https://mvp.eykon.ai/refund" style={{ color: '#19D0B8' }}>
-          mvp.eykon.ai/refund
+        <Link href={`${APP_URL}/refund`} style={{ color: '#19D0B8' }}>
+          eykon.ai/refund
         </Link>
       </Text>
     </EmailLayout>

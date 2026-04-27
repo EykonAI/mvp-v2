@@ -3,6 +3,7 @@ import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { sendCryptoRenewalReminder } from '@/lib/email/send';
 import { formatUsd, getCryptoVariant } from '@/lib/pricing';
+import { APP_URL } from '@/lib/url';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -82,7 +83,7 @@ export async function POST(req: NextRequest) {
       const variant = getCryptoVariant(sub.variant_id);
       const amountCents = variant?.crypto_total_usd_cents ?? 0;
       const amountUsd = amountCents > 0 ? formatUsd(amountCents) : '—';
-      const renewalUrl = `https://mvp.eykon.ai/checkout?plan=${encodeURIComponent(sub.variant_id)}&renew=1`;
+      const renewalUrl = `${APP_URL}/checkout?plan=${encodeURIComponent(sub.variant_id)}&renew=1`;
 
       const result = await sendCryptoRenewalReminder({
         to: profile.email,
