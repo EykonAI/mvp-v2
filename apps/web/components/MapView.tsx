@@ -1,9 +1,10 @@
 'use client';
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import DeckGL from '@deck.gl/react';
 import { ScatterplotLayer, IconLayer, PathLayer, GeoJsonLayer } from '@deck.gl/layers';
-import Map from 'react-map-gl/maplibre';
+import Map, { type MapRef } from 'react-map-gl/maplibre';
 import { MAP_CONFIG } from '@/lib/constants';
+import type { BBox } from '@/lib/types';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 interface MapViewProps {
@@ -11,11 +12,59 @@ interface MapViewProps {
   vessels: any[];
   conflicts: any[];
   infrastructure: any[];
+  /** Fired ~500ms after the user stops panning/zooming, with the visible bbox. */
+  onViewportChange?: (bbox: BBox) => void;
 }
 
-export default function MapView({ aircraft, vessels, conflicts, infrastructure }: MapViewProps) {
+const VIEWPORT_DEBOUNCE_MS = 500;
+
+export default function MapView({
+  aircraft,
+  vessels,
+  conflicts,
+  infrastructure,
+  onViewportChange,
+}: MapViewProps) {
   const [viewState, setViewState] = useState(MAP_CONFIG.INITIAL_VIEW);
   const [hoverInfo, setHoverInfo] = useState<any>(null);
+
+  const mapRef = useRef<MapRef>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Compute current visible bbox from the underlying MapLibre instance and
+  // emit upward. MapLibre wraps the antimeridian, so getWest()/getEast() can
+  // produce values outside [-180, 180] — clamp to keep server queries sane.
+  const emitBbox = useCallback(() => {
+    const m = mapRef.current?.getMap();
+    if (!m || !onViewportChange) return;
+    const b = m.getBounds();
+    onViewportChange({
+      latmin: Math.max(-90, b.getSouth()),
+      latmax: Math.min(90, b.getNorth()),
+      lonmin: Math.max(-180, b.getWest()),
+      lonmax: Math.min(180, b.getEast()),
+    });
+  }, [onViewportChange]);
+
+  const handleViewStateChange = useCallback(
+    ({ viewState: vs }: any) => {
+      setViewState(vs);
+      if (!onViewportChange) return;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(emitBbox, VIEWPORT_DEBOUNCE_MS);
+    },
+    [emitBbox, onViewportChange],
+  );
+
+  // Fire once on initial map load so the parent gets a starting bbox without
+  // requiring a user pan.
+  const handleMapLoad = useCallback(() => {
+    emitBbox();
+  }, [emitBbox]);
+
+  useEffect(() => () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+  }, []);
 
   // ─── Aircraft Layer (Yellow/Amber) ───
   const aircraftLayer = useMemo(() => new ScatterplotLayer({
@@ -161,14 +210,14 @@ export default function MapView({ aircraft, vessels, conflicts, infrastructure }
     <div className="w-full h-full relative">
       <DeckGL
         viewState={viewState as any}
-        onViewStateChange={({ viewState: vs }: any) => setViewState(vs)}
+        onViewStateChange={handleViewStateChange}
         layers={layers}
         controller={true}
         getCursor={({ isHovering, isDragging }: any) =>
           isDragging ? 'grabbing' : isHovering ? 'pointer' : 'grab'
         }
       >
-        <Map mapStyle={MAP_CONFIG.BASEMAP} />
+        <Map ref={mapRef} mapStyle={MAP_CONFIG.BASEMAP} onLoad={handleMapLoad} />
       </DeckGL>
 
       {renderTooltip()}
