@@ -138,6 +138,16 @@ export interface LayerState {
   lastFetch: string | null;
 }
 
+// ─── Map Viewport BBox ───
+// Emitted by MapView (debounced) and consumed by the page-level fetch loop
+// to scope `/api/*` calls to what's actually on screen.
+export interface BBox {
+  latmin: number;
+  latmax: number;
+  lonmin: number;
+  lonmax: number;
+}
+
 // ─── Chat Message ───
 export interface ChatMessage {
   id: string;
