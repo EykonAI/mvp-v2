@@ -1,7 +1,7 @@
 'use client';
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import DeckGL from '@deck.gl/react';
-import { ScatterplotLayer, IconLayer, PathLayer, GeoJsonLayer } from '@deck.gl/layers';
+import { ScatterplotLayer, IconLayer, PathLayer, GeoJsonLayer, TextLayer } from '@deck.gl/layers';
 import Map, { type MapRef } from 'react-map-gl/maplibre';
 import { MAP_CONFIG } from '@/lib/constants';
 import type { BBox } from '@/lib/types';
@@ -12,6 +12,8 @@ interface MapViewProps {
   vessels: any[];
   conflicts: any[];
   infrastructure: any[];
+  airports: any[];
+  ports: any[];
   /** Fired ~500ms after the user stops panning/zooming, with the visible bbox. */
   onViewportChange?: (bbox: BBox) => void;
 }
@@ -23,6 +25,8 @@ export default function MapView({
   vessels,
   conflicts,
   infrastructure,
+  airports,
+  ports,
   onViewportChange,
 }: MapViewProps) {
   const [viewState, setViewState] = useState(MAP_CONFIG.INITIAL_VIEW);
@@ -139,7 +143,39 @@ export default function MapView({
     updateTriggers: { getPosition: infrastructure.length },
   }), [infrastructure]);
 
-  const layers = [vesselLayer, aircraftLayer, conflictLayer, infraLayer];
+  // ─── Airports Layer (▲ unicode glyph, near-white) ───
+  const airportLayer = useMemo(() => new TextLayer({
+    id: 'airports',
+    data: airports,
+    getPosition: (d: any) => [d.longitude, d.latitude],
+    getText: () => '▲',
+    getSize: 14,
+    getColor: [240, 240, 240, 220],
+    fontFamily: 'sans-serif',
+    characterSet: ['▲'],
+    sizeUnits: 'pixels',
+    pickable: true,
+    onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'airport' } : null),
+    updateTriggers: { getPosition: airports.length },
+  }), [airports]);
+
+  // ─── Ports Layer (⚓ unicode glyph, teal) ───
+  const portLayer = useMemo(() => new TextLayer({
+    id: 'ports',
+    data: ports,
+    getPosition: (d: any) => [d.longitude, d.latitude],
+    getText: () => '⚓',
+    getSize: 14,
+    getColor: [25, 208, 184, 220],
+    fontFamily: 'sans-serif',
+    characterSet: ['⚓'],
+    sizeUnits: 'pixels',
+    pickable: true,
+    onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'port' } : null),
+    updateTriggers: { getPosition: ports.length },
+  }), [ports]);
+
+  const layers = [vesselLayer, aircraftLayer, conflictLayer, infraLayer, airportLayer, portLayer];
 
   // ─── Tooltip Renderer ───
   const renderTooltip = useCallback(() => {
@@ -189,6 +225,48 @@ export default function MapView({
             {object.fuel_type && <div className="text-xs mt-1">Fuel: {object.fuel_type}</div>}
             {object.capacity_mw > 0 && <div className="text-xs">Capacity: {object.capacity_mw.toLocaleString()} MW</div>}
             <div className="text-xs">Status: {object.status}</div>
+          </div>
+        );
+        break;
+      case 'airport':
+        content = (
+          <div>
+            <div className="font-semibold text-white">{object.name}</div>
+            <div className="text-xs text-gray-400 mt-0.5">
+              {(object.type || '').replace('_', ' ')} — {object.iso_country || '—'}
+            </div>
+            <div className="text-xs mt-1">
+              {object.iata_code ? `IATA ${object.iata_code}` : ''}
+              {object.iata_code && object.icao_code ? ' · ' : ''}
+              {object.icao_code ? `ICAO ${object.icao_code}` : ''}
+            </div>
+            {object.municipality && <div className="text-xs">{object.municipality}</div>}
+            {object.elevation_ft != null && (
+              <div className="text-xs">Elev: {object.elevation_ft.toLocaleString()} ft</div>
+            )}
+            {object.scheduled_service && (
+              <div className="text-xs text-gray-400">Scheduled service</div>
+            )}
+          </div>
+        );
+        break;
+      case 'port':
+        content = (
+          <div>
+            <div className="font-semibold text-teal-300">{object.port_name}</div>
+            <div className="text-xs text-gray-400 mt-0.5">
+              {object.country_code || '—'}{object.unlocode ? ` · ${object.unlocode}` : ''}
+            </div>
+            {object.harbor_size && (
+              <div className="text-xs mt-1">
+                Harbor: {{ L: 'Large', M: 'Medium', S: 'Small', V: 'Very small' }[object.harbor_size as 'L'|'M'|'S'|'V'] || object.harbor_size}
+                {object.harbor_type ? ` · ${object.harbor_type}` : ''}
+              </div>
+            )}
+            {object.shelter && <div className="text-xs">Shelter: {object.shelter}</div>}
+            {object.channel_depth_m != null && (
+              <div className="text-xs">Channel: {object.channel_depth_m} m</div>
+            )}
           </div>
         );
         break;

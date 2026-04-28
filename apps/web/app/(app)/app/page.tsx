@@ -41,6 +41,8 @@ export default function Home() {
   const [vessels, setVessels] = useState<any[]>([]);
   const [conflicts, setConflicts] = useState<any[]>([]);
   const [infrastructure, setInfrastructure] = useState<any[]>([]);
+  const [airports, setAirports] = useState<any[]>([]);
+  const [ports, setPorts] = useState<any[]>([]);
 
   // Per-data-source fetch state (one entry per /api/* route).
   const [dataState, setDataState] = useState<Record<DataKey, LayerState>>({
@@ -48,6 +50,8 @@ export default function Home() {
     vessels: initialDataState(),
     conflicts: initialDataState(),
     infrastructure: initialDataState(),
+    airports: initialDataState(),
+    ports: initialDataState(),
   });
 
   // Per-sub-layer visibility — independent of fetch state, since one parent
@@ -95,7 +99,9 @@ export default function Home() {
     name === 'aircraft' ? setAircraft :
     name === 'vessels' ? setVessels :
     name === 'conflicts' ? setConflicts :
-    setInfrastructure;
+    name === 'infrastructure' ? setInfrastructure :
+    name === 'airports' ? setAirports :
+    setPorts;
 
   const fetchLayer = useCallback(
     async (name: DataKey, url: string) => {
@@ -187,7 +193,7 @@ export default function Home() {
   const sublayerCounts = useMemo(() => {
     const out: Record<string, number> = {};
     const sources: Record<DataKey, any[]> = {
-      aircraft, vessels, conflicts, infrastructure,
+      aircraft, vessels, conflicts, infrastructure, airports, ports,
     };
     for (const cat of CATEGORIES) {
       for (const sub of cat.sublayers) {
@@ -199,7 +205,7 @@ export default function Home() {
       }
     }
     return out;
-  }, [aircraft, vessels, conflicts, infrastructure]);
+  }, [aircraft, vessels, conflicts, infrastructure, airports, ports]);
 
   const visibleAircraft = useMemo(
     () => filterByVisibleSublayers(aircraft, 'aircraft', sublayerVisible),
@@ -217,6 +223,16 @@ export default function Home() {
     () => filterByVisibleSublayers(infrastructure, 'infrastructure', sublayerVisible),
     [infrastructure, sublayerVisible],
   );
+  // Airports & ports each have a single live sub-layer with a `() => true`
+  // predicate, so visibility collapses to "is the sub-layer toggle on?".
+  const visibleAirports = useMemo(
+    () => sublayerVisible['infrastructure.airports'] ? airports : [],
+    [airports, sublayerVisible],
+  );
+  const visiblePorts = useMemo(
+    () => sublayerVisible['infrastructure.ports'] ? ports : [],
+    [ports, sublayerVisible],
+  );
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden">
@@ -229,6 +245,8 @@ export default function Home() {
             vessels={visibleVessels}
             conflicts={visibleConflicts}
             infrastructure={visibleInfrastructure}
+            airports={visibleAirports}
+            ports={visiblePorts}
             onViewportChange={setBbox}
           />
           <LayerControls
