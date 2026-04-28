@@ -57,7 +57,7 @@ function parseCsvLine(line: string): string[] {
 type PortRow = {
   id: string;
   port_name: string;
-  country_code: string | null;
+  country: string | null;
   unlocode: string | null;
   harbor_size: string | null;
   harbor_type: string | null;
@@ -68,27 +68,44 @@ type PortRow = {
   longitude: number;
 };
 
-// Defensive field lookup — WPI publishes under varying camelCase / snake_case
-// / SCREAMING_CASE keys depending on which publication branch you fetch.
+// Defensive field lookup — WPI is published under wildly varying schemas:
+// the current Pub 150 CSV uses verbose English headers ("Main Port Name",
+// "Channel Depth (m)"), while older shapefile / arcgis exports use SCREAMING
+// or camelCase. Empty cells are sometimes the literal " " string, so we
+// trim before deciding the key is missing.
 function pick(obj: any, ...keys: string[]): string {
   for (const k of keys) {
-    if (obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return String(obj[k]);
+    const v = obj[k];
+    if (v === undefined || v === null) continue;
+    const s = String(v).trim();
+    if (s !== '') return s;
   }
   return '';
 }
 function num(obj: any, ...keys: string[]): number | null {
   for (const k of keys) {
-    if (obj[k] !== undefined && obj[k] !== null && obj[k] !== '') {
-      const n = parseFloat(String(obj[k]));
-      if (Number.isFinite(n)) return n;
-    }
+    const v = obj[k];
+    if (v === undefined || v === null) continue;
+    const s = String(v).trim();
+    if (s === '') continue;
+    const n = parseFloat(s);
+    if (Number.isFinite(n)) return n;
   }
   return null;
 }
 
 function rowFromObject(o: any): PortRow | null {
-  const id = pick(o, 'id', 'INDEX_NO', 'indexNumber', 'PortNumber', 'portNumber');
-  const name = pick(o, 'port_name', 'PORT_NAME', 'portName', 'Name', 'NAME');
+  // WPI ID is published as a float string ("7950.0", "47620.0") in the
+  // Pub 150 CSV. Strip the .0 so we get a stable text key.
+  const idRaw = pick(o,
+    'id', 'INDEX_NO', 'indexNumber', 'PortNumber', 'portNumber',
+    'World Port Index Number', 'OID_',
+  );
+  const id = idRaw.replace(/\.0+$/, '');
+  const name = pick(o,
+    'port_name', 'PORT_NAME', 'portName', 'Name', 'NAME',
+    'Main Port Name',
+  );
   const lat = num(o, 'latitude', 'LATITUDE', 'lat', 'Latitude');
   const lon = num(o, 'longitude', 'LONGITUDE', 'lng', 'lon', 'Longitude');
   if (!id || !name || lat === null || lon === null) return null;
@@ -96,13 +113,28 @@ function rowFromObject(o: any): PortRow | null {
   return {
     id,
     port_name: name,
-    country_code: (pick(o, 'country_code', 'COUNTRY', 'countryCode', 'Country') || '').slice(0, 2) || null,
-    unlocode: pick(o, 'unlocode', 'UNLOCODE', 'unloCode') || null,
-    harbor_size: pick(o, 'harbor_size', 'HARBORSIZE', 'harborSize') || null,
-    harbor_type: pick(o, 'harbor_type', 'HARBORTYPE', 'harborType') || null,
-    shelter: pick(o, 'shelter', 'SHELTER', 'harborShelter') || null,
-    channel_depth_m: num(o, 'channel_depth_m', 'CHDEPTH', 'channelDepth'),
-    repairs: pick(o, 'repairs', 'REPAIRS', 'repairCode') || null,
+    // Pub 150 stores full country *names* under the "Country Code" header
+    // (NGA misnamed it). Schema column is now `country TEXT` (migration 014).
+    country: pick(o,
+      'country', 'Country',
+      'country_code', 'COUNTRY', 'countryCode', 'Country Code',
+    ) || null,
+    unlocode: pick(o, 'unlocode', 'UNLOCODE', 'unloCode', 'UN/LOCODE') || null,
+    harbor_size: pick(o,
+      'harbor_size', 'HARBORSIZE', 'harborSize', 'Harbor Size',
+    ) || null,
+    harbor_type: pick(o,
+      'harbor_type', 'HARBORTYPE', 'harborType', 'Harbor Type',
+    ) || null,
+    shelter: pick(o,
+      'shelter', 'SHELTER', 'harborShelter', 'Shelter Afforded',
+    ) || null,
+    channel_depth_m: num(o,
+      'channel_depth_m', 'CHDEPTH', 'channelDepth', 'Channel Depth (m)',
+    ),
+    repairs: pick(o,
+      'repairs', 'REPAIRS', 'repairCode', 'Repairs',
+    ) || null,
     latitude: lat,
     longitude: lon,
   };
