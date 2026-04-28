@@ -262,11 +262,11 @@ export default function MapView({
           <div>
             <div className="font-semibold text-teal-300">{object.port_name}</div>
             <div className="text-xs text-gray-400 mt-0.5">
-              {object.country_code || '—'}{object.unlocode ? ` · ${object.unlocode}` : ''}
+              {object.country || '—'}{object.unlocode ? ` · ${object.unlocode}` : ''}
             </div>
             {object.harbor_size && (
               <div className="text-xs mt-1">
-                Harbor: {{ L: 'Large', M: 'Medium', S: 'Small', V: 'Very small' }[object.harbor_size as 'L'|'M'|'S'|'V'] || object.harbor_size}
+                Harbor: {object.harbor_size}
                 {object.harbor_type ? ` · ${object.harbor_type}` : ''}
               </div>
             )}
