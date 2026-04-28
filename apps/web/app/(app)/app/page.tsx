@@ -1,17 +1,22 @@
 'use client';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import TopNav from '@/components/TopNav';
 import ChatPanel from '@/components/ChatPanel';
 import LayerControls from '@/components/LayerControls';
 import { POLL_INTERVALS } from '@/lib/constants';
+import {
+  CATEGORIES,
+  DATA_KEYS,
+  defaultSublayerVisibility,
+  filterByVisibleSublayers,
+  type DataKey,
+} from '@/lib/layer-config';
 import type { LayerState, BBox } from '@/lib/types';
 
-// Dynamic import for Deck.gl (no SSR — requires WebGL)
 const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
 
-const initialLayerState = (): LayerState => ({
-  visible: true,
+const initialDataState = (): LayerState => ({
   loading: false,
   error: null,
   count: 0,
@@ -37,12 +42,23 @@ export default function Home() {
   const [conflicts, setConflicts] = useState<any[]>([]);
   const [infrastructure, setInfrastructure] = useState<any[]>([]);
 
-  const [layers, setLayers] = useState<Record<string, LayerState>>({
-    aircraft: initialLayerState(),
-    vessels: initialLayerState(),
-    conflicts: initialLayerState(),
-    infrastructure: initialLayerState(),
+  // Per-data-source fetch state (one entry per /api/* route).
+  const [dataState, setDataState] = useState<Record<DataKey, LayerState>>({
+    aircraft: initialDataState(),
+    vessels: initialDataState(),
+    conflicts: initialDataState(),
+    infrastructure: initialDataState(),
   });
+
+  // Per-sub-layer visibility — independent of fetch state, since one parent
+  // fetch can serve multiple sub-layer cards (e.g. infrastructure → 6).
+  const [sublayerVisible, setSublayerVisible] = useState<Record<string, boolean>>(
+    defaultSublayerVisibility(),
+  );
+
+  // Accordion: at most one category expanded at a time so the panel never
+  // grows beyond ~11 rows even when Infrastructure is open.
+  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
 
   // Latest viewport bbox emitted by MapView (debounced ~500ms after last
   // user pan/zoom). bboxRef mirrors it so the polling intervals can read
@@ -51,7 +67,7 @@ export default function Home() {
   const bboxRef = useRef<BBox | null>(null);
 
   const intervalsRef = useRef<Record<string, NodeJS.Timeout>>({});
-  // One AbortController per layer — when bbox changes mid-fetch we cancel
+  // One AbortController per data source — when bbox changes mid-fetch we cancel
   // the in-flight request so a slow response can't overwrite the fresh one.
   const abortRefs = useRef<Record<string, AbortController | null>>({});
 
@@ -75,67 +91,69 @@ export default function Home() {
     }
   }, []);
 
+  const setterFor = (name: DataKey) =>
+    name === 'aircraft' ? setAircraft :
+    name === 'vessels' ? setVessels :
+    name === 'conflicts' ? setConflicts :
+    setInfrastructure;
+
   const fetchLayer = useCallback(
-    async (name: string, url: string, setter: (d: any[]) => void) => {
+    async (name: DataKey, url: string) => {
       abortRefs.current[name]?.abort();
       const ctrl = new AbortController();
       abortRefs.current[name] = ctrl;
 
-      setLayers(prev => ({ ...prev, [name]: { ...prev[name], loading: true, error: null } }));
+      setDataState(prev => ({ ...prev, [name]: { ...prev[name], loading: true, error: null } }));
       try {
         const res = await fetch(url, { signal: ctrl.signal });
         if (!res.ok) throw new Error(`${res.status}`);
         const json = await res.json();
         const data = json.data || json || [];
-        setter(data);
-        setLayers(prev => ({
+        setterFor(name)(data);
+        setDataState(prev => ({
           ...prev,
           [name]: {
-            ...prev[name],
             loading: false,
+            error: null,
             count: data.length,
             lastFetch: new Date().toISOString(),
           },
         }));
       } catch (err: any) {
         if (err?.name === 'AbortError') return;
-        setLayers(prev => ({ ...prev, [name]: { ...prev[name], loading: false, error: err.message } }));
+        setDataState(prev => ({
+          ...prev,
+          [name]: { ...prev[name], loading: false, error: err.message },
+        }));
       }
     },
-    []
+    [],
   );
 
   const refetchAll = useCallback(
     (b: BBox | null) => {
-      fetchLayer('aircraft',       buildUrl('aircraft', b),       setAircraft);
-      fetchLayer('vessels',        buildUrl('vessels', b),        setVessels);
-      fetchLayer('conflicts',      buildUrl('conflicts', b),      setConflicts);
-      fetchLayer('infrastructure', buildUrl('infrastructure', b), setInfrastructure);
+      DATA_KEYS.forEach(k => fetchLayer(k, buildUrl(k, b)));
     },
     [fetchLayer],
   );
 
-  // Initial fetch (bbox=null → server defaults to global) + viewport-driven
-  // refetches when MapView emits a new bbox.
   useEffect(() => {
     bboxRef.current = bbox;
     refetchAll(bbox);
   }, [bbox, refetchAll]);
 
-  // Polling intervals stay registered for the component's lifetime and
-  // always read the latest bbox via bboxRef.
   useEffect(() => {
     intervalsRef.current.aircraft = setInterval(
-      () => fetchLayer('aircraft', buildUrl('aircraft', bboxRef.current), setAircraft),
-      POLL_INTERVALS.aircraft
+      () => fetchLayer('aircraft', buildUrl('aircraft', bboxRef.current)),
+      POLL_INTERVALS.aircraft,
     );
     intervalsRef.current.vessels = setInterval(
-      () => fetchLayer('vessels', buildUrl('vessels', bboxRef.current), setVessels),
-      POLL_INTERVALS.vessels
+      () => fetchLayer('vessels', buildUrl('vessels', bboxRef.current)),
+      POLL_INTERVALS.vessels,
     );
     intervalsRef.current.conflicts = setInterval(
-      () => fetchLayer('conflicts', buildUrl('conflicts', bboxRef.current), setConflicts),
-      POLL_INTERVALS.conflicts!
+      () => fetchLayer('conflicts', buildUrl('conflicts', bboxRef.current)),
+      POLL_INTERVALS.conflicts!,
     );
 
     return () => {
@@ -144,9 +162,61 @@ export default function Home() {
     };
   }, [fetchLayer]);
 
-  const toggleLayer = (name: string) => {
-    setLayers(prev => ({ ...prev, [name]: { ...prev[name], visible: !prev[name].visible } }));
-  };
+  const onToggleSublayer = useCallback((key: string) => {
+    setSublayerVisible(prev => ({ ...prev, [key]: !prev[key] }));
+  }, []);
+
+  // Toggle a whole category: if any live sub-layers are on, turn them all off;
+  // otherwise turn them all on. Planned sub-layers stay off — they have no
+  // data path so flipping them on would create a "visible but empty" sub-layer.
+  const onToggleCategory = useCallback((catKey: string) => {
+    const cat = CATEGORIES.find(c => c.key === catKey);
+    if (!cat) return;
+    const live = cat.sublayers.filter(s => s.status === 'live');
+    if (live.length === 0) return;
+    setSublayerVisible(prev => {
+      const anyOn = live.some(s => prev[s.key]);
+      const next = { ...prev };
+      live.forEach(s => { next[s.key] = !anyOn; });
+      return next;
+    });
+  }, []);
+
+  // Per-sub-layer counts: predicate match against the parent's raw data,
+  // independent of visibility so the count stays stable as the user toggles.
+  const sublayerCounts = useMemo(() => {
+    const out: Record<string, number> = {};
+    const sources: Record<DataKey, any[]> = {
+      aircraft, vessels, conflicts, infrastructure,
+    };
+    for (const cat of CATEGORIES) {
+      for (const sub of cat.sublayers) {
+        if (sub.status === 'live' && sub.dataKey && sub.predicate) {
+          out[sub.key] = sources[sub.dataKey].filter(sub.predicate).length;
+        } else {
+          out[sub.key] = 0;
+        }
+      }
+    }
+    return out;
+  }, [aircraft, vessels, conflicts, infrastructure]);
+
+  const visibleAircraft = useMemo(
+    () => filterByVisibleSublayers(aircraft, 'aircraft', sublayerVisible),
+    [aircraft, sublayerVisible],
+  );
+  const visibleVessels = useMemo(
+    () => filterByVisibleSublayers(vessels, 'vessels', sublayerVisible),
+    [vessels, sublayerVisible],
+  );
+  const visibleConflicts = useMemo(
+    () => filterByVisibleSublayers(conflicts, 'conflicts-crisis', sublayerVisible),
+    [conflicts, sublayerVisible],
+  );
+  const visibleInfrastructure = useMemo(
+    () => filterByVisibleSublayers(infrastructure, 'infrastructure', sublayerVisible),
+    [infrastructure, sublayerVisible],
+  );
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden">
@@ -155,13 +225,21 @@ export default function Home() {
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 relative">
           <MapView
-            aircraft={layers.aircraft.visible ? aircraft : []}
-            vessels={layers.vessels.visible ? vessels : []}
-            conflicts={layers.conflicts.visible ? conflicts : []}
-            infrastructure={layers.infrastructure.visible ? infrastructure : []}
+            aircraft={visibleAircraft}
+            vessels={visibleVessels}
+            conflicts={visibleConflicts}
+            infrastructure={visibleInfrastructure}
             onViewportChange={setBbox}
           />
-          <LayerControls layers={layers} onToggle={toggleLayer} />
+          <LayerControls
+            dataState={dataState}
+            sublayerVisible={sublayerVisible}
+            sublayerCounts={sublayerCounts}
+            expandedCategory={expandedCategory}
+            onToggleSublayer={onToggleSublayer}
+            onToggleCategory={onToggleCategory}
+            onExpandCategory={setExpandedCategory}
+          />
         </div>
 
         <div
