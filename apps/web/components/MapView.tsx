@@ -20,9 +20,9 @@ interface MapViewProps {
 }
 
 // Power-plant macro-category. Collapses GIPT's 8 fuel types into three
-// strategic buckets so the globe can encode category at a glance via
-// brand-palette colour + a semantic glyph, with the specific fuel surfaced
-// on hover.
+// strategic buckets:
+//  - renewable + fossil share a glyph (⚡), differ by colour
+//  - nuclear gets its own multi-colour atom icon, rendered via IconLayer
 type PowerCategory = 'renewable' | 'fossil' | 'nuclear' | 'other';
 function powerCategory(fuel: string | null | undefined): PowerCategory {
   switch (fuel) {
@@ -41,20 +41,46 @@ function powerCategory(fuel: string | null | undefined): PowerCategory {
       return 'other';
   }
 }
-// Glyph + colour per category. Colours are the brand-palette CSS variables
-// from globals.css resolved to RGBA: --green / --amber / --violet.
-const POWER_CATEGORY_GLYPH: Record<PowerCategory, string> = {
-  renewable: '⚡',
-  fossil:    '⛁',
-  nuclear:   '⚛',
-  other:     '·',
-};
+// Colours: turquoise (--teal #19D0B8) for renewable, amber-yellow for fossil.
+// Nuclear is rendered via the atom IconLayer, not coloured here.
 const POWER_CATEGORY_COLOR: Record<PowerCategory, [number, number, number, number]> = {
-  renewable: [ 74, 191, 138, 230],  // var(--green)  #4ABF8A
-  fossil:    [212, 162,  76, 230],  // var(--amber)  #D4A24C
-  nuclear:   [139, 127, 216, 240],  // var(--violet) #8B7FD8
+  renewable: [ 25, 208, 184, 240],  // var(--teal)   #19D0B8
+  fossil:    [245, 200,  66, 240],  // bright yellow  #F5C842
+  nuclear:   [255, 255, 255, 240],  // unused (IconLayer handles nuclear)
   other:     [120, 200,  90, 200],
 };
+
+// Inline SVG of an atom — two crossed orbital ellipses (turquoise) + nucleus
+// and electrons (yellow). Embedded as a data URI so we don't ship a separate
+// asset. Drawn at 32×32 with a 16,16 origin so it scales cleanly.
+const NUCLEAR_ATOM_SVG = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <g transform="translate(16,16)" stroke="#19D0B8" stroke-width="2" fill="none">
+    <ellipse rx="13" ry="5" transform="rotate(45)"/>
+    <ellipse rx="13" ry="5" transform="rotate(-45)"/>
+  </g>
+  <g fill="#F5C842" stroke="none">
+    <circle cx="16" cy="16" r="3"/>
+    <circle cx="25.2" cy="6.8" r="2"/>
+    <circle cx="6.8" cy="25.2" r="2"/>
+  </g>
+</svg>
+`.trim();
+const NUCLEAR_ATOM_ICON = {
+  url: `data:image/svg+xml;utf8,${encodeURIComponent(NUCLEAR_ATOM_SVG)}`,
+  width: 32,
+  height: 32,
+  mask: false,
+};
+
+// Capacity-proportional pixel size, sqrt-damped so a 5 GW reactor isn't 50×
+// the size of a 100 MW plant. Range: 12–28 px so dots stay readable but
+// scale meaningfully with capacity.
+function powerSize(capacity_mw: any): number {
+  const c = Number(capacity_mw);
+  if (!Number.isFinite(c) || c <= 0) return 12;
+  return Math.max(12, Math.min(28, Math.sqrt(c) * 1.1));
+}
 
 const VIEWPORT_DEBOUNCE_MS = 500;
 
@@ -221,26 +247,52 @@ export default function MapView({
     updateTriggers: { getPosition: ports.length },
   }), [ports]);
 
-  // ─── Power Plants Layer (GEM GIPT — three macro-categories) ───
-  // Glyph + brand colour per category: ⚡ green = renewable,
-  // ⛁ amber = fossil, ⚛ violet = nuclear. Fixed 8 px so density stays
-  // calm; capacity-based zoom thinning happens server-side.
+  // ─── Power Plants — split into nuclear + non-nuclear ───
+  // Non-nuclear (renewable + fossil) share the ⚡ glyph and differ only by
+  // colour. Nuclear renders via a multi-colour atom IconLayer so the orbits
+  // (turquoise) and electrons (yellow) come through.
+  const { nuclearPlants, nonNuclearPlants } = useMemo(() => {
+    const nuclear: any[] = [];
+    const nonNuclear: any[] = [];
+    for (const p of powerPlants) {
+      if (p.fuel_type === 'nuclear') nuclear.push(p);
+      else nonNuclear.push(p);
+    }
+    return { nuclearPlants: nuclear, nonNuclearPlants: nonNuclear };
+  }, [powerPlants]);
+
   const powerPlantLayer = useMemo(() => new TextLayer({
     id: 'power-plants',
-    data: powerPlants,
+    data: nonNuclearPlants,
     getPosition: (d: any) => [d.longitude, d.latitude],
-    getText: (d: any) => POWER_CATEGORY_GLYPH[powerCategory(d.fuel_type)],
-    getSize: 8,
+    getText: () => '⚡',
+    getSize: (d: any) => powerSize(d.capacity_mw),
     getColor: (d: any) => POWER_CATEGORY_COLOR[powerCategory(d.fuel_type)],
     fontFamily: 'sans-serif',
-    characterSet: ['⚡', '⛁', '⚛', '·'],
+    characterSet: ['⚡'],
     sizeUnits: 'pixels',
     pickable: true,
     onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'power_plant' } : null),
-    updateTriggers: { getPosition: powerPlants.length, getText: powerPlants.length, getColor: powerPlants.length },
-  }), [powerPlants]);
+    updateTriggers: {
+      getPosition: nonNuclearPlants.length,
+      getColor: nonNuclearPlants.length,
+      getSize: nonNuclearPlants.length,
+    },
+  }), [nonNuclearPlants]);
 
-  const layers = [vesselLayer, aircraftLayer, conflictLayer, infraLayer, powerPlantLayer, airportLayer, portLayer];
+  const nuclearLayer = useMemo(() => new IconLayer({
+    id: 'power-plants-nuclear',
+    data: nuclearPlants,
+    getPosition: (d: any) => [d.longitude, d.latitude],
+    getIcon: () => NUCLEAR_ATOM_ICON,
+    getSize: (d: any) => powerSize(d.capacity_mw) * 1.4, // atom needs a touch more pixel real-estate than ⚡ to read
+    sizeUnits: 'pixels',
+    pickable: true,
+    onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'power_plant' } : null),
+    updateTriggers: { getPosition: nuclearPlants.length, getSize: nuclearPlants.length },
+  }), [nuclearPlants]);
+
+  const layers = [vesselLayer, aircraftLayer, conflictLayer, infraLayer, powerPlantLayer, nuclearLayer, airportLayer, portLayer];
 
   // ─── Tooltip Renderer ───
   const renderTooltip = useCallback(() => {

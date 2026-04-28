@@ -40,16 +40,15 @@ export async function GET(req: NextRequest) {
       // queries ("show retired plants in Germany since 2015").
       query = query.eq('status', statusOverride || 'operating');
 
-      // Three-tier capacity thinning by zoom (verified against the
-      // March 2026 GIPT release distribution):
-      //   zoom < 3  → ≥1 GW    ~1,000 plants  (world view: only the giants)
-      //   zoom 3-5  → ≥500 MW  ~4,300 plants  (continental view)
-      //   zoom ≥ 5  → ≥100 MW  ~20,000 plants (regional+ view)
-      // Pure capacity rule, no fuel-type exception — at world zoom small
-      // nuclear units (most reactors are 600-900 MW per unit) won't show.
+      // Two-tier capacity thinning:
+      //   zoom < 3  → ≥500 MW (~4,300 plants)
+      //   zoom ≥ 3  → ≥200 MW (~10,000 plants)
+      // Nuclear is exempted from the capacity floor — every operating
+      // reactor shows at every zoom level since they're geopolitically
+      // significant regardless of unit size (most are 600-900 MW per unit).
       const z = Number.isFinite(zoom) ? zoom : 0;
-      const minMW = z < 3 ? 1000 : z < 5 ? 500 : 100;
-      query = query.gte('capacity_mw', minMW);
+      const minMW = z < 3 ? 500 : 200;
+      query = query.or(`capacity_mw.gte.${minMW},fuel_type.eq.nuclear`);
     } else if (statusOverride) {
       query = query.eq('status', statusOverride);
     }
