@@ -162,12 +162,15 @@ export interface CategoryDef {
 
 // ─── Map Viewport BBox ───
 // Emitted by MapView (debounced) and consumed by the page-level fetch loop
-// to scope `/api/*` calls to what's actually on screen.
+// to scope `/api/*` calls to what's actually on screen. `zoom` is included
+// for layers that thin themselves at low zoom (e.g. airports/ports show only
+// the biggest tier when the whole world is visible).
 export interface BBox {
   latmin: number;
   latmax: number;
   lonmin: number;
   lonmax: number;
+  zoom?: number;
 }
 
 // ─── Chat Message ───

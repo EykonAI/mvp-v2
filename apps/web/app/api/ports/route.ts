@@ -16,6 +16,8 @@ export async function GET(req: NextRequest) {
     const lon_min = parseFloat(params.get('lon_min') || '-180');
     const lon_max = parseFloat(params.get('lon_max') || '180');
     const harborSize = params.get('harbor_size'); // L | M | S | V
+    const zoomStr = params.get('zoom');
+    const zoom = zoomStr !== null ? parseFloat(zoomStr) : NaN;
     const limit = Math.min(parseInt(params.get('limit') || '5000'), 20000);
 
     const supabase = createServerSupabase();
@@ -28,7 +30,13 @@ export async function GET(req: NextRequest) {
       .lte('longitude', lon_max)
       .limit(limit);
 
-    if (harborSize) query = query.eq('harbor_size', harborSize);
+    if (harborSize) {
+      query = query.eq('harbor_size', harborSize);
+    } else if (Number.isFinite(zoom) && zoom < 3) {
+      // Globe view: thin to Large harbors only. WPI codes harbor_size as
+      // L | M | S | V (Very small) — `L` is the major commercial bracket.
+      query = query.eq('harbor_size', 'L');
+    }
 
     const { data, error } = await query;
     if (error) {
