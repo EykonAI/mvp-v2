@@ -34,7 +34,7 @@ function buildUrl(layer: string, b: BBox | null): string {
     return `/api/vessels?latmin=${b.latmin}&latmax=${b.latmax}&lonmin=${b.lonmin}&lonmax=${b.lonmax}`;
   }
   let url = `/api/${layer}?lat_min=${b.latmin}&lat_max=${b.latmax}&lon_min=${b.lonmin}&lon_max=${b.lonmax}`;
-  if ((layer === 'airports' || layer === 'ports') && typeof b.zoom === 'number') {
+  if ((layer === 'airports' || layer === 'ports' || layer === 'power-plants') && typeof b.zoom === 'number') {
     url += `&zoom=${b.zoom.toFixed(2)}`;
   }
   return url;
@@ -49,6 +49,7 @@ export default function Home() {
   const [infrastructure, setInfrastructure] = useState<any[]>([]);
   const [airports, setAirports] = useState<any[]>([]);
   const [ports, setPorts] = useState<any[]>([]);
+  const [powerPlants, setPowerPlants] = useState<any[]>([]);
 
   // Per-data-source fetch state (one entry per /api/* route).
   const [dataState, setDataState] = useState<Record<DataKey, LayerState>>({
@@ -58,6 +59,7 @@ export default function Home() {
     infrastructure: initialDataState(),
     airports: initialDataState(),
     ports: initialDataState(),
+    'power-plants': initialDataState(),
   });
 
   // Per-sub-layer visibility — independent of fetch state, since one parent
@@ -107,7 +109,8 @@ export default function Home() {
     name === 'conflicts' ? setConflicts :
     name === 'infrastructure' ? setInfrastructure :
     name === 'airports' ? setAirports :
-    setPorts;
+    name === 'ports' ? setPorts :
+    setPowerPlants;
 
   const fetchLayer = useCallback(
     async (name: DataKey, url: string) => {
@@ -200,6 +203,7 @@ export default function Home() {
     const out: Record<string, number> = {};
     const sources: Record<DataKey, any[]> = {
       aircraft, vessels, conflicts, infrastructure, airports, ports,
+      'power-plants': powerPlants,
     };
     for (const cat of CATEGORIES) {
       for (const sub of cat.sublayers) {
@@ -211,7 +215,7 @@ export default function Home() {
       }
     }
     return out;
-  }, [aircraft, vessels, conflicts, infrastructure, airports, ports]);
+  }, [aircraft, vessels, conflicts, infrastructure, airports, ports, powerPlants]);
 
   const visibleAircraft = useMemo(
     () => filterByVisibleSublayers(aircraft, 'aircraft', sublayerVisible),
@@ -239,6 +243,10 @@ export default function Home() {
     () => sublayerVisible['infrastructure.ports'] ? ports : [],
     [ports, sublayerVisible],
   );
+  const visiblePowerPlants = useMemo(
+    () => sublayerVisible['infrastructure.power-plants'] ? powerPlants : [],
+    [powerPlants, sublayerVisible],
+  );
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden">
@@ -253,6 +261,7 @@ export default function Home() {
             infrastructure={visibleInfrastructure}
             airports={visibleAirports}
             ports={visiblePorts}
+            powerPlants={visiblePowerPlants}
             onViewportChange={setBbox}
           />
           <LayerControls
