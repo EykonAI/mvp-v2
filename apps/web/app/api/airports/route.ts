@@ -19,6 +19,8 @@ export async function GET(req: NextRequest) {
     const lon_min = parseFloat(params.get('lon_min') || '-180');
     const lon_max = parseFloat(params.get('lon_max') || '180');
     const includeMinor = params.get('include_minor') === 'true';
+    const zoomStr = params.get('zoom');
+    const zoom = zoomStr !== null ? parseFloat(zoomStr) : NaN;
     const limit = Math.min(parseInt(params.get('limit') || '8000'), 20000);
 
     const supabase = createServerSupabase();
@@ -32,9 +34,15 @@ export async function GET(req: NextRequest) {
       .limit(limit);
 
     if (!includeMinor) {
-      // "Significant" = large airports (always) + medium airports with
-      // scheduled commercial service. Yields ~7,500 worldwide.
-      query = query.or('type.eq.large_airport,and(type.eq.medium_airport,scheduled_service.eq.true)');
+      if (Number.isFinite(zoom) && zoom < 3) {
+        // Globe / continental view — only the ~1,200 large hubs, otherwise
+        // the map drowns in white triangles over the US and Europe.
+        query = query.eq('type', 'large_airport');
+      } else {
+        // Regional and closer — large airports + medium airports with
+        // scheduled commercial service (~3,300 worldwide).
+        query = query.or('type.eq.large_airport,and(type.eq.medium_airport,scheduled_service.eq.true)');
+      }
     }
 
     const { data, error } = await query;

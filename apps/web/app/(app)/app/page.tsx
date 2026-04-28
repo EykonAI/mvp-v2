@@ -23,15 +23,21 @@ const initialDataState = (): LayerState => ({
   lastFetch: null,
 });
 
-// Build a /api/<layer> URL with bbox params. Three of the four routes use
-// snake_case (lat_min/lon_max); /api/vessels uses the camel-mashed form
-// (latmin/lonmax). Keep the inconsistency contained here.
+// Build a /api/<layer> URL with bbox params. Three of the four legacy routes
+// use snake_case (lat_min/lon_max); /api/vessels uses the camel-mashed form
+// (latmin/lonmax). Keep the inconsistency contained here. Airports and ports
+// also forward the current zoom so the server can thin to a top-tier subset
+// at globe view.
 function buildUrl(layer: string, b: BBox | null): string {
   if (!b) return `/api/${layer}`;
   if (layer === 'vessels') {
     return `/api/vessels?latmin=${b.latmin}&latmax=${b.latmax}&lonmin=${b.lonmin}&lonmax=${b.lonmax}`;
   }
-  return `/api/${layer}?lat_min=${b.latmin}&lat_max=${b.latmax}&lon_min=${b.lonmin}&lon_max=${b.lonmax}`;
+  let url = `/api/${layer}?lat_min=${b.latmin}&lat_max=${b.latmax}&lon_min=${b.lonmin}&lon_max=${b.lonmax}`;
+  if ((layer === 'airports' || layer === 'ports') && typeof b.zoom === 'number') {
+    url += `&zoom=${b.zoom.toFixed(2)}`;
+  }
+  return url;
 }
 
 export default function Home() {

@@ -38,6 +38,8 @@ export default function MapView({
   // Compute current visible bbox from the underlying MapLibre instance and
   // emit upward. MapLibre wraps the antimeridian, so getWest()/getEast() can
   // produce values outside [-180, 180] — clamp to keep server queries sane.
+  // Zoom is forwarded too, so server-side layer thinning (e.g. airports
+  // showing only large hubs at world zoom) can run on the same fetch.
   const emitBbox = useCallback(() => {
     const m = mapRef.current?.getMap();
     if (!m || !onViewportChange) return;
@@ -47,6 +49,7 @@ export default function MapView({
       latmax: Math.min(90, b.getNorth()),
       lonmin: Math.max(-180, b.getWest()),
       lonmax: Math.min(180, b.getEast()),
+      zoom: m.getZoom(),
     });
   }, [onViewportChange]);
 
@@ -144,12 +147,15 @@ export default function MapView({
   }), [infrastructure]);
 
   // ─── Airports Layer (▲ unicode glyph, near-white) ───
+  // Server thins to large hubs at zoom < 3, so the dot count stays sane
+  // even at globe view. 10px is small enough not to overlap on continental
+  // density but still readable on retina.
   const airportLayer = useMemo(() => new TextLayer({
     id: 'airports',
     data: airports,
     getPosition: (d: any) => [d.longitude, d.latitude],
     getText: () => '▲',
-    getSize: 14,
+    getSize: 10,
     getColor: [240, 240, 240, 220],
     fontFamily: 'sans-serif',
     characterSet: ['▲'],
@@ -160,12 +166,13 @@ export default function MapView({
   }), [airports]);
 
   // ─── Ports Layer (⚓ unicode glyph, teal) ───
+  // Same thinning approach: harbor_size='L' only at zoom < 3.
   const portLayer = useMemo(() => new TextLayer({
     id: 'ports',
     data: ports,
     getPosition: (d: any) => [d.longitude, d.latitude],
     getText: () => '⚓',
-    getSize: 14,
+    getSize: 10,
     getColor: [25, 208, 184, 220],
     fontFamily: 'sans-serif',
     characterSet: ['⚓'],
@@ -299,22 +306,6 @@ export default function MapView({
       </DeckGL>
 
       {renderTooltip()}
-
-      {/* Map Legend */}
-      <div className="absolute bottom-4 left-4 bg-eykon-card/90 backdrop-blur-sm border border-eykon-border rounded-lg p-3 z-40">
-        <div className="text-[10px] font-semibold text-eykon-muted uppercase tracking-wider mb-2">Layers</div>
-        {[
-          { color: 'bg-yellow-400', label: 'Aircraft (ADS-B)' },
-          { color: 'bg-blue-400', label: 'Vessels (AIS)' },
-          { color: 'bg-red-400', label: 'Conflicts (ACLED)' },
-          { color: 'bg-green-400', label: 'Infrastructure' },
-        ].map(({ color, label }) => (
-          <div key={label} className="flex items-center gap-2 mb-1">
-            <div className={`w-2.5 h-2.5 rounded-full ${color}`} />
-            <span className="text-[11px] text-gray-300">{label}</span>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
