@@ -129,13 +129,35 @@ export interface AnomalyFlag {
   created_at: string;
 }
 
-// ─── Layer State ───
+// ─── Per-data-source fetch state ───
+// One per /api/* route the globe consumes (aircraft, vessels, conflicts,
+// infrastructure). Sub-layer visibility is held separately so a single fetch
+// can back multiple sub-layer cards (e.g. infrastructure → 6 sub-layers).
 export interface LayerState {
-  visible: boolean;
   loading: boolean;
   error: string | null;
   count: number;
   lastFetch: string | null;
+}
+
+// ─── Layer hierarchy ───
+export type SubLayerStatus = 'live' | 'planned';
+
+export interface SubLayerDef {
+  key: string;                // e.g. 'aircraft.civilian'
+  label: string;
+  status: SubLayerStatus;
+  dataKey?: 'aircraft' | 'vessels' | 'conflicts' | 'infrastructure';
+  predicate?: (item: any) => boolean;
+  comingSoon?: string;        // tooltip text for `planned` sub-layers
+}
+
+export interface CategoryDef {
+  key: string;                // e.g. 'aircraft', 'conflicts-crisis'
+  label: string;
+  color: string;              // CSS variable
+  icon: string;
+  sublayers: SubLayerDef[];
 }
 
 // ─── Map Viewport BBox ───
