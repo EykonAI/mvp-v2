@@ -74,12 +74,14 @@ const NUCLEAR_ATOM_ICON = {
 };
 
 // Capacity-proportional pixel size, sqrt-damped so a 5 GW reactor isn't 50×
-// the size of a 100 MW plant. Range: 12–28 px so dots stay readable but
-// scale meaningfully with capacity.
+// the size of a 100 MW plant. Range tuned to 6–14 px after the world-zoom
+// view at 12–28 px composed into a stripey blanket — the ⚡ glyph has too
+// many angles to overlap cleanly at large sizes. Atom icons get a 1.4×
+// multiplier so the orbits stay readable.
 function powerSize(capacity_mw: any): number {
   const c = Number(capacity_mw);
-  if (!Number.isFinite(c) || c <= 0) return 12;
-  return Math.max(12, Math.min(28, Math.sqrt(c) * 1.1));
+  if (!Number.isFinite(c) || c <= 0) return 6;
+  return Math.max(6, Math.min(14, Math.sqrt(c) * 0.4));
 }
 
 const VIEWPORT_DEBOUNCE_MS = 500;
