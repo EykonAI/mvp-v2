@@ -40,17 +40,16 @@ export async function GET(req: NextRequest) {
       // queries ("show retired plants in Germany since 2015").
       query = query.eq('status', statusOverride || 'operating');
 
-      // Capacity thinning by zoom. Threshold rationale (verified against
-      // the March 2026 release):
-      //   zoom < 3  → ≥1 GW OR nuclear OR geothermal      ~1,700 plants
-      //   zoom ≥ 3  → ≥100 MW OR nuclear OR geothermal   ~20,000 plants
-      // Nuclear and geothermal stay visible regardless of capacity because
-      // they are strategic regardless of size.
-      if (Number.isFinite(zoom) && zoom < 3) {
-        query = query.or('capacity_mw.gte.1000,fuel_type.eq.nuclear,fuel_type.eq.geothermal');
-      } else {
-        query = query.or('capacity_mw.gte.100,fuel_type.eq.nuclear,fuel_type.eq.geothermal');
-      }
+      // Three-tier capacity thinning by zoom (verified against the
+      // March 2026 GIPT release distribution):
+      //   zoom < 3  → ≥1 GW    ~1,000 plants  (world view: only the giants)
+      //   zoom 3-5  → ≥500 MW  ~4,300 plants  (continental view)
+      //   zoom ≥ 5  → ≥100 MW  ~20,000 plants (regional+ view)
+      // Pure capacity rule, no fuel-type exception — at world zoom small
+      // nuclear units (most reactors are 600-900 MW per unit) won't show.
+      const z = Number.isFinite(zoom) ? zoom : 0;
+      const minMW = z < 3 ? 1000 : z < 5 ? 500 : 100;
+      query = query.gte('capacity_mw', minMW);
     } else if (statusOverride) {
       query = query.eq('status', statusOverride);
     }

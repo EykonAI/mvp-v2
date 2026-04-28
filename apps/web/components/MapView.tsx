@@ -19,20 +19,42 @@ interface MapViewProps {
   onViewportChange?: (bbox: BBox) => void;
 }
 
-// GIPT fuel-type colour palette. Each entry maps a power_plants.fuel_type
-// value to an RGBA tuple. Keeps the globe legible at a glance — coal vs solar
-// vs nuclear are immediately distinguishable.
-const POWER_FUEL_COLORS: Record<string, [number, number, number, number]> = {
-  'coal':                [140, 140, 140, 220],
-  'oil/gas':             [255, 140,  60, 220],
-  'nuclear':             [ 80, 150, 255, 230],
-  'utility-scale solar': [255, 220,  60, 220],
-  'wind':                [120, 230, 220, 220],
-  'hydropower':          [ 60, 130, 230, 220],
-  'geothermal':          [220,  80,  80, 220],
-  'bioenergy':           [120, 200,  90, 220],
+// Power-plant macro-category. Collapses GIPT's 8 fuel types into three
+// strategic buckets so the globe can encode category at a glance via
+// brand-palette colour + a semantic glyph, with the specific fuel surfaced
+// on hover.
+type PowerCategory = 'renewable' | 'fossil' | 'nuclear' | 'other';
+function powerCategory(fuel: string | null | undefined): PowerCategory {
+  switch (fuel) {
+    case 'utility-scale solar':
+    case 'wind':
+    case 'hydropower':
+    case 'geothermal':
+    case 'bioenergy':
+      return 'renewable';
+    case 'coal':
+    case 'oil/gas':
+      return 'fossil';
+    case 'nuclear':
+      return 'nuclear';
+    default:
+      return 'other';
+  }
+}
+// Glyph + colour per category. Colours are the brand-palette CSS variables
+// from globals.css resolved to RGBA: --green / --amber / --violet.
+const POWER_CATEGORY_GLYPH: Record<PowerCategory, string> = {
+  renewable: '⚡',
+  fossil:    '⛁',
+  nuclear:   '⚛',
+  other:     '·',
 };
-const POWER_FUEL_FALLBACK: [number, number, number, number] = [120, 200, 90, 220];
+const POWER_CATEGORY_COLOR: Record<PowerCategory, [number, number, number, number]> = {
+  renewable: [ 74, 191, 138, 230],  // var(--green)  #4ABF8A
+  fossil:    [212, 162,  76, 230],  // var(--amber)  #D4A24C
+  nuclear:   [139, 127, 216, 240],  // var(--violet) #8B7FD8
+  other:     [120, 200,  90, 200],
+};
 
 const VIEWPORT_DEBOUNCE_MS = 500;
 
@@ -199,21 +221,23 @@ export default function MapView({
     updateTriggers: { getPosition: ports.length },
   }), [ports]);
 
-  // ─── Power Plants Layer (GEM GIPT — coloured by fuel type) ───
-  // Radius scales with capacity (sqrt-damped so a 1 GW plant isn't 30× the
-  // size of a 100 MW one) and clamps to a sensible pixel range so dots stay
-  // visible at any zoom. Fuel-type colour comes from POWER_FUEL_COLORS.
-  const powerPlantLayer = useMemo(() => new ScatterplotLayer({
+  // ─── Power Plants Layer (GEM GIPT — three macro-categories) ───
+  // Glyph + brand colour per category: ⚡ green = renewable,
+  // ⛁ amber = fossil, ⚛ violet = nuclear. Fixed 8 px so density stays
+  // calm; capacity-based zoom thinning happens server-side.
+  const powerPlantLayer = useMemo(() => new TextLayer({
     id: 'power-plants',
     data: powerPlants,
     getPosition: (d: any) => [d.longitude, d.latitude],
-    getFillColor: (d: any) => POWER_FUEL_COLORS[d.fuel_type] || POWER_FUEL_FALLBACK,
-    getRadius: (d: any) => Math.sqrt(Number(d.capacity_mw) || 50) * 6000,
-    radiusMinPixels: 3,
-    radiusMaxPixels: 14,
+    getText: (d: any) => POWER_CATEGORY_GLYPH[powerCategory(d.fuel_type)],
+    getSize: 8,
+    getColor: (d: any) => POWER_CATEGORY_COLOR[powerCategory(d.fuel_type)],
+    fontFamily: 'sans-serif',
+    characterSet: ['⚡', '⛁', '⚛', '·'],
+    sizeUnits: 'pixels',
     pickable: true,
     onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'power_plant' } : null),
-    updateTriggers: { getPosition: powerPlants.length, getFillColor: powerPlants.length, getRadius: powerPlants.length },
+    updateTriggers: { getPosition: powerPlants.length, getText: powerPlants.length, getColor: powerPlants.length },
   }), [powerPlants]);
 
   const layers = [vesselLayer, aircraftLayer, conflictLayer, infraLayer, powerPlantLayer, airportLayer, portLayer];
@@ -269,10 +293,12 @@ export default function MapView({
           </div>
         );
         break;
-      case 'power_plant':
+      case 'power_plant': {
+        const cat = powerCategory(object.fuel_type);
+        const [r, g, b] = POWER_CATEGORY_COLOR[cat];
         content = (
           <div>
-            <div className="font-semibold" style={{ color: 'rgb(120, 200, 90)' }}>{object.plant_name}</div>
+            <div className="font-semibold" style={{ color: `rgb(${r}, ${g}, ${b})` }}>{object.plant_name}</div>
             <div className="text-xs text-gray-400 mt-0.5">
               {object.unit_name ? `Unit ${object.unit_name} · ` : ''}{object.fuel_type || '—'}
               {object.technology ? ` · ${object.technology}` : ''}
@@ -291,6 +317,7 @@ export default function MapView({
           </div>
         );
         break;
+      }
       case 'airport':
         content = (
           <div>
