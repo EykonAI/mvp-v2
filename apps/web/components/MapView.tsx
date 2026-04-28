@@ -14,9 +14,25 @@ interface MapViewProps {
   infrastructure: any[];
   airports: any[];
   ports: any[];
+  powerPlants: any[];
   /** Fired ~500ms after the user stops panning/zooming, with the visible bbox. */
   onViewportChange?: (bbox: BBox) => void;
 }
+
+// GIPT fuel-type colour palette. Each entry maps a power_plants.fuel_type
+// value to an RGBA tuple. Keeps the globe legible at a glance — coal vs solar
+// vs nuclear are immediately distinguishable.
+const POWER_FUEL_COLORS: Record<string, [number, number, number, number]> = {
+  'coal':                [140, 140, 140, 220],
+  'oil/gas':             [255, 140,  60, 220],
+  'nuclear':             [ 80, 150, 255, 230],
+  'utility-scale solar': [255, 220,  60, 220],
+  'wind':                [120, 230, 220, 220],
+  'hydropower':          [ 60, 130, 230, 220],
+  'geothermal':          [220,  80,  80, 220],
+  'bioenergy':           [120, 200,  90, 220],
+};
+const POWER_FUEL_FALLBACK: [number, number, number, number] = [120, 200, 90, 220];
 
 const VIEWPORT_DEBOUNCE_MS = 500;
 
@@ -27,6 +43,7 @@ export default function MapView({
   infrastructure,
   airports,
   ports,
+  powerPlants,
   onViewportChange,
 }: MapViewProps) {
   const [viewState, setViewState] = useState(MAP_CONFIG.INITIAL_VIEW);
@@ -182,7 +199,24 @@ export default function MapView({
     updateTriggers: { getPosition: ports.length },
   }), [ports]);
 
-  const layers = [vesselLayer, aircraftLayer, conflictLayer, infraLayer, airportLayer, portLayer];
+  // ─── Power Plants Layer (GEM GIPT — coloured by fuel type) ───
+  // Radius scales with capacity (sqrt-damped so a 1 GW plant isn't 30× the
+  // size of a 100 MW one) and clamps to a sensible pixel range so dots stay
+  // visible at any zoom. Fuel-type colour comes from POWER_FUEL_COLORS.
+  const powerPlantLayer = useMemo(() => new ScatterplotLayer({
+    id: 'power-plants',
+    data: powerPlants,
+    getPosition: (d: any) => [d.longitude, d.latitude],
+    getFillColor: (d: any) => POWER_FUEL_COLORS[d.fuel_type] || POWER_FUEL_FALLBACK,
+    getRadius: (d: any) => Math.sqrt(Number(d.capacity_mw) || 50) * 6000,
+    radiusMinPixels: 3,
+    radiusMaxPixels: 14,
+    pickable: true,
+    onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'power_plant' } : null),
+    updateTriggers: { getPosition: powerPlants.length, getFillColor: powerPlants.length, getRadius: powerPlants.length },
+  }), [powerPlants]);
+
+  const layers = [vesselLayer, aircraftLayer, conflictLayer, infraLayer, powerPlantLayer, airportLayer, portLayer];
 
   // ─── Tooltip Renderer ───
   const renderTooltip = useCallback(() => {
@@ -232,6 +266,28 @@ export default function MapView({
             {object.fuel_type && <div className="text-xs mt-1">Fuel: {object.fuel_type}</div>}
             {object.capacity_mw > 0 && <div className="text-xs">Capacity: {object.capacity_mw.toLocaleString()} MW</div>}
             <div className="text-xs">Status: {object.status}</div>
+          </div>
+        );
+        break;
+      case 'power_plant':
+        content = (
+          <div>
+            <div className="font-semibold" style={{ color: 'rgb(120, 200, 90)' }}>{object.plant_name}</div>
+            <div className="text-xs text-gray-400 mt-0.5">
+              {object.unit_name ? `Unit ${object.unit_name} · ` : ''}{object.fuel_type || '—'}
+              {object.technology ? ` · ${object.technology}` : ''}
+            </div>
+            {object.capacity_mw != null && (
+              <div className="text-xs mt-1">Capacity: {Number(object.capacity_mw).toLocaleString()} MW</div>
+            )}
+            <div className="text-xs">Status: {object.status || '—'}</div>
+            {object.start_year && <div className="text-xs">Online since {object.start_year}</div>}
+            {object.country && (
+              <div className="text-xs text-gray-400 mt-1">
+                {object.country}{object.subnational_unit ? ` · ${object.subnational_unit}` : ''}
+              </div>
+            )}
+            {object.owner && <div className="text-xs text-gray-400 max-w-[260px] truncate">{object.owner}</div>}
           </div>
         );
         break;

@@ -68,7 +68,7 @@ export const CATEGORIES: CategoryDef[] = [
     icon: '⚡',
     sublayers: [
       { key: 'infrastructure.power-plants', label: 'Power plants', status: 'live',
-        dataKey: 'infrastructure', predicate: f => f?.infra_type === 'power_plant' },
+        dataKey: 'power-plants', predicate: () => true },
       { key: 'infrastructure.refineries', label: 'Refineries', status: 'live',
         dataKey: 'infrastructure', predicate: f => f?.infra_type === 'refinery' },
       { key: 'infrastructure.pipelines', label: 'Pipelines', status: 'live',
@@ -83,9 +83,9 @@ export const CATEGORIES: CategoryDef[] = [
   },
 ];
 
-export type DataKey = 'aircraft' | 'vessels' | 'conflicts' | 'infrastructure' | 'airports' | 'ports';
+export type DataKey = 'aircraft' | 'vessels' | 'conflicts' | 'infrastructure' | 'airports' | 'ports' | 'power-plants';
 
-export const DATA_KEYS: DataKey[] = ['aircraft', 'vessels', 'conflicts', 'infrastructure', 'airports', 'ports'];
+export const DATA_KEYS: DataKey[] = ['aircraft', 'vessels', 'conflicts', 'infrastructure', 'airports', 'ports', 'power-plants'];
 
 /**
  * Default visibility: all live sub-layers on, all planned sub-layers off.
