@@ -13,6 +13,10 @@ export async function executeToolCall(toolName: string, toolInput: Record<string
       case 'query_aircraft':            return await queryAircraft(toolInput);
       case 'query_conflicts':           return await queryConflicts(toolInput);
       case 'query_infrastructure':      return await queryInfrastructure(toolInput);
+      case 'query_power_plants':        return await queryPowerPlants(toolInput);
+      case 'query_pipelines':           return await queryPipelines(toolInput);
+      case 'query_airports':            return await queryAirports(toolInput);
+      case 'query_ports':               return await queryPorts(toolInput);
       case 'query_weather':             return await queryWeather(toolInput);
       case 'query_agent_reports':       return await queryAgentReports(toolInput);
 
@@ -125,6 +129,186 @@ async function queryInfrastructure(input: Record<string, any>): Promise<string> 
   const data = await res.json();
   const items = (data.data || data || []).slice(0, 50);
   return JSON.stringify({ count: items.length, facilities: items });
+}
+
+// GEM Global Integrated Power Tracker (~127k operating units).
+async function queryPowerPlants(input: Record<string, any>): Promise<string> {
+  const params = new URLSearchParams({
+    lat_min: String(input.lat_min),
+    lat_max: String(input.lat_max),
+    lon_min: String(input.lon_min),
+    lon_max: String(input.lon_max),
+  });
+  if (input.fuel) params.set('fuel', String(input.fuel));
+  if (input.status) params.set('status', String(input.status));
+  if (input.include_minor) params.set('include_minor', 'true');
+  const limit = Math.min(500, Math.max(1, Number(input.limit ?? 50)));
+  const res = await fetch(`${APP_URL()}/api/power-plants?${params.toString()}`);
+  const data = await res.json();
+  let plants = (data.data || []).slice(0, limit);
+  if (input.min_capacity_mw !== undefined) {
+    const min = Number(input.min_capacity_mw);
+    plants = plants.filter((p: any) => Number(p.capacity_mw) >= min);
+  }
+  return JSON.stringify({
+    count: plants.length,
+    provider: data.provider,
+    attribution: data.attribution,
+    plants: plants.map((p: any) => ({
+      id: p.id,
+      plant_name: p.plant_name,
+      unit_name: p.unit_name,
+      fuel: p.fuel_type,
+      technology: p.technology,
+      capacity_mw: p.capacity_mw,
+      status: p.status,
+      start_year: p.start_year,
+      country: p.country,
+      subnational: p.subnational_unit,
+      owner: p.owner,
+      operator: p.operator,
+      lat: p.latitude,
+      lon: p.longitude,
+      wiki: p.gem_wiki_url,
+    })),
+  });
+}
+
+// GEM Global Gas Infrastructure Tracker — pipelines + LNG terminals.
+// Strips the heavy route_geojson before returning so the AI gets summary
+// metadata rather than 100s of KB of geometry per row.
+async function queryPipelines(input: Record<string, any>): Promise<string> {
+  const params = new URLSearchParams({
+    lat_min: String(input.lat_min),
+    lat_max: String(input.lat_max),
+    lon_min: String(input.lon_min),
+    lon_max: String(input.lon_max),
+  });
+  if (input.status) params.set('status', String(input.status));
+  if (input.facility_type) params.set('facility_type', String(input.facility_type));
+  if (input.include_minor) params.set('include_minor', 'true');
+  const limit = Math.min(500, Math.max(1, Number(input.limit ?? 50)));
+  const res = await fetch(`${APP_URL()}/api/pipelines?${params.toString()}`);
+  const data = await res.json();
+  const items = (data.data || []).slice(0, limit);
+  return JSON.stringify({
+    count: items.length,
+    pipelines_count: data.pipelines_count,
+    terminals_count: data.terminals_count,
+    provider: data.provider,
+    attribution: data.attribution,
+    items: items.map((it: any) => {
+      if (it.infra_subtype === 'lng_terminal') {
+        return {
+          infra_subtype: 'lng_terminal',
+          id: it.id,
+          terminal_name: it.terminal_name,
+          facility_type: it.facility_type,
+          fuel: it.fuel,
+          status: it.status,
+          country: it.country,
+          capacity_mtpa: it.capacity_mtpa,
+          capacity_bcm_y: it.capacity_bcm_y,
+          start_year: it.start_year,
+          offshore: it.offshore,
+          floating: it.floating,
+          owner: it.owner,
+          operator: it.operator,
+          lat: it.latitude,
+          lon: it.longitude,
+          wiki: it.wiki_url,
+        };
+      }
+      return {
+        infra_subtype: 'pipeline',
+        id: it.id,
+        pipeline_name: it.pipeline_name,
+        segment_name: it.segment_name,
+        fuel: it.fuel,
+        status: it.status,
+        countries: it.countries,
+        start_country: it.start_country,
+        end_country: it.end_country,
+        capacity_bcm_y: it.capacity_bcm_y,
+        length_km: it.length_km,
+        start_year: it.start_year,
+        owner: it.owner,
+        route_accuracy: it.route_accuracy,
+        wiki: it.wiki_url,
+        // route_geojson intentionally omitted — too large for tool response budget.
+      };
+    }),
+  });
+}
+
+// OurAirports (~85k total; default ~7,500 commercially significant).
+async function queryAirports(input: Record<string, any>): Promise<string> {
+  const params = new URLSearchParams({
+    lat_min: String(input.lat_min),
+    lat_max: String(input.lat_max),
+    lon_min: String(input.lon_min),
+    lon_max: String(input.lon_max),
+  });
+  if (input.include_minor) params.set('include_minor', 'true');
+  const limit = Math.min(500, Math.max(1, Number(input.limit ?? 50)));
+  const res = await fetch(`${APP_URL()}/api/airports?${params.toString()}`);
+  const data = await res.json();
+  let airports = (data.data || []);
+  if (input.iso_country) {
+    const code = String(input.iso_country).toUpperCase();
+    airports = airports.filter((a: any) => (a.iso_country || '').toUpperCase() === code);
+  }
+  airports = airports.slice(0, limit);
+  return JSON.stringify({
+    count: airports.length,
+    provider: data.provider,
+    airports: airports.map((a: any) => ({
+      id: a.id,
+      name: a.name,
+      ident: a.ident,
+      iata: a.iata_code,
+      icao: a.icao_code,
+      type: a.type,
+      country: a.iso_country,
+      municipality: a.municipality,
+      elevation_ft: a.elevation_ft,
+      scheduled_service: a.scheduled_service,
+      lat: a.latitude,
+      lon: a.longitude,
+    })),
+  });
+}
+
+// NGA World Port Index (~3,800 commercial seaports).
+async function queryPorts(input: Record<string, any>): Promise<string> {
+  const params = new URLSearchParams({
+    lat_min: String(input.lat_min),
+    lat_max: String(input.lat_max),
+    lon_min: String(input.lon_min),
+    lon_max: String(input.lon_max),
+  });
+  if (input.harbor_size) params.set('harbor_size', String(input.harbor_size));
+  const limit = Math.min(500, Math.max(1, Number(input.limit ?? 50)));
+  const res = await fetch(`${APP_URL()}/api/ports?${params.toString()}`);
+  const data = await res.json();
+  const ports = (data.data || []).slice(0, limit);
+  return JSON.stringify({
+    count: ports.length,
+    provider: data.provider,
+    ports: ports.map((p: any) => ({
+      id: p.id,
+      port_name: p.port_name,
+      country: p.country,
+      unlocode: p.unlocode,
+      harbor_size: p.harbor_size,
+      harbor_type: p.harbor_type,
+      shelter: p.shelter,
+      channel_depth_m: p.channel_depth_m,
+      repairs: p.repairs,
+      lat: p.latitude,
+      lon: p.longitude,
+    })),
+  });
 }
 
 async function queryWeather(input: Record<string, any>): Promise<string> {
