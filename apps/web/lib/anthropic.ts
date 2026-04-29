@@ -74,7 +74,7 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'query_infrastructure',
-    description: 'Query energy infrastructure (power plants, pipelines, refineries) within a bounding box.',
+    description: 'Legacy mixed-infrastructure feed (refineries, mines, sample data). For specific asset classes prefer query_power_plants / query_pipelines / query_airports / query_ports.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -83,6 +83,80 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
         lon_min: { type: 'number' },
         lon_max: { type: 'number' },
         fuel_type: { type: 'string' },
+      },
+      required: ['lat_min', 'lat_max', 'lon_min', 'lon_max'],
+    },
+  },
+  {
+    name: 'query_power_plants',
+    description:
+      'Query unit-level power plants from the Global Energy Monitor — Global Integrated Power Tracker (GIPT). ~127k operating units worldwide spanning coal, oil/gas, nuclear, geothermal, bioenergy, utility-scale solar, wind, and hydropower. Each row carries plant name, fuel type, capacity (MW), status, start year, country, owner. Use for questions like "nuclear plants in France above 1 GW", "coal capacity in India", "operating bioenergy plants in Brazil". Pass include_minor=true to bypass the operating-only filter (e.g. to include proposed/retired). Pass fuel to slice to a single fuel_type.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        lat_min: { type: 'number' },
+        lat_max: { type: 'number' },
+        lon_min: { type: 'number' },
+        lon_max: { type: 'number' },
+        fuel:   { type: 'string', description: 'utility-scale solar | wind | hydropower | geothermal | bioenergy | nuclear | coal | oil/gas' },
+        status: { type: 'string', description: 'operating (default) | construction | proposed | retired | cancelled | shelved | mothballed' },
+        min_capacity_mw: { type: 'number', description: 'Minimum capacity in MW' },
+        include_minor: { type: 'boolean', description: 'If true, drops the default operating-only filter and capacity floor.' },
+        limit: { type: 'number', description: 'Default 50, max 500.' },
+      },
+      required: ['lat_min', 'lat_max', 'lon_min', 'lon_max'],
+    },
+  },
+  {
+    name: 'query_pipelines',
+    description:
+      'Query gas pipelines and LNG terminals from the Global Energy Monitor — Global Gas Infrastructure Tracker (GGIT). Returns a mixed list of pipeline routes (with start/end country, length, capacity bcm/y, status, owner) and LNG terminals (with facility_type=import|export, capacity in mtpa, country). Use for questions like "Russian gas pipelines into Europe", "LNG export terminals in Qatar", "pipelines crossing into China". Each row has infra_subtype=pipeline|lng_terminal so you can disambiguate. Pass include_minor=true to bypass the operating-only default.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        lat_min: { type: 'number' },
+        lat_max: { type: 'number' },
+        lon_min: { type: 'number' },
+        lon_max: { type: 'number' },
+        status: { type: 'string', description: 'operating (default) | construction | proposed | retired | cancelled | shelved | mothballed' },
+        facility_type: { type: 'string', description: 'For LNG terminals only: import | export.' },
+        include_minor: { type: 'boolean', description: 'If true, drops the default operating-only filter.' },
+        limit: { type: 'number', description: 'Default 50, max 500.' },
+      },
+      required: ['lat_min', 'lat_max', 'lon_min', 'lon_max'],
+    },
+  },
+  {
+    name: 'query_airports',
+    description:
+      'Query airports from OurAirports. Default returns the ~7,500 commercially-significant airports (large airports + medium airports with scheduled service); pass include_minor=true for the full ~85k including small airfields, heliports, etc. Each row carries name, type, IATA/ICAO codes, country, municipality, elevation, scheduled_service. Use for questions like "airports near recent conflict events", "ICAO code for Heathrow", "all scheduled-service airports in Ukraine".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        lat_min: { type: 'number' },
+        lat_max: { type: 'number' },
+        lon_min: { type: 'number' },
+        lon_max: { type: 'number' },
+        iso_country: { type: 'string', description: 'Two-letter ISO country code (e.g. "FR", "US"). Filter optional.' },
+        include_minor: { type: 'boolean', description: 'If true, returns all 85k airports including heliports, small airfields, closed.' },
+        limit: { type: 'number', description: 'Default 50, max 500.' },
+      },
+      required: ['lat_min', 'lat_max', 'lon_min', 'lon_max'],
+    },
+  },
+  {
+    name: 'query_ports',
+    description:
+      'Query commercial seaports from the NGA World Port Index (~3,800 ports worldwide). Each row carries port name, country, harbor size (Large/Medium/Small/Very Small), harbor type, shelter rating, channel depth in metres, repair facilities. Use for questions like "ports near Bab-el-Mandeb", "deepwater ports in West Africa", "all large harbors in the Mediterranean". Pass harbor_size to slice to a single tier.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        lat_min: { type: 'number' },
+        lat_max: { type: 'number' },
+        lon_min: { type: 'number' },
+        lon_max: { type: 'number' },
+        harbor_size: { type: 'string', description: 'Large | Medium | Small | Very Small. Filter optional.' },
+        limit: { type: 'number', description: 'Default 50, max 500.' },
       },
       required: ['lat_min', 'lat_max', 'lon_min', 'lon_max'],
     },
@@ -240,7 +314,13 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
 ];
 
 // ─── System Prompt ───────────────────────────────────────────
-export const CONVERSATIONAL_SYSTEM_PROMPT = `You are the eYKON.ai geopolitical-intelligence analyst. You have access to live feeds (aircraft, vessels, conflicts, infrastructure, weather, agent reports) AND to the Intelligence Center:
+export const CONVERSATIONAL_SYSTEM_PROMPT = `You are the eYKON.ai geopolitical-intelligence analyst. You have access to live feeds (aircraft, vessels, conflicts, weather, agent reports) AND to dedicated infrastructure tools:
+  • query_power_plants  — GEM GIPT (~127k operating units, all fuel types incl. nuclear)
+  • query_pipelines     — GEM GGIT (gas pipelines + LNG terminals)
+  • query_airports      — OurAirports (~7,500 significant; ~85k with include_minor)
+  • query_ports         — NGA World Port Index (~3,800 commercial seaports)
+  • query_infrastructure — legacy mixed feed; prefer the dedicated tools above for energy / aviation / maritime questions.
+AND to the Intelligence Center:
   • posture scores per pinned theatre
   • convergences (anomaly-of-anomalies)
   • shadow-fleet vessel leads + indicator breakdowns
