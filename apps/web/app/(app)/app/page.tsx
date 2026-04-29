@@ -50,6 +50,7 @@ export default function Home() {
   const [airports, setAirports] = useState<any[]>([]);
   const [ports, setPorts] = useState<any[]>([]);
   const [powerPlants, setPowerPlants] = useState<any[]>([]);
+  const [pipelines, setPipelines] = useState<any[]>([]);
 
   // Per-data-source fetch state (one entry per /api/* route).
   const [dataState, setDataState] = useState<Record<DataKey, LayerState>>({
@@ -60,6 +61,7 @@ export default function Home() {
     airports: initialDataState(),
     ports: initialDataState(),
     'power-plants': initialDataState(),
+    pipelines: initialDataState(),
   });
 
   // Per-sub-layer visibility — independent of fetch state, since one parent
@@ -110,7 +112,8 @@ export default function Home() {
     name === 'infrastructure' ? setInfrastructure :
     name === 'airports' ? setAirports :
     name === 'ports' ? setPorts :
-    setPowerPlants;
+    name === 'power-plants' ? setPowerPlants :
+    setPipelines;
 
   const fetchLayer = useCallback(
     async (name: DataKey, url: string) => {
@@ -204,6 +207,7 @@ export default function Home() {
     const sources: Record<DataKey, any[]> = {
       aircraft, vessels, conflicts, infrastructure, airports, ports,
       'power-plants': powerPlants,
+      pipelines,
     };
     for (const cat of CATEGORIES) {
       for (const sub of cat.sublayers) {
@@ -215,7 +219,7 @@ export default function Home() {
       }
     }
     return out;
-  }, [aircraft, vessels, conflicts, infrastructure, airports, ports, powerPlants]);
+  }, [aircraft, vessels, conflicts, infrastructure, airports, ports, powerPlants, pipelines]);
 
   const visibleAircraft = useMemo(
     () => filterByVisibleSublayers(aircraft, 'aircraft', sublayerVisible),
@@ -247,6 +251,10 @@ export default function Home() {
     () => sublayerVisible['infrastructure.power-plants'] ? powerPlants : [],
     [powerPlants, sublayerVisible],
   );
+  const visiblePipelines = useMemo(
+    () => sublayerVisible['infrastructure.pipelines'] ? pipelines : [],
+    [pipelines, sublayerVisible],
+  );
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden">
@@ -262,6 +270,7 @@ export default function Home() {
             airports={visibleAirports}
             ports={visiblePorts}
             powerPlants={visiblePowerPlants}
+            pipelines={visiblePipelines}
             onViewportChange={setBbox}
           />
           <LayerControls
