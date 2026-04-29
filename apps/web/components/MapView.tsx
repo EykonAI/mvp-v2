@@ -15,8 +15,27 @@ interface MapViewProps {
   airports: any[];
   ports: any[];
   powerPlants: any[];
+  pipelines: any[];
   /** Fired ~500ms after the user stops panning/zooming, with the visible bbox. */
   onViewportChange?: (bbox: BBox) => void;
+}
+
+// GGIT pipeline + LNG-terminal palette: soft peach-yellow (#FFD6A5) for both,
+// distinguished by shape — lines for pipelines, ⛁ glyph for terminals.
+const PIPELINE_COLOR: [number, number, number, number] = [255, 214, 165, 220];
+const LNG_TERMINAL_COLOR: [number, number, number, number] = [255, 214, 165, 240];
+
+// Capacity-proportional pipeline width: sqrt-damped, 1.5–4 px range.
+function pipelineWidth(capacity_bcm_y: any): number {
+  const c = Number(capacity_bcm_y);
+  if (!Number.isFinite(c) || c <= 0) return 1.5;
+  return Math.max(1.5, Math.min(4, Math.sqrt(c) * 0.5));
+}
+// LNG terminal glyph size: capacity-scaled, 10–16 px.
+function terminalSize(capacity_mtpa: any): number {
+  const c = Number(capacity_mtpa);
+  if (!Number.isFinite(c) || c <= 0) return 10;
+  return Math.max(10, Math.min(16, Math.sqrt(c) * 2));
 }
 
 // Power-plant macro-category. Collapses GIPT's 8 fuel types into three
@@ -94,6 +113,7 @@ export default function MapView({
   airports,
   ports,
   powerPlants,
+  pipelines,
   onViewportChange,
 }: MapViewProps) {
   const [viewState, setViewState] = useState(MAP_CONFIG.INITIAL_VIEW);
@@ -294,7 +314,72 @@ export default function MapView({
     updateTriggers: { getPosition: nuclearPlants.length, getSize: nuclearPlants.length },
   }), [nuclearPlants]);
 
-  const layers = [vesselLayer, aircraftLayer, conflictLayer, infraLayer, powerPlantLayer, nuclearLayer, airportLayer, portLayer];
+  // ─── Pipelines (PathLayer) — split MultiLineString into one entry per
+  // sub-line so the layer renders all routes uniformly. LNG terminals come
+  // through the same `pipelines` prop tagged with infra_subtype, so we
+  // partition the array first.
+  const { pipelinePaths, lngTerminalPoints } = useMemo(() => {
+    const paths: any[] = [];
+    const points: any[] = [];
+    for (const item of pipelines) {
+      if (item.infra_subtype === 'lng_terminal') {
+        points.push(item);
+        continue;
+      }
+      const geom = item.route_geojson;
+      if (!geom) continue;
+      if (geom.type === 'LineString') {
+        paths.push({ ...item, path: geom.coordinates });
+      } else if (geom.type === 'MultiLineString') {
+        for (const line of geom.coordinates) paths.push({ ...item, path: line });
+      } else if (geom.type === 'GeometryCollection') {
+        for (const inner of geom.geometries || []) {
+          if (inner.type === 'LineString') paths.push({ ...item, path: inner.coordinates });
+          else if (inner.type === 'MultiLineString') {
+            for (const line of inner.coordinates) paths.push({ ...item, path: line });
+          }
+        }
+      }
+    }
+    return { pipelinePaths: paths, lngTerminalPoints: points };
+  }, [pipelines]);
+
+  const pipelineLayer = useMemo(() => new PathLayer({
+    id: 'gas-pipelines',
+    data: pipelinePaths,
+    getPath: (d: any) => d.path,
+    getColor: PIPELINE_COLOR,
+    getWidth: (d: any) => pipelineWidth(d.capacity_bcm_y),
+    widthUnits: 'pixels',
+    widthMinPixels: 1,
+    widthMaxPixels: 4,
+    pickable: true,
+    onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'pipeline' } : null),
+    updateTriggers: { getPath: pipelinePaths.length, getWidth: pipelinePaths.length },
+  }), [pipelinePaths]);
+
+  const lngTerminalLayer = useMemo(() => new TextLayer({
+    id: 'lng-terminals',
+    data: lngTerminalPoints,
+    getPosition: (d: any) => [d.longitude, d.latitude],
+    getText: () => '⛁',
+    getSize: (d: any) => terminalSize(d.capacity_mtpa),
+    getColor: LNG_TERMINAL_COLOR,
+    fontFamily: 'sans-serif',
+    characterSet: ['⛁'],
+    sizeUnits: 'pixels',
+    pickable: true,
+    onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'lng_terminal' } : null),
+    updateTriggers: {
+      getPosition: lngTerminalPoints.length,
+      getSize: lngTerminalPoints.length,
+    },
+  }), [lngTerminalPoints]);
+
+  // Pipelines render under everything else (lines as background); LNG
+  // terminals sit alongside other point markers. Hover-pick order is
+  // last → first, so terminals win over pipelines when overlapping.
+  const layers = [pipelineLayer, vesselLayer, aircraftLayer, conflictLayer, infraLayer, powerPlantLayer, nuclearLayer, airportLayer, portLayer, lngTerminalLayer];
 
   // ─── Tooltip Renderer ───
   const renderTooltip = useCallback(() => {
@@ -344,6 +429,57 @@ export default function MapView({
             {object.fuel_type && <div className="text-xs mt-1">Fuel: {object.fuel_type}</div>}
             {object.capacity_mw > 0 && <div className="text-xs">Capacity: {object.capacity_mw.toLocaleString()} MW</div>}
             <div className="text-xs">Status: {object.status}</div>
+          </div>
+        );
+        break;
+      case 'pipeline':
+        content = (
+          <div>
+            <div className="font-semibold" style={{ color: 'rgb(255, 214, 165)' }}>{object.pipeline_name}</div>
+            <div className="text-xs text-gray-400 mt-0.5">
+              {object.segment_name ? `${object.segment_name} · ` : ''}{object.fuel || '—'}
+              {object.route_accuracy ? ` · route ${object.route_accuracy}` : ''}
+            </div>
+            {object.capacity_bcm_y != null && (
+              <div className="text-xs mt-1">Capacity: {Number(object.capacity_bcm_y).toFixed(1)} bcm/y</div>
+            )}
+            {object.length_km != null && (
+              <div className="text-xs">Length: {Math.round(Number(object.length_km)).toLocaleString()} km</div>
+            )}
+            <div className="text-xs">Status: {object.status || '—'}</div>
+            {object.start_year && <div className="text-xs">Online since {object.start_year}</div>}
+            {(object.start_country || object.end_country) && (
+              <div className="text-xs text-gray-400 mt-1">
+                {object.start_country || '—'} → {object.end_country || '—'}
+              </div>
+            )}
+            {object.owner && <div className="text-xs text-gray-400 max-w-[260px] truncate">{object.owner}</div>}
+          </div>
+        );
+        break;
+      case 'lng_terminal':
+        content = (
+          <div>
+            <div className="font-semibold" style={{ color: 'rgb(255, 214, 165)' }}>{object.terminal_name}</div>
+            <div className="text-xs text-gray-400 mt-0.5">
+              {object.facility_type ? `${object.facility_type} terminal · ` : 'LNG terminal · '}{object.fuel || 'LNG'}
+            </div>
+            {object.capacity_mtpa != null && (
+              <div className="text-xs mt-1">Capacity: {Number(object.capacity_mtpa).toFixed(1)} mtpa
+                {object.capacity_bcm_y != null ? ` (${Number(object.capacity_bcm_y).toFixed(1)} bcm/y)` : ''}
+              </div>
+            )}
+            <div className="text-xs">Status: {object.status || '—'}</div>
+            {object.start_year && <div className="text-xs">Online since {object.start_year}</div>}
+            {object.country && (
+              <div className="text-xs text-gray-400 mt-1">{object.country}</div>
+            )}
+            {(object.offshore || object.floating) && (
+              <div className="text-xs text-gray-400">
+                {object.floating ? 'Floating' : object.offshore ? 'Offshore' : ''}
+              </div>
+            )}
+            {object.operator && <div className="text-xs text-gray-400 max-w-[260px] truncate">{object.operator}</div>}
           </div>
         );
         break;
