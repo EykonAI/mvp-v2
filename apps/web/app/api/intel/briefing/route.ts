@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
 
     const anthropic = getAnthropic();
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-4-5',
       max_tokens: 1600,
       system: `You are the eYKON.ai briefing generator. Produce a briefing tailored to the requested persona. Cite sources (provider + timestamp) in every factual claim.\n\nPersona frame: ${frame}`,
       messages: [
