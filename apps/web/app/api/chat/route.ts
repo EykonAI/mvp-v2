@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
       .map((m: any) => ({ role: m.role, content: m.content }));
 
     let response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-4-5',
       max_tokens: 4096,
       system: CONVERSATIONAL_SYSTEM_PROMPT,
       tools: CLAUDE_TOOLS,
@@ -136,7 +136,7 @@ export async function POST(req: NextRequest) {
       allMessages.push({ role: 'user', content: toolResults });
 
       response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-6',
+        model: 'claude-sonnet-4-5',
         max_tokens: 4096,
         system: CONVERSATIONAL_SYSTEM_PROMPT,
         tools: CLAUDE_TOOLS,
