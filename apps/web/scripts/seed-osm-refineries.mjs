@@ -13,16 +13,17 @@
  *   node scripts/seed-osm-refineries.mjs
  *
  * Optional env:
- *   OVERPASS_URL  override (default: https://overpass.kumi.systems/api/interpreter
- *                 — Austrian non-profit mirror with no rate limits per the
- *                 2026-Q2 provider deltas memo).
+ *   OVERPASS_URL          override (default: https://overpass-api.de/api/interpreter
+ *                         — canonical instance; the Kumi mirror is more often
+ *                         overloaded with HTTP 504s).
+ *   OVERPASS_USER_AGENT   override the polite UA string (defaults to a
+ *                         project identifier so mirrors don't 429 us).
  *
- * OSM tagging covered by the query:
- *   - man_made=works   + product=oil  (~250 results)
- *   - industrial=oil   + landuse=industrial
+ * OSM tagging covered (refinery-only — see code for rationale):
+ *   - man_made=petroleum_refinery   (canonical, growing usage)
  *   - industrial=oil_refinery
- *   - man_made=petroleum_refinery   (newer tag, growing usage)
- * Total expected: ~1,000–1,500 globally.
+ *   - industrial=refinery
+ * Total expected: ~700–1,000 globally.
  */
 import { createClient } from '@supabase/supabase-js';
 
@@ -33,7 +34,10 @@ if (!SUPABASE_URL || !SERVICE_ROLE) {
   process.exit(1);
 }
 
-const OVERPASS_URL = process.env.OVERPASS_URL || 'https://overpass.kumi.systems/api/interpreter';
+// Default to the canonical overpass-api.de endpoint. The Kumi mirror is
+// less consistently available (frequent HTTP 504 under load); set
+// OVERPASS_URL to override if you want to use it or another mirror.
+const OVERPASS_URL = process.env.OVERPASS_URL || 'https://overpass-api.de/api/interpreter';
 // Most Overpass mirrors return HTTP 429 to clients without a meaningful
 // User-Agent. This identifies our project + provides a contact route per
 // Overpass etiquette (https://wiki.openstreetmap.org/wiki/Overpass_API#API_usage_policy).
@@ -43,15 +47,21 @@ const supabase = createClient(SUPABASE_URL, SERVICE_ROLE, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-// Overpass QL — combines four common refinery taggings, returns geometries
-// inline (`out center`) so we can compute centroids without a second pass.
+// Overpass QL — refinery-only tags. The earlier draft also queried
+// `industrial=oil` and `man_made=works`+`product=oil` (substring match), which
+// returned ~125k features globally — most of them oilfields, vegetable-oil
+// mills, and paint factories rather than petroleum refineries. The three
+// tags below are the canonical refinery markers per the OSM wiki and yield
+// a tight set (~700–1,000 features globally) of actual refineries.
+//
+// `out center` returns a centroid for ways/relations so we don't need to
+// resolve member nodes.
 const OVERPASS_QUERY = `
 [out:json][timeout:180];
 (
   nwr["man_made"="petroleum_refinery"];
   nwr["industrial"="oil_refinery"];
-  nwr["man_made"="works"]["product"~"oil|petroleum|refined",i];
-  nwr["industrial"="oil"];
+  nwr["industrial"="refinery"];
 );
 out center tags;
 `.trim();
