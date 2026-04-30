@@ -15,14 +15,17 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 600;
 
-const DEFAULT_OVERPASS_URL = 'https://overpass.kumi.systems/api/interpreter';
+const DEFAULT_OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+// Refinery-only tags. See seed-osm-refineries.mjs for the rationale —
+// the earlier broader query (industrial=oil + man_made=works) returned
+// ~125k features mostly composed of oilfields, vegetable-oil mills, and
+// paint factories, not refineries.
 const OVERPASS_QUERY = `
 [out:json][timeout:180];
 (
   nwr["man_made"="petroleum_refinery"];
   nwr["industrial"="oil_refinery"];
-  nwr["man_made"="works"]["product"~"oil|petroleum|refined",i];
-  nwr["industrial"="oil"];
+  nwr["industrial"="refinery"];
 );
 out center tags;
 `.trim();
