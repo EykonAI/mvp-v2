@@ -70,7 +70,7 @@ export const CATEGORIES: CategoryDef[] = [
       { key: 'infrastructure.power-plants', label: 'Power plants', status: 'live',
         dataKey: 'power-plants', predicate: () => true },
       { key: 'infrastructure.refineries', label: 'Refineries', status: 'live',
-        dataKey: 'infrastructure', predicate: f => f?.infra_type === 'refinery' },
+        dataKey: 'refineries', predicate: () => true },
       { key: 'infrastructure.pipelines', label: 'Pipelines', status: 'live',
         dataKey: 'pipelines', predicate: () => true },
       { key: 'infrastructure.airports', label: 'Airports', status: 'live',
@@ -78,14 +78,14 @@ export const CATEGORIES: CategoryDef[] = [
       { key: 'infrastructure.ports', label: 'Ports', status: 'live',
         dataKey: 'ports', predicate: () => true },
       { key: 'infrastructure.mines', label: 'Mines', status: 'live',
-        dataKey: 'infrastructure', predicate: f => f?.infra_type === 'mine' },
+        dataKey: 'mines', predicate: () => true },
     ],
   },
 ];
 
-export type DataKey = 'aircraft' | 'vessels' | 'conflicts' | 'infrastructure' | 'airports' | 'ports' | 'power-plants' | 'pipelines';
+export type DataKey = 'aircraft' | 'vessels' | 'conflicts' | 'airports' | 'ports' | 'power-plants' | 'pipelines' | 'refineries' | 'mines';
 
-export const DATA_KEYS: DataKey[] = ['aircraft', 'vessels', 'conflicts', 'infrastructure', 'airports', 'ports', 'power-plants', 'pipelines'];
+export const DATA_KEYS: DataKey[] = ['aircraft', 'vessels', 'conflicts', 'airports', 'ports', 'power-plants', 'pipelines', 'refineries', 'mines'];
 
 /**
  * Default visibility: all live sub-layers on, all planned sub-layers off.
