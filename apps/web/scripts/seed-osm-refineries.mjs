@@ -34,6 +34,10 @@ if (!SUPABASE_URL || !SERVICE_ROLE) {
 }
 
 const OVERPASS_URL = process.env.OVERPASS_URL || 'https://overpass.kumi.systems/api/interpreter';
+// Most Overpass mirrors return HTTP 429 to clients without a meaningful
+// User-Agent. This identifies our project + provides a contact route per
+// Overpass etiquette (https://wiki.openstreetmap.org/wiki/Overpass_API#API_usage_policy).
+const USER_AGENT = process.env.OVERPASS_USER_AGENT || 'eYKON.ai/1.0 (geopolitical intelligence platform; https://eykon.ai)';
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE, {
   auth: { autoRefreshToken: false, persistSession: false },
@@ -115,7 +119,10 @@ const t0 = Date.now();
 
 const res = await fetch(OVERPASS_URL, {
   method: 'POST',
-  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  headers: {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'User-Agent': USER_AGENT,
+  },
   body: `data=${encodeURIComponent(OVERPASS_QUERY)}`,
 });
 if (!res.ok) {

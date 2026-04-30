@@ -100,9 +100,16 @@ async function handle(req: NextRequest) {
   const startedAt = Date.now();
   try {
     const url = process.env.OVERPASS_URL || DEFAULT_OVERPASS_URL;
+    // Overpass mirrors return HTTP 429 to clients without a meaningful
+    // User-Agent. Identifies our project + provides a contact route.
+    const userAgent = process.env.OVERPASS_USER_AGENT
+      || 'eYKON.ai/1.0 (geopolitical intelligence platform; https://eykon.ai)';
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': userAgent,
+      },
       body: `data=${encodeURIComponent(OVERPASS_QUERY)}`,
       cache: 'no-store',
     });
