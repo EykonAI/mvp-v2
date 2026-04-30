@@ -11,11 +11,12 @@ interface MapViewProps {
   aircraft: any[];
   vessels: any[];
   conflicts: any[];
-  infrastructure: any[];
   airports: any[];
   ports: any[];
   powerPlants: any[];
   pipelines: any[];
+  refineries: any[];
+  mines: any[];
   /** Fired ~500ms after the user stops panning/zooming, with the visible bbox. */
   onViewportChange?: (bbox: BBox) => void;
 }
@@ -109,11 +110,12 @@ export default function MapView({
   aircraft,
   vessels,
   conflicts,
-  infrastructure,
   airports,
   ports,
   powerPlants,
   pipelines,
+  refineries,
+  mines,
   onViewportChange,
 }: MapViewProps) {
   const [viewState, setViewState] = useState(MAP_CONFIG.INITIAL_VIEW);
@@ -209,29 +211,37 @@ export default function MapView({
     updateTriggers: { getPosition: conflicts.length, getFillColor: conflicts.length },
   }), [conflicts]);
 
-  // ─── Infrastructure Layer (Green/Teal icons by type) ───
-  const infraLayer = useMemo(() => new ScatterplotLayer({
-    id: 'infrastructure',
-    data: infrastructure,
+  // ─── Refineries Layer (⚗ alembic glyph, orange — OSM Overpass) ───
+  const refineryLayer = useMemo(() => new TextLayer({
+    id: 'refineries',
+    data: refineries,
     getPosition: (d: any) => [d.longitude, d.latitude],
-    getFillColor: (d: any) => {
-      const colors: Record<string, [number, number, number, number]> = {
-        power_plant: [0, 200, 100, 200],
-        refinery: [255, 140, 0, 200],
-        pipeline: [100, 180, 255, 180],
-        port: [0, 160, 255, 200],
-        airport: [180, 130, 255, 200],
-        mine: [255, 200, 50, 200],
-      };
-      return colors[d.infra_type] || [0, 200, 100, 200];
-    },
-    getRadius: 50000,
-    radiusMinPixels: 4,
-    radiusMaxPixels: 12,
+    getText: () => '⚗',
+    getSize: 12,
+    getColor: [255, 140, 0, 230],
+    fontFamily: 'sans-serif',
+    characterSet: ['⚗'],
+    sizeUnits: 'pixels',
     pickable: true,
-    onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'infrastructure' } : null),
-    updateTriggers: { getPosition: infrastructure.length },
-  }), [infrastructure]);
+    onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'refinery' } : null),
+    updateTriggers: { getPosition: refineries.length },
+  }), [refineries]);
+
+  // ─── Mines Layer (⛏ pickaxe glyph, yellow — USGS MRDS) ───
+  const mineLayer = useMemo(() => new TextLayer({
+    id: 'mines',
+    data: mines,
+    getPosition: (d: any) => [d.longitude, d.latitude],
+    getText: () => '⛏',
+    getSize: 11,
+    getColor: [255, 200, 50, 220],
+    fontFamily: 'sans-serif',
+    characterSet: ['⛏'],
+    sizeUnits: 'pixels',
+    pickable: true,
+    onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'mine' } : null),
+    updateTriggers: { getPosition: mines.length },
+  }), [mines]);
 
   // ─── Airports Layer (▲ unicode glyph, near-white) ───
   // Server thins to large hubs at zoom < 3, so the dot count stays sane
@@ -379,7 +389,7 @@ export default function MapView({
   // Pipelines render under everything else (lines as background); LNG
   // terminals sit alongside other point markers. Hover-pick order is
   // last → first, so terminals win over pipelines when overlapping.
-  const layers = [pipelineLayer, vesselLayer, aircraftLayer, conflictLayer, infraLayer, powerPlantLayer, nuclearLayer, airportLayer, portLayer, lngTerminalLayer];
+  const layers = [pipelineLayer, vesselLayer, aircraftLayer, conflictLayer, refineryLayer, mineLayer, powerPlantLayer, nuclearLayer, airportLayer, portLayer, lngTerminalLayer];
 
   // ─── Tooltip Renderer ───
   const renderTooltip = useCallback(() => {
@@ -421,14 +431,46 @@ export default function MapView({
           </div>
         );
         break;
-      case 'infrastructure':
+      case 'refinery':
         content = (
           <div>
-            <div className="font-semibold text-green-300">{object.name}</div>
-            <div className="text-xs text-gray-400 mt-0.5">{object.infra_type} — {object.country}</div>
-            {object.fuel_type && <div className="text-xs mt-1">Fuel: {object.fuel_type}</div>}
-            {object.capacity_mw > 0 && <div className="text-xs">Capacity: {object.capacity_mw.toLocaleString()} MW</div>}
-            <div className="text-xs">Status: {object.status}</div>
+            <div className="font-semibold" style={{ color: 'rgb(255, 140, 0)' }}>
+              {object.refinery_name || object.operator || 'Refinery'}
+            </div>
+            <div className="text-xs text-gray-400 mt-0.5">
+              {object.product || 'oil refinery'}{object.country ? ` — ${object.country}` : (object.iso_country ? ` — ${object.iso_country}` : '')}
+            </div>
+            {object.capacity_bpd != null && (
+              <div className="text-xs mt-1">Capacity: {Number(object.capacity_bpd).toLocaleString()} bpd</div>
+            )}
+            {object.operator && object.operator !== object.refinery_name && (
+              <div className="text-xs">Operator: {object.operator}</div>
+            )}
+            {object.start_date && <div className="text-xs">Online since {object.start_date}</div>}
+            {object.city && <div className="text-xs text-gray-400 mt-1">{object.city}</div>}
+          </div>
+        );
+        break;
+      case 'mine':
+        content = (
+          <div>
+            <div className="font-semibold" style={{ color: 'rgb(255, 200, 50)' }}>
+              {object.site_name || 'Mine'}
+            </div>
+            <div className="text-xs text-gray-400 mt-0.5">
+              {object.commod1 || '—'}{object.dev_stat ? ` · ${object.dev_stat}` : ''}
+            </div>
+            {(object.commod2 || object.commod3) && (
+              <div className="text-xs mt-1">
+                Also: {[object.commod2, object.commod3].filter(Boolean).join(', ')}
+              </div>
+            )}
+            {object.dep_type && <div className="text-xs">Type: {object.dep_type}</div>}
+            {(object.country || object.state) && (
+              <div className="text-xs text-gray-400 mt-1">
+                {object.state ? `${object.state}, ` : ''}{object.country || object.iso_country || '—'}
+              </div>
+            )}
           </div>
         );
         break;

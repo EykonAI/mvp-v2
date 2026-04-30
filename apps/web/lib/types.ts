@@ -147,7 +147,7 @@ export interface SubLayerDef {
   key: string;                // e.g. 'aircraft.civilian'
   label: string;
   status: SubLayerStatus;
-  dataKey?: 'aircraft' | 'vessels' | 'conflicts' | 'infrastructure' | 'airports' | 'ports' | 'power-plants' | 'pipelines';
+  dataKey?: 'aircraft' | 'vessels' | 'conflicts' | 'airports' | 'ports' | 'power-plants' | 'pipelines' | 'refineries' | 'mines';
   predicate?: (item: any) => boolean;
   comingSoon?: string;        // tooltip text for `planned` sub-layers
 }
