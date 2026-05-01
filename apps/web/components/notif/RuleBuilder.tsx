@@ -5,13 +5,20 @@ import {
   type SingleEventToolId,
   type FilterValue,
   suggestRuleName,
+  suggestMultiEventRuleName,
+  MULTI_EVENT_MIN_PREDICATES,
+  MULTI_EVENT_MAX_PREDICATES,
+  MULTI_EVENT_DEFAULT_WINDOW_HOURS,
+  MULTI_EVENT_MIN_WINDOW_HOURS,
+  MULTI_EVENT_MAX_WINDOW_HOURS,
 } from '@/lib/notifications/tools';
 import { DEFAULT_COOLDOWN_MINUTES, MIN_COOLDOWN_MINUTES } from '@/lib/notifications/rule-limits';
 import type { PersonaId } from '@/lib/intelligence-analyst/personas';
 
-// Inline rule builder for the single-event mode (PR 5). Multi-event,
-// outcome-AI, and cross-data-AI rule types add their own panes in
-// PRs 7 and 8 — this file owns single_event only.
+// Inline rule builder. Supports single_event (PR 5) and multi_event
+// (PR 7). Outcome-AI / cross-data-AI panes arrive in PR 8 — the
+// rule-type segmented control already shows them, disabled, with a
+// "PR 8" hint so the affordance is discoverable.
 //
 // Channels come from /api/notifications/channels filtered to verified-
 // and-active rows. If the user has none, the form shows a CTA pointing
@@ -24,6 +31,13 @@ interface VerifiedChannel {
   label: string | null;
 }
 
+type RuleMode = 'single_event' | 'multi_event';
+
+interface PredicateState {
+  tool: SingleEventToolId;
+  filters: Record<string, FilterValue>;
+}
+
 interface RuleBuilderProps {
   persona: PersonaId;
   onCreated: () => void;
@@ -31,10 +45,22 @@ interface RuleBuilderProps {
 }
 
 export function RuleBuilder({ persona, onCreated, onCancel }: RuleBuilderProps) {
+  const [mode, setMode] = useState<RuleMode>('single_event');
+
+  // Single-event state
   const [tool, setTool] = useState<SingleEventToolId>(SINGLE_EVENT_TOOLS[0].id);
   const [filters, setFilters] = useState<Record<string, FilterValue>>(() =>
     initialFilters(SINGLE_EVENT_TOOLS[0].id),
   );
+
+  // Multi-event state
+  const [predicates, setPredicates] = useState<PredicateState[]>(() => [
+    { tool: SINGLE_EVENT_TOOLS[0].id, filters: initialFilters(SINGLE_EVENT_TOOLS[0].id) },
+    { tool: SINGLE_EVENT_TOOLS[1].id, filters: initialFilters(SINGLE_EVENT_TOOLS[1].id) },
+  ]);
+  const [windowHours, setWindowHours] = useState<number>(MULTI_EVENT_DEFAULT_WINDOW_HOURS);
+
+  // Shared state
   const [name, setName] = useState('');
   const [cooldown, setCooldown] = useState<number>(DEFAULT_COOLDOWN_MINUTES);
   const [channels, setChannels] = useState<VerifiedChannel[] | null>(null);
@@ -46,58 +72,62 @@ export function RuleBuilder({ persona, onCreated, onCancel }: RuleBuilderProps) 
     let cancelled = false;
     fetch('/api/notifications/channels', { cache: 'no-store' })
       .then(r => (r.ok ? r.json() : { channels: [] }))
-      .then((data: { channels?: Array<VerifiedChannel & { verified_at: string | null; active: boolean }> }) => {
-        if (cancelled) return;
-        const verified = (data.channels ?? [])
-          .filter(c => c.verified_at && c.active)
-          .map(c => ({ id: c.id, channel_type: c.channel_type, handle: c.handle, label: c.label }));
-        setChannels(verified);
-        // Default-select the user's email channel (most users will
-        // have one); if none, the first verified row of any kind.
-        const defaultId =
-          verified.find(c => c.channel_type === 'email')?.id ?? verified[0]?.id;
-        if (defaultId) setSelectedChannelIds([defaultId]);
-      })
+      .then(
+        (data: {
+          channels?: Array<VerifiedChannel & { verified_at: string | null; active: boolean }>;
+        }) => {
+          if (cancelled) return;
+          const verified = (data.channels ?? [])
+            .filter(c => c.verified_at && c.active)
+            .map(c => ({
+              id: c.id,
+              channel_type: c.channel_type,
+              handle: c.handle,
+              label: c.label,
+            }));
+          setChannels(verified);
+          const defaultId =
+            verified.find(c => c.channel_type === 'email')?.id ?? verified[0]?.id;
+          if (defaultId) setSelectedChannelIds([defaultId]);
+        },
+      )
       .catch(() => setChannels([]));
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const toolDef = useMemo(
-    () => SINGLE_EVENT_TOOLS.find(t => t.id === tool) ?? SINGLE_EVENT_TOOLS[0],
-    [tool],
-  );
-
-  function onToolChange(next: SingleEventToolId) {
-    setTool(next);
-    setFilters(initialFilters(next));
-    setName('');
-  }
-
-  function setFilter(id: string, raw: string, type: 'string' | 'number') {
-    setFilters(prev => ({
-      ...prev,
-      [id]: type === 'number' ? (raw === '' ? 0 : Number(raw)) : raw,
-    }));
-  }
+  const placeholderName = useMemo(() => {
+    if (mode === 'single_event') return suggestRuleName(tool, filters);
+    return suggestMultiEventRuleName({
+      predicates: predicates.map(p => ({ tool: p.tool, filters: p.filters })),
+      window_hours: windowHours,
+    });
+  }, [mode, tool, filters, predicates, windowHours]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
     try {
+      const config =
+        mode === 'single_event'
+          ? { tool, filters }
+          : {
+              predicates: predicates.map(p => ({ tool: p.tool, filters: p.filters })),
+              window_hours: windowHours,
+            };
       const r = await fetch('/api/notifications/rules', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          rule_type: 'single_event',
-          name: name.trim() || suggestRuleName(tool, filters),
+          rule_type: mode,
+          name: name.trim() || placeholderName,
           persona,
           cooldown_minutes: cooldown,
           channel_ids: selectedChannelIds,
           active: true,
-          config: { tool, filters },
+          config,
         }),
       });
       const data = await r.json();
@@ -112,18 +142,7 @@ export function RuleBuilder({ persona, onCreated, onCancel }: RuleBuilderProps) 
   }
 
   return (
-    <form
-      onSubmit={onSubmit}
-      style={{
-        background: 'var(--bg-panel)',
-        border: '1px solid var(--rule-strong)',
-        borderRadius: 6,
-        padding: '20px 22px',
-        marginBottom: 18,
-        display: 'grid',
-        gap: 14,
-      }}
-    >
+    <form onSubmit={onSubmit} style={formStyle}>
       <div
         style={{
           fontFamily: 'var(--f-mono)',
@@ -133,8 +152,10 @@ export function RuleBuilder({ persona, onCreated, onCancel }: RuleBuilderProps) 
           color: 'var(--teal)',
         }}
       >
-        New rule · single event
+        New rule
       </div>
+
+      <ModeSelector mode={mode} onChange={setMode} />
 
       {error && (
         <div
@@ -151,38 +172,52 @@ export function RuleBuilder({ persona, onCreated, onCancel }: RuleBuilderProps) 
         </div>
       )}
 
-      <label style={fieldLabel}>
-        Tool
-        <select value={tool} onChange={e => onToolChange(e.target.value as SingleEventToolId)} style={inputStyle}>
-          {SINGLE_EVENT_TOOLS.map(t => (
-            <option key={t.id} value={t.id}>
-              {t.label}
-            </option>
-          ))}
-        </select>
-        <span style={hintStyle}>{toolDef.description}</span>
-      </label>
+      {mode === 'single_event' && (
+        <SingleEventFields
+          tool={tool}
+          filters={filters}
+          onToolChange={next => {
+            setTool(next);
+            setFilters(initialFilters(next));
+          }}
+          onFilterChange={(id, raw, type) =>
+            setFilters(prev => ({
+              ...prev,
+              [id]: type === 'number' ? (raw === '' ? 0 : Number(raw)) : raw,
+            }))
+          }
+        />
+      )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-        {toolDef.filters.map(f => (
-          <label key={f.id} style={fieldLabel}>
-            {f.label}
-            <input
-              type={f.type === 'number' ? 'number' : 'text'}
-              value={String(filters[f.id] ?? f.default)}
-              onChange={e => setFilter(f.id, e.target.value, f.type)}
-              style={inputStyle}
-            />
-          </label>
-        ))}
-      </div>
+      {mode === 'multi_event' && (
+        <MultiEventFields
+          predicates={predicates}
+          windowHours={windowHours}
+          onPredicateChange={(idx, next) =>
+            setPredicates(prev => prev.map((p, i) => (i === idx ? next : p)))
+          }
+          onAddPredicate={() =>
+            setPredicates(prev =>
+              prev.length >= MULTI_EVENT_MAX_PREDICATES
+                ? prev
+                : [...prev, { tool: SINGLE_EVENT_TOOLS[0].id, filters: initialFilters(SINGLE_EVENT_TOOLS[0].id) }],
+            )
+          }
+          onRemovePredicate={idx =>
+            setPredicates(prev =>
+              prev.length <= MULTI_EVENT_MIN_PREDICATES ? prev : prev.filter((_, i) => i !== idx),
+            )
+          }
+          onWindowChange={setWindowHours}
+        />
+      )}
 
       <label style={fieldLabel}>
         Name (optional)
         <input
           value={name}
           onChange={e => setName(e.target.value)}
-          placeholder={suggestRuleName(tool, filters)}
+          placeholder={placeholderName}
           style={inputStyle}
         />
       </label>
@@ -204,7 +239,10 @@ export function RuleBuilder({ persona, onCreated, onCancel }: RuleBuilderProps) 
           <span style={hintStyle}>Loading channels…</span>
         ) : channels.length === 0 ? (
           <span style={hintStyle}>
-            No verified channels yet. <a href="/settings" style={{ color: 'var(--teal)' }}>Add one in Settings →</a>
+            No verified channels yet.{' '}
+            <a href="/settings" style={{ color: 'var(--teal)' }}>
+              Add one in Settings →
+            </a>
           </span>
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -213,16 +251,22 @@ export function RuleBuilder({ persona, onCreated, onCancel }: RuleBuilderProps) 
                 <input
                   type="checkbox"
                   checked={selectedChannelIds.includes(c.id)}
-                  onChange={e => {
+                  onChange={e =>
                     setSelectedChannelIds(prev =>
-                      e.target.checked
-                        ? [...prev, c.id]
-                        : prev.filter(id => id !== c.id),
-                    );
-                  }}
+                      e.target.checked ? [...prev, c.id] : prev.filter(id => id !== c.id),
+                    )
+                  }
                   style={{ marginRight: 6 }}
                 />
-                <span style={{ textTransform: 'uppercase', fontFamily: 'var(--f-mono)', fontSize: 10, letterSpacing: '0.14em', marginRight: 6 }}>
+                <span
+                  style={{
+                    textTransform: 'uppercase',
+                    fontFamily: 'var(--f-mono)',
+                    fontSize: 10,
+                    letterSpacing: '0.14em',
+                    marginRight: 6,
+                  }}
+                >
                   {c.channel_type}
                 </span>
                 {c.label ?? c.handle}
@@ -236,11 +280,7 @@ export function RuleBuilder({ persona, onCreated, onCancel }: RuleBuilderProps) 
         <button type="button" onClick={onCancel} style={btnGhost}>
           Cancel
         </button>
-        <button
-          type="submit"
-          disabled={submitting || selectedChannelIds.length === 0}
-          style={btnPrimary}
-        >
+        <button type="submit" disabled={submitting || selectedChannelIds.length === 0} style={btnPrimary}>
           {submitting ? 'Saving…' : 'Enable rule'}
         </button>
       </div>
@@ -248,22 +288,287 @@ export function RuleBuilder({ persona, onCreated, onCancel }: RuleBuilderProps) 
   );
 }
 
+// ─── Sub-components ──────────────────────────────────────────────
+
+function ModeSelector({ mode, onChange }: { mode: RuleMode; onChange: (m: RuleMode) => void }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        gap: 0,
+        background: 'var(--bg-void)',
+        border: '1px solid var(--rule)',
+        borderRadius: 3,
+        padding: 2,
+        alignSelf: 'flex-start',
+      }}
+    >
+      <ModeTab label="Single event" active={mode === 'single_event'} onClick={() => onChange('single_event')} />
+      <ModeTab label="Multi-event" active={mode === 'multi_event'} onClick={() => onChange('multi_event')} />
+      <ModeTab label="Outcome AI · PR 8" active={false} disabled />
+      <ModeTab label="Cross-data AI · PR 8" active={false} disabled />
+    </div>
+  );
+}
+
+function ModeTab({
+  label,
+  active,
+  onClick,
+  disabled,
+}: {
+  label: string;
+  active: boolean;
+  onClick?: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        fontFamily: 'var(--f-mono)',
+        fontSize: 10.5,
+        letterSpacing: '0.14em',
+        textTransform: 'uppercase',
+        padding: '6px 12px',
+        background: active ? 'var(--teal)' : 'transparent',
+        color: active ? 'var(--bg-void)' : disabled ? 'var(--ink-ghost)' : 'var(--ink-dim)',
+        border: 'none',
+        borderRadius: 2,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        fontWeight: active ? 500 : 400,
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function SingleEventFields({
+  tool,
+  filters,
+  onToolChange,
+  onFilterChange,
+}: {
+  tool: SingleEventToolId;
+  filters: Record<string, FilterValue>;
+  onToolChange: (next: SingleEventToolId) => void;
+  onFilterChange: (id: string, raw: string, type: 'string' | 'number') => void;
+}) {
+  const toolDef = SINGLE_EVENT_TOOLS.find(t => t.id === tool) ?? SINGLE_EVENT_TOOLS[0];
+  return (
+    <>
+      <label style={fieldLabel}>
+        Tool
+        <select
+          value={tool}
+          onChange={e => onToolChange(e.target.value as SingleEventToolId)}
+          style={inputStyle}
+        >
+          {SINGLE_EVENT_TOOLS.map(t => (
+            <option key={t.id} value={t.id}>
+              {t.label}
+            </option>
+          ))}
+        </select>
+        <span style={hintStyle}>{toolDef.description}</span>
+      </label>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+        {toolDef.filters.map(f => (
+          <label key={f.id} style={fieldLabel}>
+            {f.label}
+            <input
+              type={f.type === 'number' ? 'number' : 'text'}
+              value={String(filters[f.id] ?? f.default)}
+              onChange={e => onFilterChange(f.id, e.target.value, f.type)}
+              style={inputStyle}
+            />
+          </label>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function MultiEventFields({
+  predicates,
+  windowHours,
+  onPredicateChange,
+  onAddPredicate,
+  onRemovePredicate,
+  onWindowChange,
+}: {
+  predicates: PredicateState[];
+  windowHours: number;
+  onPredicateChange: (idx: number, next: PredicateState) => void;
+  onAddPredicate: () => void;
+  onRemovePredicate: (idx: number) => void;
+  onWindowChange: (n: number) => void;
+}) {
+  return (
+    <>
+      <label style={fieldLabel}>
+        Co-occurrence window (hours; {MULTI_EVENT_MIN_WINDOW_HOURS}–{MULTI_EVENT_MAX_WINDOW_HOURS})
+        <input
+          type="number"
+          min={MULTI_EVENT_MIN_WINDOW_HOURS}
+          max={MULTI_EVENT_MAX_WINDOW_HOURS}
+          value={windowHours}
+          onChange={e =>
+            onWindowChange(
+              Math.min(
+                MULTI_EVENT_MAX_WINDOW_HOURS,
+                Math.max(MULTI_EVENT_MIN_WINDOW_HOURS, Number(e.target.value) || 0),
+              ),
+            )
+          }
+          style={inputStyle}
+        />
+        <span style={hintStyle}>
+          Fires when every predicate has at least one match AND the matches are spread within this window.
+        </span>
+      </label>
+      {predicates.map((pred, idx) => (
+        <PredicateCard
+          key={idx}
+          index={idx}
+          predicate={pred}
+          canRemove={predicates.length > MULTI_EVENT_MIN_PREDICATES}
+          onChange={next => onPredicateChange(idx, next)}
+          onRemove={() => onRemovePredicate(idx)}
+        />
+      ))}
+      {predicates.length < MULTI_EVENT_MAX_PREDICATES && (
+        <button type="button" onClick={onAddPredicate} style={{ ...btnGhost, alignSelf: 'flex-start' }}>
+          + Add predicate
+        </button>
+      )}
+    </>
+  );
+}
+
+function PredicateCard({
+  index,
+  predicate,
+  canRemove,
+  onChange,
+  onRemove,
+}: {
+  index: number;
+  predicate: PredicateState;
+  canRemove: boolean;
+  onChange: (next: PredicateState) => void;
+  onRemove: () => void;
+}) {
+  const toolDef = SINGLE_EVENT_TOOLS.find(t => t.id === predicate.tool) ?? SINGLE_EVENT_TOOLS[0];
+  return (
+    <div
+      style={{
+        background: 'var(--bg-void)',
+        border: '1px solid var(--rule)',
+        borderRadius: 4,
+        padding: '12px 14px',
+        display: 'grid',
+        gap: 10,
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span
+          style={{
+            fontFamily: 'var(--f-mono)',
+            fontSize: 10,
+            letterSpacing: '0.18em',
+            textTransform: 'uppercase',
+            color: 'var(--ink-faint)',
+          }}
+        >
+          Predicate {index + 1}
+        </span>
+        {canRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            style={{ ...btnGhost, padding: '3px 10px', fontSize: 10 }}
+          >
+            Remove
+          </button>
+        )}
+      </div>
+      <label style={fieldLabel}>
+        Tool
+        <select
+          value={predicate.tool}
+          onChange={e => {
+            const next = e.target.value as SingleEventToolId;
+            onChange({ tool: next, filters: initialFilters(next) });
+          }}
+          style={inputStyle}
+        >
+          {SINGLE_EVENT_TOOLS.map(t => (
+            <option key={t.id} value={t.id}>
+              {t.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
+        {toolDef.filters.map(f => (
+          <label key={f.id} style={fieldLabel}>
+            {f.label}
+            <input
+              type={f.type === 'number' ? 'number' : 'text'}
+              value={String(predicate.filters[f.id] ?? f.default)}
+              onChange={e => {
+                const raw = e.target.value;
+                const value: FilterValue =
+                  f.type === 'number' ? (raw === '' ? 0 : Number(raw)) : raw;
+                onChange({
+                  tool: predicate.tool,
+                  filters: { ...predicate.filters, [f.id]: value },
+                });
+              }}
+              style={inputStyle}
+            />
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Helpers + styles ────────────────────────────────────────────
+
 function initialFilters(toolId: SingleEventToolId): Record<string, FilterValue> {
   const tool = SINGLE_EVENT_TOOLS.find(t => t.id === toolId);
   if (!tool) return {};
   return Object.fromEntries(tool.filters.map(f => [f.id, f.default]));
 }
 
-function humanizeCreateError(data: { error?: string; limit?: number; tier?: string; hint?: string }): string {
+function humanizeCreateError(data: {
+  error?: string;
+  limit?: number;
+  tier?: string;
+  hint?: string;
+  min?: number;
+  max?: number;
+}): string {
   switch (data.error) {
     case 'rule_limit_reached':
-      return `Active-rule cap reached for tier ${data.tier} (${data.limit}). Pause or delete a rule before adding another.`;
+      return `Active-rule cap reached for tier ${data.tier} (${data.limit}). Pause or delete a rule first.`;
     case 'no_channels':
       return 'Pick at least one channel.';
     case 'no_verified_channels':
       return 'None of the selected channels are verified. Verify one in Settings first.';
     case 'invalid_tool':
       return 'Invalid tool selection.';
+    case 'invalid_predicate':
+      return 'One of the predicates references an unknown tool.';
+    case 'too_few_predicates':
+      return `Multi-event rules need at least ${data.min} predicates.`;
+    case 'too_many_predicates':
+      return `Multi-event rules allow at most ${data.max} predicates.`;
     case 'unsupported_rule_type':
       return data.hint ?? 'This rule type is not yet supported.';
     case 'forbidden':
@@ -272,6 +577,16 @@ function humanizeCreateError(data: { error?: string; limit?: number; tier?: stri
       return data.error ?? 'Could not create rule.';
   }
 }
+
+const formStyle: React.CSSProperties = {
+  background: 'var(--bg-panel)',
+  border: '1px solid var(--rule-strong)',
+  borderRadius: 6,
+  padding: '20px 22px',
+  marginBottom: 18,
+  display: 'grid',
+  gap: 14,
+};
 
 const fieldLabel: React.CSSProperties = {
   display: 'flex',

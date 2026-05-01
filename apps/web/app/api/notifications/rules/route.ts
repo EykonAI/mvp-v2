@@ -8,9 +8,17 @@ import {
 } from '@/lib/notifications/rule-limits';
 import {
   coerceFilters,
+  coercePredicate,
   isValidSingleEventTool,
+  suggestMultiEventRuleName,
   suggestRuleName,
+  type MultiEventConfig,
   type SingleEventToolId,
+  MULTI_EVENT_MIN_PREDICATES,
+  MULTI_EVENT_MAX_PREDICATES,
+  MULTI_EVENT_DEFAULT_WINDOW_HOURS,
+  MULTI_EVENT_MIN_WINDOW_HOURS,
+  MULTI_EVENT_MAX_WINDOW_HOURS,
 } from '@/lib/notifications/tools';
 import { isValidPersona } from '@/lib/intelligence-analyst/personas';
 
@@ -27,7 +35,7 @@ import { isValidPersona } from '@/lib/intelligence-analyst/personas';
 
 export const dynamic = 'force-dynamic';
 
-const PR5_ALLOWED_RULE_TYPES = new Set(['single_event']);
+const ALLOWED_RULE_TYPES = new Set(['single_event', 'multi_event']);
 
 export async function GET(_req: NextRequest) {
   const user = await getCurrentUser();
@@ -58,8 +66,12 @@ interface CreateBody {
   channel_ids?: string[];
   active?: boolean;
   config?: {
+    // single_event
     tool?: string;
     filters?: Record<string, unknown>;
+    // multi_event
+    predicates?: Array<{ tool?: unknown; filters?: Record<string, unknown> }>;
+    window_hours?: number;
   };
 }
 
@@ -75,23 +87,59 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => null)) as CreateBody | null;
   if (!body) return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
 
-  if (!body.rule_type || !PR5_ALLOWED_RULE_TYPES.has(body.rule_type)) {
+  if (!body.rule_type || !ALLOWED_RULE_TYPES.has(body.rule_type)) {
     return NextResponse.json(
       {
         error: 'unsupported_rule_type',
-        allowed: Array.from(PR5_ALLOWED_RULE_TYPES),
-        hint: 'multi_event lands in PR 7; outcome_ai and cross_data_ai land in PR 8.',
+        allowed: Array.from(ALLOWED_RULE_TYPES),
+        hint: 'outcome_ai and cross_data_ai land in PR 8.',
       },
       { status: 400 },
     );
   }
 
-  // Validate single_event config.
-  const toolId = body.config?.tool;
-  if (!isValidSingleEventTool(toolId)) {
-    return NextResponse.json({ error: 'invalid_tool' }, { status: 400 });
+  let savedConfig: Record<string, unknown>;
+  let derivedName: string;
+
+  if (body.rule_type === 'single_event') {
+    const toolId = body.config?.tool;
+    if (!isValidSingleEventTool(toolId)) {
+      return NextResponse.json({ error: 'invalid_tool' }, { status: 400 });
+    }
+    const filters = coerceFilters(toolId as SingleEventToolId, body.config?.filters ?? {});
+    savedConfig = { tool: toolId, filters };
+    derivedName = suggestRuleName(toolId as SingleEventToolId, filters);
+  } else {
+    // multi_event
+    const rawPreds = Array.isArray(body.config?.predicates) ? body.config!.predicates! : [];
+    if (rawPreds.length < MULTI_EVENT_MIN_PREDICATES) {
+      return NextResponse.json(
+        { error: 'too_few_predicates', min: MULTI_EVENT_MIN_PREDICATES },
+        { status: 400 },
+      );
+    }
+    if (rawPreds.length > MULTI_EVENT_MAX_PREDICATES) {
+      return NextResponse.json(
+        { error: 'too_many_predicates', max: MULTI_EVENT_MAX_PREDICATES },
+        { status: 400 },
+      );
+    }
+    const predicates: Array<{ tool: string; filters: Record<string, unknown> }> = [];
+    for (const raw of rawPreds) {
+      const p = coercePredicate(raw);
+      if (!p) {
+        return NextResponse.json({ error: 'invalid_predicate' }, { status: 400 });
+      }
+      predicates.push(p);
+    }
+    const windowHoursRaw = Number(body.config?.window_hours ?? MULTI_EVENT_DEFAULT_WINDOW_HOURS);
+    const windowHours = Math.min(
+      MULTI_EVENT_MAX_WINDOW_HOURS,
+      Math.max(MULTI_EVENT_MIN_WINDOW_HOURS, Math.floor(windowHoursRaw)),
+    );
+    savedConfig = { predicates, window_hours: windowHours };
+    derivedName = suggestMultiEventRuleName(savedConfig as unknown as MultiEventConfig);
   }
-  const filters = coerceFilters(toolId as SingleEventToolId, body.config?.filters ?? {});
 
   // Cooldown floor matches the DB CHECK constraint. We re-check here
   // so the API returns a friendly error instead of a Postgres-level
@@ -144,15 +192,15 @@ export async function POST(req: NextRequest) {
   }
 
   const persona = isValidPersona(body.persona) ? body.persona : null;
-  const name = (body.name ?? '').trim() || suggestRuleName(toolId as SingleEventToolId, filters);
+  const name = (body.name ?? '').trim() || derivedName;
 
   const { data: inserted, error: insertError } = await supabase
     .from('user_notification_rules')
     .insert({
       user_id: user.id,
       name,
-      rule_type: 'single_event',
-      config: { tool: toolId, filters },
+      rule_type: body.rule_type,
+      config: savedConfig,
       channel_ids: usableChannelIds,
       active: wantsActive,
       cooldown_minutes: cooldown,
