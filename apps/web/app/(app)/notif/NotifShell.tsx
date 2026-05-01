@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import TopNav from '@/components/TopNav';
 import ChatPanel from '@/components/ChatPanel';
+import { RulesList } from '@/components/notif/RulesList';
 import { PERSONAS, DEFAULT_PERSONA, isValidPersona, type PersonaId } from '@/lib/intelligence-analyst/personas';
 
 // Single-key localStorage source of truth shared with the AI Chat
@@ -91,7 +92,7 @@ function NotifContent({
       <Header persona={persona} onPersonaChange={onPersonaChange} />
       {recentFilter && <RecentFiresSection />}
       <SuggestionLibrarySection persona={persona} />
-      <RulesListSection />
+      <RulesListSection persona={persona} />
     </div>
   );
 }
@@ -261,14 +262,11 @@ function SuggestionLibrarySection({ persona }: { persona: PersonaId }) {
   );
 }
 
-function RulesListSection() {
+function RulesListSection({ persona }: { persona: PersonaId }) {
   return (
     <section>
       <SectionHeading index="C" title="Your rules" />
-      <PlaceholderCard
-        title="No rules yet"
-        body="The rule builder lands in PR 5. Once enabled, your rules show here with their channel set, cooldown, last-fire timestamp, and an active toggle."
-      />
+      <RulesList persona={persona} />
     </section>
   );
 }
