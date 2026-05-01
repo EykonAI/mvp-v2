@@ -1,6 +1,7 @@
 'use client';
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { formatDistanceToNow } from 'date-fns';
+import { STARTER_PERSONAS } from '@/lib/intelligence-analyst/starter-queries';
 
 interface Message {
   id: string;
@@ -55,6 +56,7 @@ export default function ChatPanel() {
   const [activeTab, setActiveTab] = useState<TabKey>('suggested');
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -197,6 +199,36 @@ export default function ChatPanel() {
     setActiveTab(prev => (prev === key ? null : key));
   };
 
+  const toggleStar = useCallback(async (entryId: string, currentStarred: boolean) => {
+    // Optimistic update — flip locally; server-side PATCH below.
+    // On failure we re-load from server to roll back.
+    setHistory(prev => prev.map(e => (e.id === entryId ? { ...e, starred: !currentStarred } : e)));
+    try {
+      const res = await fetch(`/api/user_queries/${entryId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ starred: !currentStarred }),
+      });
+      if (!res.ok) throw new Error(`PATCH failed: ${res.status}`);
+    } catch {
+      // Roll back by re-fetching authoritative state.
+      void loadHistory();
+    }
+  }, [loadHistory]);
+
+  const filteredHistory = useMemo(() => {
+    const q = historyFilter.trim().toLowerCase();
+    if (!q) return history;
+    return history.filter(e => {
+      if (e.query_text.toLowerCase().includes(q)) return true;
+      const tags = e.domain_tags ?? [];
+      for (const t of tags) {
+        if (t.toLowerCase().includes(q)) return true;
+      }
+      return false;
+    });
+  }, [history, historyFilter]);
+
   return (
     <div className="h-full flex flex-col" style={{ background: 'var(--bg-panel)' }}>
       {/* Header */}
@@ -263,9 +295,17 @@ export default function ChatPanel() {
       {/* Tab content */}
       {activeTab === 'history' && (
         <HistoryList
-          entries={history}
+          entries={filteredHistory}
+          totalCount={history.length}
           loading={historyLoading}
+          filter={historyFilter}
+          onFilterChange={setHistoryFilter}
           onPick={openSnapshot}
+          onToggleStar={toggleStar}
+          onPickStarter={text => {
+            setInput(text);
+            inputRef.current?.focus();
+          }}
         />
       )}
       {activeTab === 'suggested' && (
@@ -440,111 +480,273 @@ function TabButton({
 
 function HistoryList({
   entries,
+  totalCount,
   loading,
+  filter,
+  onFilterChange,
   onPick,
+  onToggleStar,
+  onPickStarter,
 }: {
   entries: HistoryEntry[];
+  totalCount: number;
   loading: boolean;
+  filter: string;
+  onFilterChange: (s: string) => void;
   onPick: (e: HistoryEntry) => void;
+  onToggleStar: (id: string, currentStarred: boolean) => void;
+  onPickStarter: (text: string) => void;
 }) {
-  if (loading) {
-    return (
-      <div
-        className="px-3 py-3 shrink-0"
-        style={{ borderBottom: '1px solid var(--rule-soft)' }}
-      >
-        <div className="text-xs" style={{ color: 'var(--ink-faint)' }}>
-          Loading history…
-        </div>
-      </div>
-    );
-  }
-  if (entries.length === 0) {
-    return (
-      <div
-        className="px-3 py-3 shrink-0"
-        style={{ borderBottom: '1px solid var(--rule-soft)' }}
-      >
-        <div className="text-xs" style={{ color: 'var(--ink-faint)' }}>
-          No queries yet. Ask the analyst something — your history will collect here.
-        </div>
-      </div>
-    );
-  }
+  // Show the curated empty state (§4.5) only when the user has NEVER
+  // submitted a query — the search filter producing zero rows is a
+  // different empty state and gets its own message.
+  const showStarter = !loading && totalCount === 0;
   return (
     <div
       className="shrink-0 overflow-y-auto"
       style={{
-        maxHeight: 240,
+        maxHeight: 320,
         borderBottom: '1px solid var(--rule-soft)',
       }}
     >
-      <ul className="space-y-px px-1.5 py-1.5">
-        {entries.map(entry => (
-          <li key={entry.id}>
-            <button
-              onClick={() => onPick(entry)}
-              className="w-full text-left px-2 py-1.5 transition-colors"
+      {/* Search input (§4.2). Hidden in starter state — nothing to filter yet. */}
+      {!showStarter && (
+        <div
+          className="px-3 pt-2 pb-1.5 sticky top-0"
+          style={{ background: 'var(--bg-panel)' }}
+        >
+          <input
+            type="text"
+            value={filter}
+            onChange={e => onFilterChange(e.target.value)}
+            placeholder="Filter your queries…"
+            className="w-full px-2 py-1 text-xs focus:outline-none"
+            style={{
+              background: 'var(--bg-raised)',
+              border: '1px solid var(--rule)',
+              color: 'var(--ink)',
+              borderRadius: 2,
+              fontFamily: 'var(--f-body)',
+            }}
+          />
+        </div>
+      )}
+
+      {loading && (
+        <div className="px-3 py-3">
+          <div className="text-xs" style={{ color: 'var(--ink-faint)' }}>
+            Loading history…
+          </div>
+        </div>
+      )}
+
+      {showStarter && <StarterEmptyState onPick={onPickStarter} />}
+
+      {!loading && !showStarter && entries.length === 0 && (
+        <div className="px-3 py-3">
+          <div className="text-xs" style={{ color: 'var(--ink-faint)' }}>
+            No queries match “{filter}”.
+          </div>
+        </div>
+      )}
+
+      {!loading && entries.length > 0 && (
+        <ul className="space-y-px px-1.5 pb-1.5">
+          {entries.map(entry => (
+            <li key={entry.id}>
+              <HistoryEntryRow
+                entry={entry}
+                onPick={() => onPick(entry)}
+                onToggleStar={() => onToggleStar(entry.id, entry.starred)}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function HistoryEntryRow({
+  entry,
+  onPick,
+  onToggleStar,
+}: {
+  entry: HistoryEntry;
+  onPick: () => void;
+  onToggleStar: () => void;
+}) {
+  return (
+    <div
+      className="px-2 py-1.5 transition-colors flex gap-2 items-start"
+      style={{
+        background: 'transparent',
+        border: '1px solid transparent',
+        borderRadius: 2,
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.background = 'var(--bg-hover)';
+        e.currentTarget.style.borderColor = 'var(--rule)';
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.background = 'transparent';
+        e.currentTarget.style.borderColor = 'transparent';
+      }}
+    >
+      <button
+        onClick={onToggleStar}
+        aria-label={entry.starred ? 'Unstar query' : 'Star query'}
+        className="shrink-0 transition-colors"
+        style={{
+          background: 'transparent',
+          border: 'none',
+          padding: 2,
+          cursor: 'pointer',
+          color: entry.starred ? 'var(--amber)' : 'var(--ink-ghost)',
+          lineHeight: 0,
+        }}
+        onMouseEnter={e => {
+          if (!entry.starred) e.currentTarget.style.color = 'var(--ink-dim)';
+        }}
+        onMouseLeave={e => {
+          if (!entry.starred) e.currentTarget.style.color = 'var(--ink-ghost)';
+        }}
+      >
+        <StarIcon filled={entry.starred} />
+      </button>
+      <button
+        onClick={onPick}
+        className="flex-1 min-w-0 text-left"
+        style={{
+          background: 'transparent',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+        }}
+      >
+        <div
+          className="text-xs"
+          style={{
+            color: 'var(--ink)',
+            fontFamily: 'var(--f-body)',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {truncate(entry.query_text, 80)}
+        </div>
+        <div className="mt-1 flex items-center gap-2 flex-wrap">
+          <span
+            style={{
+              fontFamily: 'var(--f-mono)',
+              fontSize: 9,
+              color: 'var(--ink-faint)',
+              letterSpacing: '0.05em',
+            }}
+          >
+            {relativeTime(entry.last_run_at)}
+          </span>
+          {primaryToolName(entry) && (
+            <span
+              className="px-1 py-px"
               style={{
-                background: 'transparent',
-                border: '1px solid transparent',
+                fontFamily: 'var(--f-mono)',
+                fontSize: 9,
+                color: 'var(--teal)',
+                background: 'var(--teal-glow)',
+                border: '1px solid var(--teal-deep)',
                 borderRadius: 2,
-                cursor: 'pointer',
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.background = 'var(--bg-hover)';
-                e.currentTarget.style.borderColor = 'var(--rule)';
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.borderColor = 'transparent';
+                letterSpacing: '0.04em',
               }}
             >
-              <div
-                className="text-xs"
+              {primaryToolName(entry)}
+            </span>
+          )}
+          {(entry.domain_tags ?? []).map(tag => (
+            <span
+              key={tag}
+              className="px-1 py-px"
+              style={{
+                fontFamily: 'var(--f-body)',
+                fontSize: 9,
+                color: 'var(--ink-dim)',
+                background: 'var(--bg-raised)',
+                border: '1px solid var(--rule)',
+                borderRadius: 2,
+              }}
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      </button>
+    </div>
+  );
+}
+
+function StarterEmptyState({ onPick }: { onPick: (text: string) => void }) {
+  return (
+    <div className="px-3 py-3 space-y-3">
+      <div
+        className="text-xs"
+        style={{ color: 'var(--ink-dim)', fontFamily: 'var(--f-body)' }}
+      >
+        Try one of these to get started.
+      </div>
+      {STARTER_PERSONAS.map(persona => (
+        <div key={persona.id}>
+          <div
+            className="mb-1.5"
+            style={{
+              fontFamily: 'var(--f-mono)',
+              fontSize: 9.5,
+              color: 'var(--ink-faint)',
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+            }}
+          >
+            {persona.label}
+          </div>
+          <div className="space-y-1">
+            {persona.prompts.map((p, i) => (
+              <button
+                key={i}
+                onClick={() => onPick(p)}
+                className="block w-full text-left text-xs px-2 py-1.5 transition-colors"
                 style={{
-                  color: 'var(--ink)',
+                  color: 'var(--ink-dim)',
+                  background: 'var(--bg-raised)',
+                  border: '1px solid var(--rule)',
+                  borderRadius: 2,
                   fontFamily: 'var(--f-body)',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
+                  cursor: 'pointer',
                 }}
               >
-                {truncate(entry.query_text, 80)}
-              </div>
-              <div className="mt-1 flex items-center gap-2">
-                <span
-                  style={{
-                    fontFamily: 'var(--f-mono)',
-                    fontSize: 9,
-                    color: 'var(--ink-faint)',
-                    letterSpacing: '0.05em',
-                  }}
-                >
-                  {relativeTime(entry.last_run_at)}
-                </span>
-                {primaryToolName(entry) && (
-                  <span
-                    className="px-1 py-px"
-                    style={{
-                      fontFamily: 'var(--f-mono)',
-                      fontSize: 9,
-                      color: 'var(--teal)',
-                      background: 'var(--teal-glow)',
-                      border: '1px solid var(--teal-deep)',
-                      borderRadius: 2,
-                      letterSpacing: '0.04em',
-                    }}
-                  >
-                    {primaryToolName(entry)}
-                  </span>
-                )}
-              </div>
-            </button>
-          </li>
-        ))}
-      </ul>
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
+  );
+}
+
+function StarIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill={filled ? 'currentColor' : 'none'}
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
   );
 }
 
