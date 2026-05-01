@@ -12,9 +12,10 @@ export async function executeToolCall(toolName: string, toolInput: Record<string
       case 'query_vessels':             return await queryVessels(toolInput);
       case 'query_aircraft':            return await queryAircraft(toolInput);
       case 'query_conflicts':           return await queryConflicts(toolInput);
-      case 'query_infrastructure':      return await queryInfrastructure(toolInput);
       case 'query_power_plants':        return await queryPowerPlants(toolInput);
       case 'query_pipelines':           return await queryPipelines(toolInput);
+      case 'query_refineries':          return await queryRefineries(toolInput);
+      case 'query_mines':               return await queryMines(toolInput);
       case 'query_airports':            return await queryAirports(toolInput);
       case 'query_ports':               return await queryPorts(toolInput);
       case 'query_weather':             return await queryWeather(toolInput);
@@ -115,20 +116,6 @@ async function queryConflicts(input: Record<string, any>): Promise<string> {
       notes: (e.notes || '').substring(0, 200),
     })),
   });
-}
-
-async function queryInfrastructure(input: Record<string, any>): Promise<string> {
-  const params = new URLSearchParams({
-    lat_min: String(input.lat_min),
-    lat_max: String(input.lat_max),
-    lon_min: String(input.lon_min),
-    lon_max: String(input.lon_max),
-  });
-  if (input.fuel_type) params.set('fuel_type', input.fuel_type);
-  const res = await fetch(`${APP_URL()}/api/infrastructure?${params.toString()}`);
-  const data = await res.json();
-  const items = (data.data || data || []).slice(0, 50);
-  return JSON.stringify({ count: items.length, facilities: items });
 }
 
 // GEM Global Integrated Power Tracker (~127k operating units).
@@ -238,6 +225,80 @@ async function queryPipelines(input: Record<string, any>): Promise<string> {
         // route_geojson intentionally omitted — too large for tool response budget.
       };
     }),
+  });
+}
+
+// OSM Overpass-backed refineries (~700 globally — canonical refinery tags).
+async function queryRefineries(input: Record<string, any>): Promise<string> {
+  const params = new URLSearchParams({
+    lat_min: String(input.lat_min),
+    lat_max: String(input.lat_max),
+    lon_min: String(input.lon_min),
+    lon_max: String(input.lon_max),
+  });
+  if (input.country) params.set('country', String(input.country));
+  const limit = Math.min(500, Math.max(1, Number(input.limit ?? 50)));
+  const res = await fetch(`${APP_URL()}/api/refineries?${params.toString()}`);
+  const data = await res.json();
+  const items = (data.data || []).slice(0, limit);
+  return JSON.stringify({
+    count: items.length,
+    provider: data.provider,
+    attribution: data.attribution,
+    refineries: items.map((r: any) => ({
+      id: r.id,
+      name: r.refinery_name,
+      operator: r.operator,
+      owner: r.owner,
+      product: r.product,
+      capacity_bpd: r.capacity_bpd,
+      start_date: r.start_date,
+      country: r.country,
+      iso_country: r.iso_country,
+      city: r.city,
+      lat: r.latitude,
+      lon: r.longitude,
+      wiki: r.wiki_url,
+    })),
+  });
+}
+
+// USGS MRDS-backed mines (~304k globally — archival snapshot frozen at 2011).
+async function queryMines(input: Record<string, any>): Promise<string> {
+  const params = new URLSearchParams({
+    lat_min: String(input.lat_min),
+    lat_max: String(input.lat_max),
+    lon_min: String(input.lon_min),
+    lon_max: String(input.lon_max),
+  });
+  if (input.commodity) params.set('commodity', String(input.commodity));
+  if (input.dev_stat) params.set('dev_stat', String(input.dev_stat));
+  if (input.country) params.set('country', String(input.country));
+  if (input.include_minor) params.set('include_minor', 'true');
+  const limit = Math.min(500, Math.max(1, Number(input.limit ?? 50)));
+  const res = await fetch(`${APP_URL()}/api/mines?${params.toString()}`);
+  const data = await res.json();
+  const items = (data.data || []).slice(0, limit);
+  return JSON.stringify({
+    count: items.length,
+    provider: data.provider,
+    attribution: data.attribution,
+    mines: items.map((m: any) => ({
+      id: m.id,
+      name: m.site_name,
+      dev_stat: m.dev_stat,
+      commodities: m.commodities,
+      commod1: m.commod1,
+      ore: m.ore,
+      dep_type: m.dep_type,
+      country: m.country,
+      iso_country: m.iso_country,
+      state: m.state,
+      county: m.county,
+      lat: m.latitude,
+      lon: m.longitude,
+      url: m.url,
+    })),
   });
 }
 

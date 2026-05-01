@@ -73,8 +73,9 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
-    name: 'query_infrastructure',
-    description: 'Legacy mixed-infrastructure feed (refineries, mines, sample data). For specific asset classes prefer query_power_plants / query_pipelines / query_airports / query_ports.',
+    name: 'query_refineries',
+    description:
+      'Query oil refineries from OpenStreetMap (canonical refinery tags only — petroleum_refinery, oil_refinery, refinery). ~700 facilities globally, each with name, operator, product, capacity (when tagged), country, city. Use for questions like "refineries in Saudi Arabia", "oil refining capacity on the Gulf Coast", "European refineries near Russian crude pipelines". Pass country to slice (ISO2 code or country name).',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -82,7 +83,28 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
         lat_max: { type: 'number' },
         lon_min: { type: 'number' },
         lon_max: { type: 'number' },
-        fuel_type: { type: 'string' },
+        country: { type: 'string', description: 'ISO 3166-1 alpha-2 (e.g. "SA") or country-name substring (e.g. "Saudi"). Filter optional.' },
+        limit:   { type: 'number', description: 'Default 50, max 500.' },
+      },
+      required: ['lat_min', 'lat_max', 'lon_min', 'lon_max'],
+    },
+  },
+  {
+    name: 'query_mines',
+    description:
+      'Query mineral deposits from the USGS Mineral Resources Data System (MRDS — public-domain US Government, ~304k records globally, archival snapshot frozen at 2011). Each row carries site name, development status (Producer / Past Producer / Prospect / Occurrence / Plant), commodities (commod1/2/3 + commodities array), country, state, deposit type. Default returns only Producer / Past Producer / Plant rows with a known commod1 (significant sites); pass include_minor=true for prospects and occurrences. Use for questions like "lithium mines in Chile", "rare-earth deposits worldwide", "active copper producers in Peru". Pass commodity to filter on the commodities[] array (case-sensitive, e.g. "Copper", "Lithium", "Rare Earths").',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        lat_min:    { type: 'number' },
+        lat_max:    { type: 'number' },
+        lon_min:    { type: 'number' },
+        lon_max:    { type: 'number' },
+        commodity:  { type: 'string', description: 'Commodity name to match in the commodities array (e.g. "Copper", "Lithium", "Gold", "Rare Earths", "Uranium"). Case-sensitive.' },
+        dev_stat:   { type: 'string', description: 'Producer | Past Producer | Prospect | Occurrence | Plant | Unknown. Filter optional.' },
+        country:    { type: 'string', description: 'ISO 3166-1 alpha-2 (e.g. "CL") or country-name substring. Filter optional.' },
+        include_minor: { type: 'boolean', description: 'If true, drops the default significant-sites filter and returns prospects/occurrences too.' },
+        limit:      { type: 'number', description: 'Default 50, max 500.' },
       },
       required: ['lat_min', 'lat_max', 'lon_min', 'lon_max'],
     },
@@ -110,7 +132,7 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
   {
     name: 'query_pipelines',
     description:
-      'Query gas pipelines and LNG terminals from the Global Energy Monitor — Global Gas Infrastructure Tracker (GGIT). Returns a mixed list of pipeline routes (with start/end country, length, capacity bcm/y, status, owner) and LNG terminals (with facility_type=import|export, capacity in mtpa, country). Use for questions like "Russian gas pipelines into Europe", "LNG export terminals in Qatar", "pipelines crossing into China". Each row has infra_subtype=pipeline|lng_terminal so you can disambiguate. Pass include_minor=true to bypass the operating-only default.',
+      'Query gas pipelines (GEM GGIT), oil/NGL pipelines (GEM GOIT), and LNG terminals (GEM GGIT) in one call. Returns a mixed list — each row has infra_subtype=pipeline_gas|pipeline_oil|lng_terminal so you can disambiguate. Pipeline rows carry start/end country, length, capacity (bcm/y for gas, BOEd or raw bpd for oil), status, owner, route accuracy. LNG terminals carry facility_type=import|export, capacity in mtpa, country. Use for questions like "Russian gas pipelines into Europe", "LNG export terminals in Qatar", "Trans-Alaska oil pipeline status", "Keystone XL". Pass fuel=gas or fuel=oil to slice to one type. Pass include_minor=true to bypass the operating-only default.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -118,6 +140,7 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
         lat_max: { type: 'number' },
         lon_min: { type: 'number' },
         lon_max: { type: 'number' },
+        fuel: { type: 'string', description: '"gas" (returns gas pipelines + LNG terminals) | "oil" (returns oil pipelines only). Omit to return all three.' },
         status: { type: 'string', description: 'operating (default) | construction | proposed | retired | cancelled | shelved | mothballed' },
         facility_type: { type: 'string', description: 'For LNG terminals only: import | export.' },
         include_minor: { type: 'boolean', description: 'If true, drops the default operating-only filter.' },
@@ -316,10 +339,11 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
 // ─── System Prompt ───────────────────────────────────────────
 export const CONVERSATIONAL_SYSTEM_PROMPT = `You are the eYKON.ai geopolitical-intelligence analyst. You have access to live feeds (aircraft, vessels, conflicts, weather, agent reports) AND to dedicated infrastructure tools:
   • query_power_plants  — GEM GIPT (~127k operating units, all fuel types incl. nuclear)
-  • query_pipelines     — GEM GGIT (gas pipelines + LNG terminals)
+  • query_pipelines     — GEM GGIT + GOIT (gas pipelines, oil/NGL pipelines, LNG terminals; pass fuel=gas|oil to slice)
+  • query_refineries    — OpenStreetMap canonical refinery tags (~700 oil refineries globally, with operator + product)
+  • query_mines         — USGS MRDS (~304k mineral deposits globally; archival snapshot frozen at 2011 — fine for strategic-resource questions, weak for short-horizon production)
   • query_airports      — OurAirports (~7,500 significant; ~85k with include_minor)
   • query_ports         — NGA World Port Index (~3,800 commercial seaports)
-  • query_infrastructure — legacy mixed feed; prefer the dedicated tools above for energy / aviation / maritime questions.
 AND to the Intelligence Center:
   • posture scores per pinned theatre
   • convergences (anomaly-of-anomalies)
