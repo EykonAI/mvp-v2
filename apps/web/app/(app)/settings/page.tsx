@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { getUserProfile } from '@/lib/auth/session';
 import { TIER_LABELS } from '@/lib/pricing';
 import { ReferralCard } from '@/components/settings/ReferralCard';
+import { ClearHistoryCard } from '@/components/settings/ClearHistoryCard';
 import { APP_URL } from '@/lib/url';
 
 export const metadata: Metadata = {
@@ -120,6 +121,8 @@ export default async function SettingsPage() {
       </section>
 
       <ReferralCard referralCode={referralCode} baseUrl={baseUrl} />
+
+      <ClearHistoryCard />
 
       <p
         style={{
