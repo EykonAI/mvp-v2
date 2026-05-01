@@ -2,6 +2,10 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { STARTER_PERSONAS } from '@/lib/intelligence-analyst/starter-queries';
+import {
+  COLD_START_SUGGESTIONS,
+  type Suggestion,
+} from '@/lib/intelligence-analyst/suggestions';
 
 interface Message {
   id: string;
@@ -35,16 +39,6 @@ const WELCOME: Message = {
   content: `**Welcome to eYKON.ai Intelligence**\n\nI'm your geopolitical analyst. I have access to live data on aircraft, vessels, conflicts, energy infrastructure, and weather — plus posture scores, shadow-fleet leads, convergences, and the calibration ledger.\n\nAsk me anything.`,
 };
 
-// Static fallback suggestions — used by the Suggested tab in PR 3a.
-// PR 4 replaces this with personalised, cross-data-biased output.
-const SUGGESTIONS = [
-  'Top 3 shadow-fleet leads with an AIS gap > 12 h in the past week',
-  'What is the current posture score for the Red Sea?',
-  'Any convergences in the last 6 hours?',
-  'What was our 30-day Brier on conflict escalation?',
-  'Run a Hormuz full closure scenario for 14 days',
-];
-
 type TabKey = 'history' | 'suggested' | null;
 
 export default function ChatPanel() {
@@ -57,6 +51,10 @@ export default function ChatPanel() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyFilter, setHistoryFilter] = useState('');
+  // Suggestions are fetched once per session per §3.3 — refreshing
+  // mid-session is "too noisy". Cold-start fallback rendered while
+  // we wait for the first /api/suggestions response.
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([...COLD_START_SUGGESTIONS]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -81,6 +79,20 @@ export default function ChatPanel() {
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
+
+  // Fetch personalised suggestions once on mount. No refresh on tab
+  // toggles — §3.3 explicitly bans mid-session updates.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/suggestions', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (cancelled || !data?.suggestions) return;
+        setSuggestions(data.suggestions);
+      })
+      .catch(() => { /* keep cold-start fallback */ });
+    return () => { cancelled = true; };
+  }, []);
 
   const send = async (text: string) => {
     if (!text.trim() || loading) return;
@@ -310,7 +322,7 @@ export default function ChatPanel() {
       )}
       {activeTab === 'suggested' && (
         <SuggestedList
-          suggestions={SUGGESTIONS}
+          suggestions={suggestions}
           onPick={text => send(text)}
         />
       )}
@@ -754,35 +766,58 @@ function SuggestedList({
   suggestions,
   onPick,
 }: {
-  suggestions: readonly string[];
+  suggestions: readonly Suggestion[];
   onPick: (text: string) => void;
 }) {
   return (
     <div
       className="shrink-0 overflow-y-auto"
       style={{
-        maxHeight: 240,
+        maxHeight: 320,
         borderBottom: '1px solid var(--rule-soft)',
       }}
     >
       <div className="space-y-1.5 px-3 py-2">
-        {suggestions.slice(0, 5).map((s, i) => (
-          <button
-            key={i}
-            onClick={() => onPick(s)}
-            className="block w-full text-left text-xs px-3 py-2 transition-colors"
-            style={{
-              color: 'var(--ink-dim)',
-              background: 'var(--bg-raised)',
-              border: '1px solid var(--rule)',
-              borderRadius: 2,
-              fontFamily: 'var(--f-body)',
-              cursor: 'pointer',
-            }}
-          >
-            {s}
-          </button>
-        ))}
+        {suggestions.slice(0, 8).map((s, i) => {
+          const cross = s.buckets.length >= 2;
+          return (
+            <button
+              key={i}
+              onClick={() => onPick(s.text)}
+              className="block w-full text-left text-xs px-3 py-2 transition-colors"
+              style={{
+                color: 'var(--ink-dim)',
+                background: 'var(--bg-raised)',
+                border: '1px solid var(--rule)',
+                borderRadius: 2,
+                fontFamily: 'var(--f-body)',
+                cursor: 'pointer',
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span className="flex-1">{s.text}</span>
+                {cross && (
+                  <span
+                    aria-label={`Cross-data: ${s.buckets.length} feeds`}
+                    title={`Spans ${s.buckets.length} data feeds`}
+                    className="shrink-0 px-1 py-px"
+                    style={{
+                      fontFamily: 'var(--f-mono)',
+                      fontSize: 9,
+                      color: 'var(--teal)',
+                      background: 'var(--teal-glow)',
+                      border: '1px solid var(--teal-deep)',
+                      borderRadius: 2,
+                      letterSpacing: '0.04em',
+                    }}
+                  >
+                    × {s.buckets.length}
+                  </span>
+                )}
+              </div>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
