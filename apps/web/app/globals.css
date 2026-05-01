@@ -29,6 +29,13 @@
   --f-display: 'Jura', sans-serif;
   --f-body: 'IBM Plex Sans', sans-serif;
   --f-mono: 'IBM Plex Mono', monospace;
+
+  /* AI Chat / Notification Center column.
+   * Single source of truth: changing this variable resizes both the
+   * side panel (globe + intel views) and the top-nav tab cluster
+   * (which is aligned so GLOBE's left edge sits above this column).
+   * Previous width was 380px; brief §3.1 widens by ~33%. */
+  --chat-panel-width: 506px;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }

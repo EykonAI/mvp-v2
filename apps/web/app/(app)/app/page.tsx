@@ -293,8 +293,11 @@ export default function Home() {
         </div>
 
         <div
-          className={`transition-all duration-300 ease-in-out ${chatOpen ? 'w-[380px]' : 'w-0'} overflow-hidden`}
-          style={{ borderLeft: '1px solid var(--rule-soft)' }}
+          className="transition-all duration-300 ease-in-out overflow-hidden"
+          style={{
+            width: chatOpen ? 'var(--chat-panel-width)' : 0,
+            borderLeft: '1px solid var(--rule-soft)',
+          }}
         >
           {chatOpen && <ChatPanel />}
         </div>

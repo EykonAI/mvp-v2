@@ -1,6 +1,8 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import WelcomeGreeting from '@/components/WelcomeGreeting';
+import NotificationBell from '@/components/NotificationBell';
 
 interface TopNavProps {
   chatOpen?: boolean;
@@ -8,21 +10,36 @@ interface TopNavProps {
 }
 
 /**
- * Global top bar. Mounts above both the globe view (/) and the
- * Intelligence Center (/intel/**). Renders a brand mark, a Globe/Intel
- * toggle (Next.js links — path-driven highlight), a LIVE pill, and a
- * chat toggle when the parent provides one.
+ * Global top bar. Brief §3.1 split the bar into two zones:
+ *   • Left: brand mark, "Geopolitical Intelligence" tagline,
+ *           WELCOME greeting, LIVE pill.
+ *   • Right: four-tab cluster (GLOBE, INTEL, NOTIF, AI CHAT) plus
+ *           a bell glyph. The cluster occupies a column whose width
+ *           equals the AI Chat panel — driven off
+ *           --chat-panel-width in globals.css — so the GLOBE tab's
+ *           left edge sits vertically above the panel's left edge.
+ *
+ * The first three tabs are <Link>s; AI CHAT is a <button> that
+ * toggles the side panel via the parent-supplied callback. All four
+ * share visual treatment so the cluster reads as one unit.
  */
 export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
   const pathname = usePathname();
+  const isGlobe = pathname?.startsWith('/app') ?? false;
   const isIntel = pathname?.startsWith('/intel') ?? false;
+  const isNotif = pathname?.startsWith('/notif') ?? false;
 
   return (
     <nav
-      className="flex items-center gap-7 px-6 py-3 sticky top-0 z-30 backdrop-blur"
+      className="flex items-center sticky top-0 z-30 backdrop-blur"
       style={{
         background: 'rgba(10, 18, 32, 0.9)',
         borderBottom: '1px solid var(--rule-soft)',
+        paddingLeft: 24,
+        paddingRight: 0,
+        paddingTop: 12,
+        paddingBottom: 12,
+        gap: 28,
       }}
     >
       {/* Brand */}
@@ -77,23 +94,11 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
         Geopolitical Intelligence
       </span>
 
-      {/* Mode toggle */}
-      <div
-        className="ml-auto mr-5 flex"
-        style={{
-          background: 'var(--bg-panel)',
-          border: '1px solid var(--rule)',
-          borderRadius: 3,
-          padding: 2,
-        }}
-      >
-        <ToggleLink href="/app" label="Globe" active={!isIntel} />
-        <ToggleLink href="/intel" label="Intel" active={isIntel} />
-      </div>
+      <WelcomeGreeting />
 
       {/* LIVE pill */}
       <span
-        className="inline-flex items-center gap-1.5"
+        className="hidden lg:inline-flex items-center gap-1.5"
         style={{
           fontFamily: 'var(--f-mono)',
           fontSize: 10.5,
@@ -115,49 +120,98 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
         Live
       </span>
 
-      {/* Chat toggle */}
-      {onChatToggle && (
-        <button
+      {/* Right-side tab cluster — width matches the AI Chat panel
+          column so GLOBE's left edge sits directly above the panel's
+          left edge. */}
+      <div
+        style={{
+          marginLeft: 'auto',
+          width: 'var(--chat-panel-width)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 6,
+          paddingLeft: 8,
+          paddingRight: 16,
+        }}
+      >
+        <TabLink href="/app" label="Globe" active={isGlobe} />
+        <TabLink href="/intel" label="Intel" active={isIntel} />
+        <TabLink href="/notif" label="Notif" active={isNotif} />
+        <NotificationBell />
+        <TabButton
+          label="AI Chat"
+          active={!!chatOpen}
           onClick={onChatToggle}
-          aria-label="Toggle AI chat"
-          style={{
-            fontFamily: 'var(--f-mono)',
-            fontSize: 11,
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            color: chatOpen ? 'var(--teal)' : 'var(--ink)',
-            background: 'transparent',
-            border: `1px solid ${chatOpen ? 'var(--teal-dim)' : 'var(--rule-strong)'}`,
-            padding: '5px 12px',
-            borderRadius: 2,
-            cursor: 'pointer',
-          }}
-        >
-          AI Chat
-        </button>
-      )}
+          disabled={!onChatToggle}
+        />
+      </div>
     </nav>
   );
 }
 
-function ToggleLink({ href, label, active }: { href: string; label: string; active: boolean }) {
+const TAB_BASE_STYLE: React.CSSProperties = {
+  fontFamily: 'var(--f-mono)',
+  fontSize: 11,
+  letterSpacing: '0.14em',
+  textTransform: 'uppercase',
+  padding: '6px 14px',
+  borderRadius: 2,
+  border: '1px solid transparent',
+  background: 'transparent',
+  textDecoration: 'none',
+  cursor: 'pointer',
+  flex: '0 1 auto',
+};
+
+function activeStyle(active: boolean): React.CSSProperties {
+  return active
+    ? {
+        color: 'var(--bg-void)',
+        background: 'var(--teal)',
+        borderColor: 'var(--teal)',
+        fontWeight: 500,
+      }
+    : {
+        color: 'var(--ink-dim)',
+        background: 'transparent',
+        borderColor: 'var(--rule-strong)',
+        fontWeight: 400,
+      };
+}
+
+function TabLink({ href, label, active }: { href: string; label: string; active: boolean }) {
   return (
-    <Link
-      href={href}
+    <Link href={href} style={{ ...TAB_BASE_STYLE, ...activeStyle(active) }}>
+      {label}
+    </Link>
+  );
+}
+
+function TabButton({
+  label,
+  active,
+  onClick,
+  disabled,
+}: {
+  label: string;
+  active: boolean;
+  onClick?: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={`Toggle ${label}`}
+      aria-pressed={active}
+      disabled={disabled}
       style={{
-        fontFamily: 'var(--f-mono)',
-        fontSize: 11,
-        letterSpacing: '0.1em',
-        textTransform: 'uppercase',
-        color: active ? 'var(--bg-void)' : 'var(--ink-dim)',
-        background: active ? 'var(--teal)' : 'transparent',
-        fontWeight: active ? 500 : 400,
-        padding: '5px 14px',
-        borderRadius: 2,
-        textDecoration: 'none',
+        ...TAB_BASE_STYLE,
+        ...activeStyle(active),
+        opacity: disabled ? 0.4 : 1,
       }}
     >
       {label}
-    </Link>
+    </button>
   );
 }
