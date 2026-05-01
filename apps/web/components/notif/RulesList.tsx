@@ -214,6 +214,11 @@ function RuleMeta({ rule }: { rule: Rule }) {
     filterSummary = cfg.predicates
       .map(p => p.tool ?? '?')
       .join(' + ');
+  } else if (rule.rule_type === 'outcome_ai' || rule.rule_type === 'cross_data_ai') {
+    const aiCfg = rule.config as { outcome_statement?: string; buckets?: string[] };
+    const buckets = Array.isArray(aiCfg.buckets) ? aiCfg.buckets : [];
+    toolSummary = buckets.length > 0 ? `buckets: ${buckets.length}` : 'buckets: all';
+    filterSummary = aiCfg.outcome_statement ?? '';
   } else if (cfg.tool) {
     toolSummary = `tool: ${String(cfg.tool)}`;
     filterSummary =

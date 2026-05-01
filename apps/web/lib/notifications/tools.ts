@@ -164,6 +164,52 @@ export const MULTI_EVENT_DEFAULT_WINDOW_HOURS = 6;
 export const MULTI_EVENT_MIN_WINDOW_HOURS = 1;
 export const MULTI_EVENT_MAX_WINDOW_HOURS = 168; // 7 days — keep the window query bounded.
 
+// ─── AI rule configs (PR 8) ─────────────────────────────────────
+// Both AI rule types share the same Claude evaluator. cross_data_ai
+// additionally requires ≥2 buckets per brief §3.5; outcome_ai will
+// auto-select buckets if none are specified, falling back to "all"
+// when the user wants the broadest recall.
+
+export const DATA_BUCKETS = [
+  'Air',
+  'Maritime',
+  'Conflict',
+  'EnergyPower',
+  'EnergyPipelines',
+  'EnergyRefineries',
+  'Mining',
+  'AviationInfra',
+  'MaritimeInfra',
+  'Weather',
+] as const;
+export type DataBucket = (typeof DATA_BUCKETS)[number];
+
+const DATA_BUCKET_SET: ReadonlySet<string> = new Set(DATA_BUCKETS);
+
+export function isValidDataBucket(value: unknown): value is DataBucket {
+  return typeof value === 'string' && DATA_BUCKET_SET.has(value);
+}
+
+export interface OutcomeAiConfig {
+  outcome_statement: string;
+  k_events: number;       // capped at AI_K_EVENTS_MAX in the evaluator
+  buckets?: DataBucket[]; // optional scope; empty = all
+}
+
+export interface CrossDataAiConfig {
+  outcome_statement: string;
+  buckets: DataBucket[];  // ≥2 required
+}
+
+// Brief §10 caps. K=50 events / 8,000 input tokens per evaluation.
+export const AI_K_EVENTS_DEFAULT = 50;
+export const AI_K_EVENTS_MAX = 50;
+export const AI_INPUT_TOKEN_BUDGET = 8000;
+export const CROSS_DATA_AI_MIN_BUCKETS = 2;
+
+export const OUTCOME_STATEMENT_MAX_CHARS = 600;
+export const OUTCOME_STATEMENT_MIN_CHARS = 12;
+
 const TOOL_BY_ID: ReadonlyMap<string, (typeof SINGLE_EVENT_TOOLS)[number]> = new Map(
   SINGLE_EVENT_TOOLS.map(t => [t.id, t]),
 );
@@ -215,6 +261,20 @@ export function coercePredicate(raw: {
     tool: raw.tool,
     filters: coerceFilters(raw.tool, raw.filters ?? {}),
   };
+}
+
+/**
+ * Auto-generate a name for an AI rule from its outcome statement.
+ * Truncates to 120 chars; same shape used by both outcome_ai and
+ * cross_data_ai.
+ */
+export function suggestAiRuleName(
+  ruleType: 'outcome_ai' | 'cross_data_ai',
+  outcomeStatement: string,
+): string {
+  const prefix = ruleType === 'cross_data_ai' ? 'Cross-data AI · ' : 'Outcome AI · ';
+  const trimmed = outcomeStatement.trim().replace(/\s+/g, ' ');
+  return `${prefix}${trimmed}`.slice(0, 120);
 }
 
 /**

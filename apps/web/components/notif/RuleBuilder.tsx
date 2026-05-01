@@ -4,13 +4,19 @@ import {
   SINGLE_EVENT_TOOLS,
   type SingleEventToolId,
   type FilterValue,
+  type DataBucket,
   suggestRuleName,
   suggestMultiEventRuleName,
+  suggestAiRuleName,
+  DATA_BUCKETS,
+  CROSS_DATA_AI_MIN_BUCKETS,
   MULTI_EVENT_MIN_PREDICATES,
   MULTI_EVENT_MAX_PREDICATES,
   MULTI_EVENT_DEFAULT_WINDOW_HOURS,
   MULTI_EVENT_MIN_WINDOW_HOURS,
   MULTI_EVENT_MAX_WINDOW_HOURS,
+  OUTCOME_STATEMENT_MAX_CHARS,
+  OUTCOME_STATEMENT_MIN_CHARS,
 } from '@/lib/notifications/tools';
 import { DEFAULT_COOLDOWN_MINUTES, MIN_COOLDOWN_MINUTES } from '@/lib/notifications/rule-limits';
 import type { PersonaId } from '@/lib/intelligence-analyst/personas';
@@ -31,7 +37,7 @@ interface VerifiedChannel {
   label: string | null;
 }
 
-type RuleMode = 'single_event' | 'multi_event';
+type RuleMode = 'single_event' | 'multi_event' | 'outcome_ai' | 'cross_data_ai';
 
 interface PredicateState {
   tool: SingleEventToolId;
@@ -59,6 +65,10 @@ export function RuleBuilder({ persona, onCreated, onCancel }: RuleBuilderProps) 
     { tool: SINGLE_EVENT_TOOLS[1].id, filters: initialFilters(SINGLE_EVENT_TOOLS[1].id) },
   ]);
   const [windowHours, setWindowHours] = useState<number>(MULTI_EVENT_DEFAULT_WINDOW_HOURS);
+
+  // AI rules state
+  const [outcomeStatement, setOutcomeStatement] = useState('');
+  const [aiBuckets, setAiBuckets] = useState<DataBucket[]>([]);
 
   // Shared state
   const [name, setName] = useState('');
@@ -99,11 +109,13 @@ export function RuleBuilder({ persona, onCreated, onCancel }: RuleBuilderProps) 
 
   const placeholderName = useMemo(() => {
     if (mode === 'single_event') return suggestRuleName(tool, filters);
-    return suggestMultiEventRuleName({
-      predicates: predicates.map(p => ({ tool: p.tool, filters: p.filters })),
-      window_hours: windowHours,
-    });
-  }, [mode, tool, filters, predicates, windowHours]);
+    if (mode === 'multi_event')
+      return suggestMultiEventRuleName({
+        predicates: predicates.map(p => ({ tool: p.tool, filters: p.filters })),
+        window_hours: windowHours,
+      });
+    return suggestAiRuleName(mode, outcomeStatement || '(outcome statement)');
+  }, [mode, tool, filters, predicates, windowHours, outcomeStatement]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -113,10 +125,12 @@ export function RuleBuilder({ persona, onCreated, onCancel }: RuleBuilderProps) 
       const config =
         mode === 'single_event'
           ? { tool, filters }
-          : {
+          : mode === 'multi_event'
+          ? {
               predicates: predicates.map(p => ({ tool: p.tool, filters: p.filters })),
               window_hours: windowHours,
-            };
+            }
+          : { outcome_statement: outcomeStatement.trim(), buckets: aiBuckets };
       const r = await fetch('/api/notifications/rules', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -212,6 +226,16 @@ export function RuleBuilder({ persona, onCreated, onCancel }: RuleBuilderProps) 
         />
       )}
 
+      {(mode === 'outcome_ai' || mode === 'cross_data_ai') && (
+        <AiFields
+          mode={mode}
+          outcomeStatement={outcomeStatement}
+          onOutcomeChange={setOutcomeStatement}
+          buckets={aiBuckets}
+          onBucketsChange={setAiBuckets}
+        />
+      )}
+
       <label style={fieldLabel}>
         Name (optional)
         <input
@@ -280,7 +304,17 @@ export function RuleBuilder({ persona, onCreated, onCancel }: RuleBuilderProps) 
         <button type="button" onClick={onCancel} style={btnGhost}>
           Cancel
         </button>
-        <button type="submit" disabled={submitting || selectedChannelIds.length === 0} style={btnPrimary}>
+        <button
+          type="submit"
+          disabled={
+            submitting ||
+            selectedChannelIds.length === 0 ||
+            ((mode === 'outcome_ai' || mode === 'cross_data_ai') &&
+              outcomeStatement.trim().length < OUTCOME_STATEMENT_MIN_CHARS) ||
+            (mode === 'cross_data_ai' && aiBuckets.length < CROSS_DATA_AI_MIN_BUCKETS)
+          }
+          style={btnPrimary}
+        >
           {submitting ? 'Saving…' : 'Enable rule'}
         </button>
       </div>
@@ -301,12 +335,13 @@ function ModeSelector({ mode, onChange }: { mode: RuleMode; onChange: (m: RuleMo
         borderRadius: 3,
         padding: 2,
         alignSelf: 'flex-start',
+        flexWrap: 'wrap',
       }}
     >
       <ModeTab label="Single event" active={mode === 'single_event'} onClick={() => onChange('single_event')} />
       <ModeTab label="Multi-event" active={mode === 'multi_event'} onClick={() => onChange('multi_event')} />
-      <ModeTab label="Outcome AI · PR 8" active={false} disabled />
-      <ModeTab label="Cross-data AI · PR 8" active={false} disabled />
+      <ModeTab label="Outcome AI" active={mode === 'outcome_ai'} onClick={() => onChange('outcome_ai')} />
+      <ModeTab label="Cross-data AI" active={mode === 'cross_data_ai'} onClick={() => onChange('cross_data_ai')} />
     </div>
   );
 }
@@ -449,6 +484,84 @@ function MultiEventFields({
   );
 }
 
+function AiFields({
+  mode,
+  outcomeStatement,
+  onOutcomeChange,
+  buckets,
+  onBucketsChange,
+}: {
+  mode: 'outcome_ai' | 'cross_data_ai';
+  outcomeStatement: string;
+  onOutcomeChange: (s: string) => void;
+  buckets: DataBucket[];
+  onBucketsChange: (b: DataBucket[]) => void;
+}) {
+  const remainingChars = OUTCOME_STATEMENT_MAX_CHARS - outcomeStatement.length;
+  return (
+    <>
+      <label style={fieldLabel}>
+        Outcome statement
+        <textarea
+          value={outcomeStatement}
+          onChange={e => onOutcomeChange(e.target.value.slice(0, OUTCOME_STATEMENT_MAX_CHARS))}
+          rows={3}
+          maxLength={OUTCOME_STATEMENT_MAX_CHARS}
+          placeholder={
+            mode === 'outcome_ai'
+              ? 'Anything that could move WTI by ≥$2/bbl in the next 24 hours.'
+              : 'Convergence of conflict + maritime + energy signals affecting Hormuz.'
+          }
+          style={{ ...inputStyle, minHeight: 70, lineHeight: 1.4 }}
+        />
+        <span style={hintStyle}>
+          {outcomeStatement.length} / {OUTCOME_STATEMENT_MAX_CHARS} chars
+          {outcomeStatement.length > 0 && outcomeStatement.length < OUTCOME_STATEMENT_MIN_CHARS
+            ? ` · need at least ${OUTCOME_STATEMENT_MIN_CHARS}`
+            : ''}
+          {remainingChars < 60 ? ` · ${remainingChars} left` : ''}
+        </span>
+      </label>
+
+      <fieldset style={{ ...fieldLabel, border: 'none', padding: 0, margin: 0 }}>
+        <legend style={{ marginBottom: 4 }}>
+          Data buckets
+          {mode === 'cross_data_ai' && (
+            <span style={{ ...hintStyle, marginLeft: 8 }}>
+              (≥{CROSS_DATA_AI_MIN_BUCKETS} required)
+            </span>
+          )}
+        </legend>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {DATA_BUCKETS.map(b => {
+            const active = buckets.includes(b);
+            return (
+              <label key={b} style={channelChip(active)}>
+                <input
+                  type="checkbox"
+                  checked={active}
+                  onChange={e =>
+                    onBucketsChange(
+                      e.target.checked ? [...buckets, b] : buckets.filter(x => x !== b),
+                    )
+                  }
+                  style={{ marginRight: 6 }}
+                />
+                {b}
+              </label>
+            );
+          })}
+        </div>
+        <span style={hintStyle}>
+          {mode === 'outcome_ai'
+            ? 'Leave empty to let the evaluator sample from every bucket.'
+            : 'Cross-data rules require at least 2 buckets — fires only when the model finds supporting events spanning ≥2 of them.'}
+        </span>
+      </fieldset>
+    </>
+  );
+}
+
 function PredicateCard({
   index,
   predicate,
@@ -569,6 +682,12 @@ function humanizeCreateError(data: {
       return `Multi-event rules need at least ${data.min} predicates.`;
     case 'too_many_predicates':
       return `Multi-event rules allow at most ${data.max} predicates.`;
+    case 'outcome_statement_too_short':
+      return `Outcome statement needs at least ${data.min} characters.`;
+    case 'outcome_statement_too_long':
+      return `Outcome statement is too long (max ${data.max} chars).`;
+    case 'too_few_buckets':
+      return `Cross-data rules need at least ${data.min} data buckets.`;
     case 'unsupported_rule_type':
       return data.hint ?? 'This rule type is not yet supported.';
     case 'forbidden':
