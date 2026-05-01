@@ -1,11 +1,31 @@
 'use client';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { formatDistanceToNow } from 'date-fns';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   tool_calls?: number;
+  // When true, this message is a frozen snapshot loaded from
+  // /api/user_queries — not part of the live conversation thread.
+  snapshot?: boolean;
+  // For snapshot assistant messages, the source row id so the
+  // Re-run button can hit /api/user_queries/[id]/rerun.
+  query_id?: string;
+}
+
+interface HistoryEntry {
+  id: string;
+  query_text: string;
+  response_text: string;
+  tool_calls: Array<{ name: string; input: any; row_count: number | null }> | null;
+  domain_tags: string[] | null;
+  created_at: string;
+  last_run_at: string;
+  run_count: number;
+  exported_at: string | null;
+  starred: boolean;
 }
 
 const WELCOME: Message = {
@@ -14,6 +34,8 @@ const WELCOME: Message = {
   content: `**Welcome to eYKON.ai Intelligence**\n\nI'm your geopolitical analyst. I have access to live data on aircraft, vessels, conflicts, energy infrastructure, and weather — plus posture scores, shadow-fleet leads, convergences, and the calibration ledger.\n\nAsk me anything.`,
 };
 
+// Static fallback suggestions — used by the Suggested tab in PR 3a.
+// PR 4 replaces this with personalised, cross-data-biased output.
 const SUGGESTIONS = [
   'Top 3 shadow-fleet leads with an AIS gap > 12 h in the past week',
   'What is the current posture score for the Red Sea?',
@@ -22,17 +44,41 @@ const SUGGESTIONS = [
   'Run a Hormuz full closure scenario for 14 days',
 ];
 
+type TabKey = 'history' | 'suggested' | null;
+
 export default function ChatPanel() {
   const [messages, setMessages] = useState<Message[]>([WELCOME]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [suggestions] = useState(SUGGESTIONS);
+  // Default the Suggested tab open on first load — preserves today's
+  // UX where the curated list greets new users. Closes on first send.
+  const [activeTab, setActiveTab] = useState<TabKey>('suggested');
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
+
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const res = await fetch('/api/user_queries', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      setHistory(data.entries ?? []);
+    } catch {
+      // Silent — history is a soft feature; failure shouldn't break chat.
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   const send = async (text: string) => {
     if (!text.trim() || loading) return;
@@ -41,9 +87,18 @@ export default function ChatPanel() {
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setLoading(true);
+    // Collapse the tab strip once the user starts conversing — they're
+    // engaged, the chat area should own the panel's vertical space.
+    setActiveTab(null);
 
     try {
-      const apiMessages = [...messages.filter(m => m.id !== 'welcome'), userMsg].map(m => ({
+      // Snapshot bubbles are visual only — never sent back to /api/chat
+      // (they would confuse the model into thinking the snapshot is
+      // part of the live thread).
+      const apiMessages = [
+        ...messages.filter(m => m.id !== 'welcome' && !m.snapshot),
+        userMsg,
+      ].map(m => ({
         role: m.role,
         content: m.content,
       }));
@@ -64,6 +119,9 @@ export default function ChatPanel() {
         tool_calls: data.tool_calls,
       };
       setMessages(prev => [...prev, assistantMsg]);
+      // Refresh history so the just-submitted query appears in the
+      // tab. Brief §3.2: list updates within 1 second of submission.
+      void loadHistory();
     } catch (err: any) {
       setMessages(prev => [
         ...prev,
@@ -86,6 +144,59 @@ export default function ChatPanel() {
     }
   };
 
+  const openSnapshot = (entry: HistoryEntry) => {
+    const tag = `snapshot-${entry.id}-${Date.now()}`;
+    const userBubble: Message = {
+      id: `${tag}-q`,
+      role: 'user',
+      content: entry.query_text,
+      snapshot: true,
+    };
+    const assistantBubble: Message = {
+      id: `${tag}-r`,
+      role: 'assistant',
+      content: entry.response_text,
+      snapshot: true,
+      query_id: entry.id,
+      tool_calls: (entry.tool_calls ?? []).length || undefined,
+    };
+    setMessages(prev => [...prev, userBubble, assistantBubble]);
+    setActiveTab(null);
+  };
+
+  const rerunSnapshot = async (queryId: string) => {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/user_queries/${queryId}/rerun`, { method: 'POST' });
+      if (!res.ok) throw new Error(`Re-run failed: ${res.status}`);
+      const data = await res.json();
+      const freshMsg: Message = {
+        id: `rerun-${queryId}-${Date.now()}`,
+        role: 'assistant',
+        content: data.content || data.error || 'No response',
+        tool_calls: data.tool_calls,
+      };
+      setMessages(prev => [...prev, freshMsg]);
+      void loadHistory();
+    } catch (err: any) {
+      setMessages(prev => [
+        ...prev,
+        {
+          id: `rerun-err-${Date.now()}`,
+          role: 'assistant',
+          content: `Error: ${err.message}.`,
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleTab = (key: TabKey) => {
+    setActiveTab(prev => (prev === key ? null : key));
+  };
+
   return (
     <div className="h-full flex flex-col" style={{ background: 'var(--bg-panel)' }}>
       {/* Header */}
@@ -106,6 +217,7 @@ export default function ChatPanel() {
               }}
             />
             <span
+              aria-label="eYKON Intelligence Analyst"
               style={{
                 fontFamily: 'var(--f-display)',
                 fontSize: 13,
@@ -114,7 +226,7 @@ export default function ChatPanel() {
                 letterSpacing: '0.04em',
               }}
             >
-              Intelligence Analyst
+              eYKON Intelligence Analyst
             </span>
           </div>
           <span
@@ -131,6 +243,38 @@ export default function ChatPanel() {
         </div>
       </div>
 
+      {/* Tab strip */}
+      <div
+        className="px-3 shrink-0 flex items-center gap-0"
+        style={{ borderBottom: '1px solid var(--rule-soft)' }}
+      >
+        <TabButton
+          label="Query History"
+          active={activeTab === 'history'}
+          onClick={() => toggleTab('history')}
+        />
+        <TabButton
+          label="Suggested"
+          active={activeTab === 'suggested'}
+          onClick={() => toggleTab('suggested')}
+        />
+      </div>
+
+      {/* Tab content */}
+      {activeTab === 'history' && (
+        <HistoryList
+          entries={history}
+          loading={historyLoading}
+          onPick={openSnapshot}
+        />
+      )}
+      {activeTab === 'suggested' && (
+        <SuggestedList
+          suggestions={SUGGESTIONS}
+          onPick={text => send(text)}
+        />
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         {messages.map(msg => (
@@ -142,10 +286,26 @@ export default function ChatPanel() {
                 color: 'var(--ink)',
                 border: msg.role === 'user' ? '1px solid var(--teal-dim)' : '1px solid var(--rule)',
                 borderRadius: 3,
+                opacity: msg.snapshot ? 0.85 : 1,
               }}
             >
+              {msg.snapshot && (
+                <div
+                  className="mb-1.5 flex items-center gap-1"
+                  style={{
+                    fontFamily: 'var(--f-mono)',
+                    fontSize: 9,
+                    color: 'var(--ink-faint)',
+                    letterSpacing: '0.1em',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  <span>◇</span>
+                  <span>Snapshot</span>
+                </div>
+              )}
               <div className="chat-content whitespace-pre-wrap">{msg.content}</div>
-              {msg.tool_calls != null && msg.tool_calls > 0 && (
+              {msg.tool_calls != null && msg.tool_calls > 0 && !msg.snapshot && (
                 <div
                   className="mt-1.5 flex items-center gap-1"
                   style={{
@@ -161,6 +321,26 @@ export default function ChatPanel() {
                     {msg.tool_calls} tool iteration{msg.tool_calls > 1 ? 's' : ''}
                   </span>
                 </div>
+              )}
+              {msg.snapshot && msg.query_id && (
+                <button
+                  onClick={() => rerunSnapshot(msg.query_id!)}
+                  disabled={loading}
+                  className="mt-2 px-2 py-1 text-xs transition-colors"
+                  style={{
+                    background: 'transparent',
+                    color: 'var(--teal)',
+                    border: '1px solid var(--teal-deep)',
+                    borderRadius: 2,
+                    fontFamily: 'var(--f-mono)',
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    opacity: loading ? 0.5 : 1,
+                  }}
+                >
+                  ↻ Re-run with fresh data
+                </button>
               )}
             </div>
           </div>
@@ -178,28 +358,6 @@ export default function ChatPanel() {
                 <div className="typing-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--teal)' }} />
               </div>
             </div>
-          </div>
-        )}
-
-        {messages.length <= 2 && !loading && (
-          <div className="space-y-1.5 pt-2">
-            <div className="eyebrow">Suggested queries</div>
-            {suggestions.slice(0, 4).map((s, i) => (
-              <button
-                key={i}
-                onClick={() => send(s)}
-                className="block w-full text-left text-xs px-3 py-2 transition-colors"
-                style={{
-                  color: 'var(--ink-dim)',
-                  background: 'var(--bg-raised)',
-                  border: '1px solid var(--rule)',
-                  borderRadius: 2,
-                  fontFamily: 'var(--f-body)',
-                }}
-              >
-                {s}
-              </button>
-            ))}
           </div>
         )}
 
@@ -246,4 +404,205 @@ export default function ChatPanel() {
       </div>
     </div>
   );
+}
+
+// ─── Sub-components ────────────────────────────────────────────
+
+function TabButton({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="px-3 py-2 text-xs transition-colors"
+      style={{
+        background: 'transparent',
+        color: active ? 'var(--ink)' : 'var(--ink-dim)',
+        border: 'none',
+        borderBottom: active ? '2px solid var(--teal)' : '2px solid transparent',
+        fontFamily: 'var(--f-mono)',
+        letterSpacing: '0.1em',
+        textTransform: 'uppercase',
+        cursor: 'pointer',
+        fontWeight: active ? 500 : 400,
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function HistoryList({
+  entries,
+  loading,
+  onPick,
+}: {
+  entries: HistoryEntry[];
+  loading: boolean;
+  onPick: (e: HistoryEntry) => void;
+}) {
+  if (loading) {
+    return (
+      <div
+        className="px-3 py-3 shrink-0"
+        style={{ borderBottom: '1px solid var(--rule-soft)' }}
+      >
+        <div className="text-xs" style={{ color: 'var(--ink-faint)' }}>
+          Loading history…
+        </div>
+      </div>
+    );
+  }
+  if (entries.length === 0) {
+    return (
+      <div
+        className="px-3 py-3 shrink-0"
+        style={{ borderBottom: '1px solid var(--rule-soft)' }}
+      >
+        <div className="text-xs" style={{ color: 'var(--ink-faint)' }}>
+          No queries yet. Ask the analyst something — your history will collect here.
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div
+      className="shrink-0 overflow-y-auto"
+      style={{
+        maxHeight: 240,
+        borderBottom: '1px solid var(--rule-soft)',
+      }}
+    >
+      <ul className="space-y-px px-1.5 py-1.5">
+        {entries.map(entry => (
+          <li key={entry.id}>
+            <button
+              onClick={() => onPick(entry)}
+              className="w-full text-left px-2 py-1.5 transition-colors"
+              style={{
+                background: 'transparent',
+                border: '1px solid transparent',
+                borderRadius: 2,
+                cursor: 'pointer',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = 'var(--bg-hover)';
+                e.currentTarget.style.borderColor = 'var(--rule)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'transparent';
+                e.currentTarget.style.borderColor = 'transparent';
+              }}
+            >
+              <div
+                className="text-xs"
+                style={{
+                  color: 'var(--ink)',
+                  fontFamily: 'var(--f-body)',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {truncate(entry.query_text, 80)}
+              </div>
+              <div className="mt-1 flex items-center gap-2">
+                <span
+                  style={{
+                    fontFamily: 'var(--f-mono)',
+                    fontSize: 9,
+                    color: 'var(--ink-faint)',
+                    letterSpacing: '0.05em',
+                  }}
+                >
+                  {relativeTime(entry.last_run_at)}
+                </span>
+                {primaryToolName(entry) && (
+                  <span
+                    className="px-1 py-px"
+                    style={{
+                      fontFamily: 'var(--f-mono)',
+                      fontSize: 9,
+                      color: 'var(--teal)',
+                      background: 'var(--teal-glow)',
+                      border: '1px solid var(--teal-deep)',
+                      borderRadius: 2,
+                      letterSpacing: '0.04em',
+                    }}
+                  >
+                    {primaryToolName(entry)}
+                  </span>
+                )}
+              </div>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function SuggestedList({
+  suggestions,
+  onPick,
+}: {
+  suggestions: readonly string[];
+  onPick: (text: string) => void;
+}) {
+  return (
+    <div
+      className="shrink-0 overflow-y-auto"
+      style={{
+        maxHeight: 240,
+        borderBottom: '1px solid var(--rule-soft)',
+      }}
+    >
+      <div className="space-y-1.5 px-3 py-2">
+        {suggestions.slice(0, 5).map((s, i) => (
+          <button
+            key={i}
+            onClick={() => onPick(s)}
+            className="block w-full text-left text-xs px-3 py-2 transition-colors"
+            style={{
+              color: 'var(--ink-dim)',
+              background: 'var(--bg-raised)',
+              border: '1px solid var(--rule)',
+              borderRadius: 2,
+              fontFamily: 'var(--f-body)',
+              cursor: 'pointer',
+            }}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Helpers ────────────────────────────────────────────────────
+
+function truncate(s: string, n: number): string {
+  if (s.length <= n) return s;
+  return s.slice(0, n - 1).trimEnd() + '…';
+}
+
+function relativeTime(iso: string): string {
+  try {
+    return formatDistanceToNow(new Date(iso), { addSuffix: true });
+  } catch {
+    return '';
+  }
+}
+
+function primaryToolName(entry: HistoryEntry): string | null {
+  const calls = entry.tool_calls ?? [];
+  if (calls.length === 0) return null;
+  return calls[0]?.name ?? null;
 }
