@@ -102,12 +102,12 @@ export function inferDomainTags(queryText: string, toolCalls: ToolCallRecord[]):
 
 /**
  * Insert one row into user_queries. Failures are logged and swallowed —
- * persistence must never break the chat response. The caller is
- * responsible for skipping when `userId` is absent (auth-disabled
- * fallback path); this helper double-checks belt-and-braces.
+ * persistence must never break the chat response. Returns the new
+ * row id on success (so the caller can wire it to the UI for
+ * downstream actions like PDF export), or null on failure.
  */
-export async function persistUserQuery(opts: PersistOptions): Promise<void> {
-  if (!opts.userId) return;
+export async function persistUserQuery(opts: PersistOptions): Promise<string | null> {
+  if (!opts.userId) return null;
 
   const supabase = createServerSupabase();
   const domain_tags = inferDomainTags(opts.queryText, opts.toolCalls);
@@ -118,15 +118,21 @@ export async function persistUserQuery(opts: PersistOptions): Promise<void> {
     row_count: tc.row_count,
   }));
 
-  const { error } = await supabase.from('user_queries').insert({
-    user_id: opts.userId,
-    query_text: opts.queryText,
-    response_text: opts.responseText,
-    tool_calls,
-    domain_tags,
-  });
+  const { data, error } = await supabase
+    .from('user_queries')
+    .insert({
+      user_id: opts.userId,
+      query_text: opts.queryText,
+      response_text: opts.responseText,
+      tool_calls,
+      domain_tags,
+    })
+    .select('id')
+    .single();
 
   if (error) {
     console.error('[user_queries] insert failed:', error.message);
+    return null;
   }
+  return data?.id ?? null;
 }

@@ -15,6 +15,7 @@ import {
   rowCountFromToolResult,
   type ToolCallRecord,
 } from '@/lib/intelligence-analyst/persistence';
+import { decorateSystemPrompt, isValidPersona } from '@/lib/intelligence-analyst/personas';
 
 export const maxDuration = 60;
 
@@ -55,10 +56,12 @@ function extractLastUserText(messages: Array<{ role: string; content: any }>): s
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages } = await req.json();
+    const { messages, persona: personaInput } = await req.json();
     if (!messages || !Array.isArray(messages)) {
       return NextResponse.json({ error: 'messages array required' }, { status: 400 });
     }
+    const persona = isValidPersona(personaInput) ? personaInput : undefined;
+    const systemPrompt = decorateSystemPrompt(CONVERSATIONAL_SYSTEM_PROMPT, persona);
 
     // ── Tier gate + atomic rate limit ────────────────────────
     const { userId, tier } = await resolveCaller();
@@ -128,7 +131,7 @@ export async function POST(req: NextRequest) {
     let response = await anthropic.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 4096,
-      system: CONVERSATIONAL_SYSTEM_PROMPT,
+      system: systemPrompt,
       tools: CLAUDE_TOOLS,
       messages: apiMessages,
     });
@@ -167,7 +170,7 @@ export async function POST(req: NextRequest) {
       response = await anthropic.messages.create({
         model: 'claude-sonnet-4-5',
         max_tokens: 4096,
-        system: CONVERSATIONAL_SYSTEM_PROMPT,
+        system: systemPrompt,
         tools: CLAUDE_TOOLS,
         messages: allMessages,
       });
@@ -181,11 +184,12 @@ export async function POST(req: NextRequest) {
     // Persist for the Query History tab and the Suggested-tab ranker.
     // Awaited so the row exists before the client re-fetches history;
     // failures are logged inside persistUserQuery and never thrown.
+    let queryId: string | null = null;
     if (userId) {
       const userQueryText = extractLastUserText(apiMessages);
       if (userQueryText) {
         try {
-          await persistUserQuery({
+          queryId = await persistUserQuery({
             userId,
             queryText: userQueryText,
             responseText: textContent,
@@ -202,6 +206,7 @@ export async function POST(req: NextRequest) {
       usage: response.usage,
       tool_calls: iterations,
       model: response.model,
+      query_id: queryId,
     });
   } catch (err: any) {
     console.error('Chat API error:', err);
