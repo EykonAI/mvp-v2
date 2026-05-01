@@ -2,8 +2,10 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { getUserProfile } from '@/lib/auth/session';
 import { TIER_LABELS } from '@/lib/pricing';
+import { tierMeetsRequirement } from '@/lib/subscription';
 import { ReferralCard } from '@/components/settings/ReferralCard';
 import { ClearHistoryCard } from '@/components/settings/ClearHistoryCard';
+import { ChannelsCard } from '@/components/settings/ChannelsCard';
 import { APP_URL } from '@/lib/url';
 
 export const metadata: Metadata = {
@@ -121,6 +123,8 @@ export default async function SettingsPage() {
       </section>
 
       <ReferralCard referralCode={referralCode} baseUrl={baseUrl} />
+
+      {tierMeetsRequirement(displayTier, 'pro') && <ChannelsCard />}
 
       <ClearHistoryCard />
 
