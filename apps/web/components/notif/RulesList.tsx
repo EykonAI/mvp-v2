@@ -200,14 +200,30 @@ export function RulesList({ persona }: { persona: PersonaId }) {
 }
 
 function RuleMeta({ rule }: { rule: Rule }) {
-  const cfg = (rule.config ?? {}) as { tool?: string; filters?: Record<string, unknown> };
-  const filterSummary =
-    cfg.filters && typeof cfg.filters === 'object'
-      ? Object.entries(cfg.filters)
-          .filter(([, v]) => v !== '' && v !== 0 && v !== undefined && v !== null)
-          .map(([k, v]) => `${k}=${v}`)
-          .join(' · ')
-      : '';
+  const cfg = (rule.config ?? {}) as {
+    tool?: string;
+    filters?: Record<string, unknown>;
+    predicates?: Array<{ tool?: string; filters?: Record<string, unknown> }>;
+    window_hours?: number;
+  };
+
+  let toolSummary = '';
+  let filterSummary = '';
+  if (rule.rule_type === 'multi_event' && Array.isArray(cfg.predicates)) {
+    toolSummary = `predicates: ${cfg.predicates.length} · window: ${cfg.window_hours ?? '?'}h`;
+    filterSummary = cfg.predicates
+      .map(p => p.tool ?? '?')
+      .join(' + ');
+  } else if (cfg.tool) {
+    toolSummary = `tool: ${String(cfg.tool)}`;
+    filterSummary =
+      cfg.filters && typeof cfg.filters === 'object'
+        ? Object.entries(cfg.filters)
+            .filter(([, v]) => v !== '' && v !== 0 && v !== undefined && v !== null)
+            .map(([k, v]) => `${k}=${v}`)
+            .join(' · ')
+        : '';
+  }
 
   return (
     <div
@@ -226,7 +242,7 @@ function RuleMeta({ rule }: { rule: Rule }) {
         ● {rule.active ? 'active' : 'paused'}
       </span>
       <span>{rule.rule_type.replace('_', ' ')}</span>
-      {cfg.tool && <span>tool: {String(cfg.tool)}</span>}
+      {toolSummary && <span>{toolSummary}</span>}
       <span>cooldown: {rule.cooldown_minutes}m</span>
       <span>channels: {rule.channel_ids.length}</span>
       {rule.last_fired_at && (

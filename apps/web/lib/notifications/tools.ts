@@ -147,6 +147,23 @@ export interface SingleEventConfig {
   filters: Record<string, FilterValue>;
 }
 
+// Multi-event rule (PR 7). The predicates array is ≥2 single-event
+// configs, evaluated as an AND across the window: a fire happens
+// when every predicate has at least one matching event within the
+// same `window_hours` window. The window walks forward in real time
+// — the evaluator looks at the last `window_hours` of feed data on
+// each cron tick.
+export interface MultiEventConfig {
+  predicates: SingleEventConfig[];
+  window_hours: number;
+}
+
+export const MULTI_EVENT_MIN_PREDICATES = 2;
+export const MULTI_EVENT_MAX_PREDICATES = 5;
+export const MULTI_EVENT_DEFAULT_WINDOW_HOURS = 6;
+export const MULTI_EVENT_MIN_WINDOW_HOURS = 1;
+export const MULTI_EVENT_MAX_WINDOW_HOURS = 168; // 7 days — keep the window query bounded.
+
 const TOOL_BY_ID: ReadonlyMap<string, (typeof SINGLE_EVENT_TOOLS)[number]> = new Map(
   SINGLE_EVENT_TOOLS.map(t => [t.id, t]),
 );
@@ -182,6 +199,36 @@ export function coerceFilters(
     }
   }
   return out;
+}
+
+/**
+ * Build a clean SingleEventConfig from a raw predicate object,
+ * validating the tool id and coercing filters. Returns null when the
+ * tool is unknown — caller (API) maps this to a 400.
+ */
+export function coercePredicate(raw: {
+  tool?: unknown;
+  filters?: Record<string, unknown>;
+}): SingleEventConfig | null {
+  if (!isValidSingleEventTool(raw.tool)) return null;
+  return {
+    tool: raw.tool,
+    filters: coerceFilters(raw.tool, raw.filters ?? {}),
+  };
+}
+
+/**
+ * Auto-generate a rule name for a multi-event rule. Mirrors the
+ * single-event helper: shows up to 2 tool labels and the window.
+ */
+export function suggestMultiEventRuleName(config: MultiEventConfig): string {
+  if (!config.predicates?.length) return 'Multi-event rule';
+  const labels = config.predicates
+    .slice(0, 2)
+    .map(p => getSingleEventTool(p.tool)?.label ?? p.tool)
+    .join(' + ');
+  const more = config.predicates.length > 2 ? ` (+${config.predicates.length - 2})` : '';
+  return `${labels}${more} within ${config.window_hours}h`.slice(0, 120);
 }
 
 /**

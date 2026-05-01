@@ -4,6 +4,7 @@ import {
   type SingleEventConfig,
   type SingleEventToolId,
   type FilterValue,
+  type MultiEventConfig,
 } from './tools';
 import type { FirePayload } from './dispatch';
 
@@ -69,10 +70,23 @@ export async function findSingleEventMatch(
 ): Promise<MatchedEvent | null> {
   const config = rule.config as SingleEventConfig;
   if (!config?.tool) return null;
+  const fromIso = evaluationFromIso(rule);
+  return queryToolForMatch(supabase, config, fromIso);
+}
+
+/**
+ * Generic per-tool query — used by single_event directly and by
+ * multi_event once per predicate. Returns the most-recent matching
+ * row with its ingested_at carried through on `row` so the caller
+ * can check window alignment.
+ */
+export async function queryToolForMatch(
+  supabase: SupabaseClient,
+  config: SingleEventConfig,
+  fromIso: string,
+): Promise<MatchedEvent | null> {
   const tool = getSingleEventTool(config.tool);
   if (!tool) return null;
-
-  const fromIso = evaluationFromIso(rule);
   const filters = config.filters ?? {};
 
   switch (config.tool as SingleEventToolId) {
@@ -91,6 +105,93 @@ export async function findSingleEventMatch(
     default:
       return null;
   }
+}
+
+// ─── Multi-event evaluator (PR 7) ────────────────────────────────
+
+export interface MultiEventMatchResult {
+  /** Most-recent matched event per predicate, in input order. */
+  matches: MatchedEvent[];
+  /** ISO timestamps of each match (parallel to `matches`). */
+  matchedAtIso: string[];
+}
+
+/**
+ * Multi-event AND semantics: every predicate must have at least one
+ * matching event in the last `window_hours` AND the spread between
+ * the oldest and newest match must be ≤ `window_hours`.
+ *
+ * The per-predicate floor is MAX(rule.created_at, now - window_hours)
+ * so a brand-new rule doesn't replay events from before it existed.
+ * Cooldown is applied by the caller (cron route) — same gate as the
+ * single-event branch.
+ */
+export async function findMultiEventMatch(
+  supabase: SupabaseClient,
+  rule: RuleRow,
+): Promise<MultiEventMatchResult | null> {
+  const config = rule.config as unknown as MultiEventConfig;
+  const predicates = Array.isArray(config?.predicates) ? config.predicates : [];
+  if (predicates.length < 2) return null;
+  const windowHours = Number(config.window_hours);
+  if (!Number.isFinite(windowHours) || windowHours <= 0) return null;
+
+  const now = Date.now();
+  const windowMs = windowHours * 60 * 60_000;
+  const createdAtMs = new Date(rule.created_at).getTime();
+  const fromMs = Math.max(createdAtMs, now - windowMs);
+  const fromIso = new Date(fromMs).toISOString();
+
+  const perPredicate = await Promise.all(
+    predicates.map(p => queryToolForMatch(supabase, p, fromIso)),
+  );
+  if (perPredicate.some(m => m === null)) return null;
+
+  // Pull the timestamp from each match. A row that doesn't expose
+  // ingested_at falls back to `now` so the window check still passes.
+  const matchedAtMs = perPredicate.map(m => {
+    const ts = (m!.row as Record<string, unknown>).ingested_at;
+    const parsed = typeof ts === 'string' ? new Date(ts).getTime() : Number.NaN;
+    return Number.isFinite(parsed) ? parsed : now;
+  });
+  const span = Math.max(...matchedAtMs) - Math.min(...matchedAtMs);
+  if (span > windowMs) return null;
+
+  return {
+    matches: perPredicate as MatchedEvent[],
+    matchedAtIso: matchedAtMs.map(t => new Date(t).toISOString()),
+  };
+}
+
+/**
+ * Build a FirePayload for a multi-event fire. Concatenates each
+ * predicate's headline into the summary and folds detail lines into
+ * one labelled list so the recipient sees what each leg contributed.
+ */
+export function buildMultiEventFirePayload(
+  rule: RuleRow,
+  result: MultiEventMatchResult,
+  firedAtIso: string,
+): FirePayload {
+  const config = rule.config as unknown as MultiEventConfig;
+  const summary = `${result.matches.length} predicates matched within ${config.window_hours}h: ${result.matches
+    .map(m => m.summary.replace(/\.$/, ''))
+    .join(' · ')}.`;
+  const detailLines: string[] = [];
+  result.matches.forEach((m, idx) => {
+    detailLines.push(`Predicate ${idx + 1}: ${m.summary}`);
+    for (const line of m.detailLines.slice(0, 3)) {
+      detailLines.push(`  · ${line}`);
+    }
+  });
+  return {
+    ruleName: rule.name,
+    ruleType: rule.rule_type,
+    summary,
+    detailLines,
+    rationale: null,
+    firedAtIso,
+  };
 }
 
 // ─── Per-tool queries ────────────────────────────────────────────

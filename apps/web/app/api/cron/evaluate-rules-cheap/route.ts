@@ -4,8 +4,12 @@ import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { createServerSupabase } from '@/lib/supabase-server';
 import {
   buildFirePayload,
+  buildMultiEventFirePayload,
+  findMultiEventMatch,
   findSingleEventMatch,
   isCooldownActive,
+  type MatchedEvent,
+  type MultiEventMatchResult,
   type RuleRow,
 } from '@/lib/notifications/evaluator-cheap';
 import {
@@ -16,10 +20,9 @@ import {
 
 // /api/cron/evaluate-rules-cheap — runs every 15 minutes.
 //
-// PR 6 wires single_event only. PR 7 extends this same route with
-// the multi_event branch. The expensive AI-evaluator (outcome_ai +
-// cross_data_ai) lives in /api/cron/evaluate-rules-ai and runs at
-// 1-h cadence — see PR 8.
+// Handles single_event and multi_event rules. The expensive AI
+// evaluator (outcome_ai + cross_data_ai) lives in
+// /api/cron/evaluate-rules-ai and runs at 1-h cadence — see PR 8.
 //
 // Cap on per-tick work: the route bails out if it processes more
 // than MAX_RULES_PER_TICK. Railway's cron timeout is 30 s by default,
@@ -42,17 +45,16 @@ export async function POST(req: NextRequest) {
 
   const admin = createServerSupabase();
 
-  // Pull active single_event rules, oldest-evaluated first so a
-  // rule that's been waiting since the last tick gets first crack.
-  // multi_event rows are NULL-aware on last_fired_at — same ordering
-  // works for both once PR 7 lands.
+  // Pull active single_event + multi_event rules, oldest-evaluated
+  // first so a rule that's been waiting since the last tick gets
+  // first crack. NULL last_fired_at sorts before any timestamp.
   const { data: rules, error: rulesErr } = await admin
     .from('user_notification_rules')
     .select(
       'id, user_id, name, rule_type, config, channel_ids, active, cooldown_minutes, last_fired_at, created_at',
     )
     .eq('active', true)
-    .in('rule_type', ['single_event'])
+    .in('rule_type', ['single_event', 'multi_event'])
     .order('last_fired_at', { ascending: true, nullsFirst: true })
     .limit(MAX_RULES_PER_TICK);
 
@@ -93,13 +95,18 @@ async function processRule(
     return { state: 'cooldown', ruleId: rule.id };
   }
 
-  // Currently single_event only — multi_event lands in PR 7.
-  if (rule.rule_type !== 'single_event') {
-    return { state: 'no_match', ruleId: rule.id };
+  let firePayloadInput:
+    | { kind: 'single'; match: MatchedEvent }
+    | { kind: 'multi'; result: MultiEventMatchResult }
+    | null = null;
+  if (rule.rule_type === 'single_event') {
+    const match = await findSingleEventMatch(admin, rule);
+    if (match) firePayloadInput = { kind: 'single', match };
+  } else if (rule.rule_type === 'multi_event') {
+    const result = await findMultiEventMatch(admin, rule);
+    if (result) firePayloadInput = { kind: 'multi', result };
   }
-
-  const match = await findSingleEventMatch(admin, rule);
-  if (!match) {
+  if (!firePayloadInput) {
     return { state: 'no_match', ruleId: rule.id };
   }
 
@@ -116,7 +123,10 @@ async function processRule(
   }
 
   const firedAtIso = new Date().toISOString();
-  const payload = buildFirePayload(rule, match, firedAtIso);
+  const payload =
+    firePayloadInput.kind === 'single'
+      ? buildFirePayload(rule, firePayloadInput.match, firedAtIso)
+      : buildMultiEventFirePayload(rule, firePayloadInput.result, firedAtIso);
   const deliveryStatus: Record<string, DispatchOutcome> = {};
 
   for (const channelId of rule.channel_ids) {
@@ -148,6 +158,13 @@ async function processRule(
     deliveryStatus[channelId] = await dispatchToChannel(row as VerifiedChannel, payload);
   }
 
+  const matchExtras =
+    firePayloadInput.kind === 'single'
+      ? { match_row: firePayloadInput.match.row }
+      : {
+          match_rows: firePayloadInput.result.matches.map(m => m.row),
+          matched_at: firePayloadInput.result.matchedAtIso,
+        };
   const { data: logRow, error: logErr } = await admin
     .from('user_notification_log')
     .insert({
@@ -157,7 +174,7 @@ async function processRule(
       channel_ids: rule.channel_ids,
       payload: {
         ...payload,
-        match_row: match.row,
+        ...matchExtras,
       },
       delivery_status: deliveryStatus,
     })
