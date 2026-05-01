@@ -10,6 +10,11 @@ import {
   type Tier,
 } from '@/lib/subscription';
 import { captureServer } from '@/lib/analytics/server';
+import {
+  persistUserQuery,
+  rowCountFromToolResult,
+  type ToolCallRecord,
+} from '@/lib/intelligence-analyst/persistence';
 
 export const maxDuration = 60;
 
@@ -30,6 +35,22 @@ async function resolveCaller(): Promise<{ userId: string | null; tier: Tier }> {
   if (!user) return { userId: null, tier: 'citizen' };
   const tier = await getCurrentTier();
   return { userId: user.id, tier };
+}
+
+/**
+ * Extract the freshest user-typed message from the request payload.
+ * Walks back-to-front looking for a `role === 'user'` message whose
+ * content is a string — internal tool-result rounds carry array
+ * content and are not the user's prompt.
+ */
+function extractLastUserText(messages: Array<{ role: string; content: any }>): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === 'user' && typeof m.content === 'string' && m.content.trim()) {
+      return m.content;
+    }
+  }
+  return '';
 }
 
 export async function POST(req: NextRequest) {
@@ -113,6 +134,9 @@ export async function POST(req: NextRequest) {
     });
 
     const allMessages = [...apiMessages];
+    // Captured for the user_queries write below — one record per
+    // tool_use block across all loop iterations.
+    const capturedToolCalls: ToolCallRecord[] = [];
     let iterations = 0;
     const maxIterations = 5;
 
@@ -126,6 +150,11 @@ export async function POST(req: NextRequest) {
       const toolResults: any[] = [];
       for (const toolUse of toolUseBlocks) {
         const result = await executeToolCall(toolUse.name, toolUse.input as Record<string, any>);
+        capturedToolCalls.push({
+          name: toolUse.name,
+          input: (toolUse.input ?? {}) as Record<string, any>,
+          row_count: rowCountFromToolResult(result),
+        });
         toolResults.push({
           type: 'tool_result',
           tool_use_id: toolUse.id,
@@ -148,6 +177,25 @@ export async function POST(req: NextRequest) {
       .filter((b: any) => b.type === 'text')
       .map((b: any) => b.text)
       .join('\n');
+
+    // Persist for the Query History tab and the Suggested-tab ranker.
+    // Awaited so the row exists before the client re-fetches history;
+    // failures are logged inside persistUserQuery and never thrown.
+    if (userId) {
+      const userQueryText = extractLastUserText(apiMessages);
+      if (userQueryText) {
+        try {
+          await persistUserQuery({
+            userId,
+            queryText: userQueryText,
+            responseText: textContent,
+            toolCalls: capturedToolCalls,
+          });
+        } catch (err: any) {
+          console.error('[chat] persistUserQuery threw:', err?.message);
+        }
+      }
+    }
 
     return NextResponse.json({
       content: textContent,
