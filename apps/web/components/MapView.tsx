@@ -21,9 +21,16 @@ interface MapViewProps {
   onViewportChange?: (bbox: BBox) => void;
 }
 
-// GGIT pipeline + LNG-terminal palette: soft peach-yellow (#FFD6A5) for both,
-// distinguished by shape — lines for pipelines, ⛁ glyph for terminals.
-const PIPELINE_COLOR: [number, number, number, number] = [255, 214, 165, 220];
+// Pipeline + LNG-terminal palette:
+//   gas pipelines (GGIT)  → soft peach-yellow (#FFD6A5) — also LNG terminals
+//   oil pipelines (GOIT)  → pastel mint-white (#ECFBE9) — picked to read as
+//                           a separate fluid type at viewport zoom while
+//                           staying on the cool side of the palette.
+//   pipelines branch on `infra_subtype` (pipeline_gas | pipeline_oil); LNG
+//   terminals come through the same prop and are split off into their own
+//   TextLayer.
+const PIPELINE_COLOR_GAS: [number, number, number, number] = [255, 214, 165, 220];
+const PIPELINE_COLOR_OIL: [number, number, number, number] = [236, 251, 233, 220];
 const LNG_TERMINAL_COLOR: [number, number, number, number] = [255, 214, 165, 240];
 
 // Capacity-proportional pipeline width: sqrt-damped, 1.5–4 px range.
@@ -227,14 +234,17 @@ export default function MapView({
     updateTriggers: { getPosition: refineries.length },
   }), [refineries]);
 
-  // ─── Mines Layer (⛏ pickaxe glyph, yellow — USGS MRDS) ───
+  // ─── Mines Layer (⛏ pickaxe glyph, light rose — USGS MRDS) ───
+  // Light rose (#FFD6EA) instead of yellow — the globe was visually saturated
+  // with yellow (aircraft, fossil power plants, LNG terminals all share the
+  // warm-yellow band). Rose pulls mines into a distinct hue cluster.
   const mineLayer = useMemo(() => new TextLayer({
     id: 'mines',
     data: mines,
     getPosition: (d: any) => [d.longitude, d.latitude],
     getText: () => '⛏',
     getSize: 11,
-    getColor: [255, 200, 50, 220],
+    getColor: [255, 214, 234, 220],
     fontFamily: 'sans-serif',
     characterSet: ['⛏'],
     sizeUnits: 'pixels',
@@ -355,17 +365,21 @@ export default function MapView({
   }, [pipelines]);
 
   const pipelineLayer = useMemo(() => new PathLayer({
-    id: 'gas-pipelines',
+    id: 'pipelines',
     data: pipelinePaths,
     getPath: (d: any) => d.path,
-    getColor: PIPELINE_COLOR,
+    getColor: (d: any) => d.infra_subtype === 'pipeline_oil' ? PIPELINE_COLOR_OIL : PIPELINE_COLOR_GAS,
     getWidth: (d: any) => pipelineWidth(d.capacity_bcm_y),
     widthUnits: 'pixels',
     widthMinPixels: 1,
     widthMaxPixels: 4,
     pickable: true,
     onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'pipeline' } : null),
-    updateTriggers: { getPath: pipelinePaths.length, getWidth: pipelinePaths.length },
+    updateTriggers: {
+      getPath: pipelinePaths.length,
+      getWidth: pipelinePaths.length,
+      getColor: pipelinePaths.length,
+    },
   }), [pipelinePaths]);
 
   const lngTerminalLayer = useMemo(() => new TextLayer({
@@ -454,7 +468,7 @@ export default function MapView({
       case 'mine':
         content = (
           <div>
-            <div className="font-semibold" style={{ color: 'rgb(255, 200, 50)' }}>
+            <div className="font-semibold" style={{ color: 'rgb(255, 214, 234)' }}>
               {object.site_name || 'Mine'}
             </div>
             <div className="text-xs text-gray-400 mt-0.5">
