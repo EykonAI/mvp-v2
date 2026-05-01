@@ -6,6 +6,12 @@ import {
   COLD_START_SUGGESTIONS,
   type Suggestion,
 } from '@/lib/intelligence-analyst/suggestions';
+import {
+  PERSONAS,
+  DEFAULT_PERSONA,
+  isValidPersona,
+  type PersonaId,
+} from '@/lib/intelligence-analyst/personas';
 
 interface Message {
   id: string;
@@ -55,6 +61,16 @@ export default function ChatPanel() {
   // mid-session is "too noisy". Cold-start fallback rendered while
   // we wait for the first /api/suggestions response.
   const [suggestions, setSuggestions] = useState<Suggestion[]>([...COLD_START_SUGGESTIONS]);
+  // Persona overlay (§4.4) — restored from localStorage so the
+  // selection persists per user across sessions on this browser.
+  const [persona, setPersona] = useState<PersonaId>(DEFAULT_PERSONA);
+  // Export-menu open state, keyed by assistant-message id. Only one
+  // open at a time. null = nothing open.
+  const [exportMenuFor, setExportMenuFor] = useState<string | null>(null);
+  // Last-active hint (§4.9). Shown once on first load; dismissed
+  // after the first interaction (send, tab toggle, persona change).
+  const [welcome, setWelcome] = useState<{ firstName: string | null; lastActiveIso: string | null } | null>(null);
+  const [welcomeDismissed, setWelcomeDismissed] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -94,6 +110,46 @@ export default function ChatPanel() {
     return () => { cancelled = true; };
   }, []);
 
+  // Restore persona from localStorage on mount.
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem('eykon.persona');
+      if (stored && isValidPersona(stored)) setPersona(stored);
+    } catch { /* localStorage may be disabled */ }
+  }, []);
+
+  // Persist persona on change.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('eykon.persona', persona);
+    } catch { /* ignore */ }
+  }, [persona]);
+
+  // Last-active hint — fetch once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/intelligence-analyst/welcome', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (cancelled || !data) return;
+        setWelcome(data);
+      })
+      .catch(() => { /* hint is optional */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Close the export menu when clicking outside it.
+  useEffect(() => {
+    if (!exportMenuFor) return;
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[data-export-menu]')) return;
+      setExportMenuFor(null);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [exportMenuFor]);
+
   const send = async (text: string) => {
     if (!text.trim() || loading) return;
 
@@ -104,6 +160,7 @@ export default function ChatPanel() {
     // Collapse the tab strip once the user starts conversing — they're
     // engaged, the chat area should own the panel's vertical space.
     setActiveTab(null);
+    setWelcomeDismissed(true);
 
     try {
       // Snapshot bubbles are visual only — never sent back to /api/chat
@@ -120,7 +177,7 @@ export default function ChatPanel() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: apiMessages }),
+        body: JSON.stringify({ messages: apiMessages, persona }),
       });
 
       if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -185,7 +242,11 @@ export default function ChatPanel() {
     if (loading) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/user_queries/${queryId}/rerun`, { method: 'POST' });
+      const res = await fetch(`/api/user_queries/${queryId}/rerun`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persona }),
+      });
       if (!res.ok) throw new Error(`Re-run failed: ${res.status}`);
       const data = await res.json();
       const freshMsg: Message = {
@@ -212,6 +273,7 @@ export default function ChatPanel() {
 
   const toggleTab = (key: TabKey) => {
     setActiveTab(prev => (prev === key ? null : key));
+    setWelcomeDismissed(true);
   };
 
   const toggleStar = useCallback(async (entryId: string, currentStarred: boolean) => {
@@ -251,10 +313,10 @@ export default function ChatPanel() {
         className="px-4 py-3 shrink-0"
         style={{ borderBottom: '1px solid var(--rule-soft)' }}
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
             <div
-              className="pulse-dot"
+              className="pulse-dot shrink-0"
               style={{
                 width: 7,
                 height: 7,
@@ -265,6 +327,7 @@ export default function ChatPanel() {
             />
             <span
               aria-label="eYKON Intelligence Analyst"
+              className="truncate"
               style={{
                 fontFamily: 'var(--f-display)',
                 fontSize: 13,
@@ -276,18 +339,39 @@ export default function ChatPanel() {
               eYKON Intelligence Analyst
             </span>
           </div>
-          <span
+          <div className="flex items-center gap-3 shrink-0">
+            <PersonaPicker value={persona} onChange={p => { setPersona(p); setWelcomeDismissed(true); }} />
+            <span
+              style={{
+                fontFamily: 'var(--f-mono)',
+                fontSize: 9.5,
+                letterSpacing: '0.15em',
+                color: 'var(--ink-faint)',
+                textTransform: 'uppercase',
+              }}
+            >
+              Sonnet 4.6
+            </span>
+          </div>
+        </div>
+        {welcome && !welcomeDismissed && (welcome.firstName || welcome.lastActiveIso) && (
+          <div
+            className="mt-1.5"
             style={{
-              fontFamily: 'var(--f-mono)',
-              fontSize: 9.5,
-              letterSpacing: '0.15em',
+              fontFamily: 'var(--f-body)',
+              fontSize: 11,
               color: 'var(--ink-faint)',
-              textTransform: 'uppercase',
             }}
           >
-            Sonnet 4.6
-          </span>
-        </div>
+            {welcome.firstName ? `Welcome back, ${welcome.firstName}` : 'Welcome back'}
+            {welcome.lastActiveIso && (
+              <>
+                <span style={{ margin: '0 6px' }}>·</span>
+                <span>last active {relativeTime(welcome.lastActiveIso)}</span>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Tab strip */}
@@ -399,23 +483,12 @@ export default function ChatPanel() {
                       ↻ Re-run with fresh data
                     </button>
                   )}
-                  <a
-                    href={`/api/export/query/${msg.query_id}`}
-                    className="px-2 py-1 text-xs transition-colors"
-                    style={{
-                      background: 'transparent',
-                      color: 'var(--ink-dim)',
-                      border: '1px solid var(--rule)',
-                      borderRadius: 2,
-                      fontFamily: 'var(--f-mono)',
-                      letterSpacing: '0.08em',
-                      textTransform: 'uppercase',
-                      textDecoration: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    ↓ Export PDF
-                  </a>
+                  <ExportMenu
+                    queryId={msg.query_id}
+                    open={exportMenuFor === msg.id}
+                    onToggle={() => setExportMenuFor(prev => (prev === msg.id ? null : msg.id))}
+                    onClose={() => setExportMenuFor(null)}
+                  />
                 </div>
               )}
             </div>
@@ -765,6 +838,120 @@ function StarterEmptyState({ onPick }: { onPick: (text: string) => void }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function PersonaPicker({
+  value,
+  onChange,
+}: {
+  value: PersonaId;
+  onChange: (p: PersonaId) => void;
+}) {
+  return (
+    <label
+      className="flex items-center gap-1.5"
+      style={{
+        fontFamily: 'var(--f-mono)',
+        fontSize: 9.5,
+        letterSpacing: '0.1em',
+        color: 'var(--ink-faint)',
+        textTransform: 'uppercase',
+      }}
+    >
+      <span>Mode</span>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value as PersonaId)}
+        className="appearance-none px-1.5 py-0.5"
+        style={{
+          background: 'var(--bg-raised)',
+          color: 'var(--ink-dim)',
+          border: '1px solid var(--rule)',
+          borderRadius: 2,
+          fontFamily: 'var(--f-mono)',
+          fontSize: 10,
+          letterSpacing: '0.08em',
+          cursor: 'pointer',
+        }}
+      >
+        {PERSONAS.map(p => (
+          <option key={p.id} value={p.id} style={{ background: 'var(--bg-panel)', color: 'var(--ink)' }}>
+            {p.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function ExportMenu({
+  queryId,
+  open,
+  onToggle,
+  onClose,
+}: {
+  queryId: string;
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+}) {
+  const formats: Array<{ label: string; href: string }> = [
+    { label: 'PDF',      href: `/api/export/query/${queryId}` },
+    { label: 'Markdown', href: `/api/export/query/${queryId}/markdown` },
+    { label: 'JSON',     href: `/api/export/query/${queryId}/json` },
+  ];
+  return (
+    <div className="relative inline-block" data-export-menu>
+      <button
+        onClick={onToggle}
+        className="px-2 py-1 text-xs transition-colors"
+        style={{
+          background: 'transparent',
+          color: 'var(--ink-dim)',
+          border: '1px solid var(--rule)',
+          borderRadius: 2,
+          fontFamily: 'var(--f-mono)',
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+          cursor: 'pointer',
+        }}
+      >
+        ↓ Export {open ? '▴' : '▾'}
+      </button>
+      {open && (
+        <div
+          className="absolute left-0 top-full mt-1 z-10"
+          style={{
+            background: 'var(--bg-panel)',
+            border: '1px solid var(--rule)',
+            borderRadius: 2,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+            minWidth: 120,
+          }}
+        >
+          {formats.map(f => (
+            <a
+              key={f.label}
+              href={f.href}
+              onClick={() => onClose()}
+              className="block px-3 py-1.5 text-xs transition-colors"
+              style={{
+                color: 'var(--ink)',
+                fontFamily: 'var(--f-mono)',
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                textDecoration: 'none',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            >
+              {f.label}
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -18,6 +18,7 @@ import {
   rowCountFromToolResult,
   type ToolCallRecord,
 } from '@/lib/intelligence-analyst/persistence';
+import { decorateSystemPrompt, isValidPersona } from '@/lib/intelligence-analyst/personas';
 
 export const maxDuration = 60;
 
@@ -31,12 +32,20 @@ export const maxDuration = 60;
 // twice: once via RLS on the cookie-bound load, once via the
 // p_user_id parameter when invoking the increment RPC.
 
-export async function POST(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
     }
+
+    // Persona is optional — POST body may carry { persona: 'analyst' }.
+    let personaInput: unknown;
+    try {
+      personaInput = (await req.json())?.persona;
+    } catch { /* no body / not JSON — ignore */ }
+    const persona = isValidPersona(personaInput) ? personaInput : undefined;
+    const systemPrompt = decorateSystemPrompt(CONVERSATIONAL_SYSTEM_PROMPT, persona);
 
     const tier = await getCurrentTier();
     if (!tierMeetsRequirement(tier, 'pro')) {
@@ -100,7 +109,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
     let response = await anthropic.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 4096,
-      system: CONVERSATIONAL_SYSTEM_PROMPT,
+      system: systemPrompt,
       tools: CLAUDE_TOOLS,
       messages: seedMessages,
     });
@@ -127,7 +136,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
       response = await anthropic.messages.create({
         model: 'claude-sonnet-4-5',
         max_tokens: 4096,
-        system: CONVERSATIONAL_SYSTEM_PROMPT,
+        system: systemPrompt,
         tools: CLAUDE_TOOLS,
         messages: allMessages,
       });
