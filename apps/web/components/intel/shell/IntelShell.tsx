@@ -41,8 +41,11 @@ export function IntelShell({ children }: { children: React.ReactNode }) {
         <div className="flex-1 flex" style={{ minHeight: 0 }}>
           <main className="flex-1 min-w-0">{children}</main>
           <aside
-            className={`transition-all duration-200 ease-in-out ${chatOpen ? 'w-[380px]' : 'w-0'} overflow-hidden`}
-            style={{ borderLeft: chatOpen ? '1px solid var(--rule-soft)' : 'none' }}
+            className="transition-all duration-200 ease-in-out overflow-hidden"
+            style={{
+              width: chatOpen ? 'var(--chat-panel-width)' : 0,
+              borderLeft: chatOpen ? '1px solid var(--rule-soft)' : 'none',
+            }}
           >
             {chatOpen && <ChatPanel />}
           </aside>
