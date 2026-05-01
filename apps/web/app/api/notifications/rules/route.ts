@@ -9,16 +9,24 @@ import {
 import {
   coerceFilters,
   coercePredicate,
+  isValidDataBucket,
   isValidSingleEventTool,
+  suggestAiRuleName,
   suggestMultiEventRuleName,
   suggestRuleName,
+  type DataBucket,
   type MultiEventConfig,
   type SingleEventToolId,
+  AI_K_EVENTS_DEFAULT,
+  AI_K_EVENTS_MAX,
+  CROSS_DATA_AI_MIN_BUCKETS,
   MULTI_EVENT_MIN_PREDICATES,
   MULTI_EVENT_MAX_PREDICATES,
   MULTI_EVENT_DEFAULT_WINDOW_HOURS,
   MULTI_EVENT_MIN_WINDOW_HOURS,
   MULTI_EVENT_MAX_WINDOW_HOURS,
+  OUTCOME_STATEMENT_MAX_CHARS,
+  OUTCOME_STATEMENT_MIN_CHARS,
 } from '@/lib/notifications/tools';
 import { isValidPersona } from '@/lib/intelligence-analyst/personas';
 
@@ -35,7 +43,12 @@ import { isValidPersona } from '@/lib/intelligence-analyst/personas';
 
 export const dynamic = 'force-dynamic';
 
-const ALLOWED_RULE_TYPES = new Set(['single_event', 'multi_event']);
+const ALLOWED_RULE_TYPES = new Set([
+  'single_event',
+  'multi_event',
+  'outcome_ai',
+  'cross_data_ai',
+]);
 
 export async function GET(_req: NextRequest) {
   const user = await getCurrentUser();
@@ -72,6 +85,10 @@ interface CreateBody {
     // multi_event
     predicates?: Array<{ tool?: unknown; filters?: Record<string, unknown> }>;
     window_hours?: number;
+    // outcome_ai / cross_data_ai
+    outcome_statement?: string;
+    k_events?: number;
+    buckets?: unknown;
   };
 }
 
@@ -109,6 +126,41 @@ export async function POST(req: NextRequest) {
     const filters = coerceFilters(toolId as SingleEventToolId, body.config?.filters ?? {});
     savedConfig = { tool: toolId, filters };
     derivedName = suggestRuleName(toolId as SingleEventToolId, filters);
+  } else if (body.rule_type === 'outcome_ai' || body.rule_type === 'cross_data_ai') {
+    const outcome = (body.config?.outcome_statement ?? '').trim();
+    if (outcome.length < OUTCOME_STATEMENT_MIN_CHARS) {
+      return NextResponse.json(
+        { error: 'outcome_statement_too_short', min: OUTCOME_STATEMENT_MIN_CHARS },
+        { status: 400 },
+      );
+    }
+    if (outcome.length > OUTCOME_STATEMENT_MAX_CHARS) {
+      return NextResponse.json(
+        { error: 'outcome_statement_too_long', max: OUTCOME_STATEMENT_MAX_CHARS },
+        { status: 400 },
+      );
+    }
+    const rawBuckets = Array.isArray(body.config?.buckets) ? body.config!.buckets : [];
+    const buckets: DataBucket[] = [];
+    for (const b of rawBuckets) {
+      if (isValidDataBucket(b) && !buckets.includes(b)) buckets.push(b);
+    }
+    if (body.rule_type === 'cross_data_ai' && buckets.length < CROSS_DATA_AI_MIN_BUCKETS) {
+      return NextResponse.json(
+        { error: 'too_few_buckets', min: CROSS_DATA_AI_MIN_BUCKETS },
+        { status: 400 },
+      );
+    }
+    if (body.rule_type === 'outcome_ai') {
+      const k = Number(body.config?.k_events);
+      const k_events = Number.isFinite(k) && k > 0
+        ? Math.min(AI_K_EVENTS_MAX, Math.floor(k))
+        : AI_K_EVENTS_DEFAULT;
+      savedConfig = { outcome_statement: outcome, k_events, buckets };
+    } else {
+      savedConfig = { outcome_statement: outcome, buckets };
+    }
+    derivedName = suggestAiRuleName(body.rule_type, outcome);
   } else {
     // multi_event
     const rawPreds = Array.isArray(body.config?.predicates) ? body.config!.predicates! : [];
