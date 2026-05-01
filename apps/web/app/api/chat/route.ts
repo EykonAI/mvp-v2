@@ -181,11 +181,12 @@ export async function POST(req: NextRequest) {
     // Persist for the Query History tab and the Suggested-tab ranker.
     // Awaited so the row exists before the client re-fetches history;
     // failures are logged inside persistUserQuery and never thrown.
+    let queryId: string | null = null;
     if (userId) {
       const userQueryText = extractLastUserText(apiMessages);
       if (userQueryText) {
         try {
-          await persistUserQuery({
+          queryId = await persistUserQuery({
             userId,
             queryText: userQueryText,
             responseText: textContent,
@@ -202,6 +203,7 @@ export async function POST(req: NextRequest) {
       usage: response.usage,
       tool_calls: iterations,
       model: response.model,
+      query_id: queryId,
     });
   } catch (err: any) {
     console.error('Chat API error:', err);

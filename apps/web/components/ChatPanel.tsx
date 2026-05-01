@@ -131,6 +131,9 @@ export default function ChatPanel() {
         role: 'assistant',
         content: data.content || data.error || 'No response',
         tool_calls: data.tool_calls,
+        // Carry the persisted row id so the Export button can hit
+        // /api/export/query/[id]. Null when auth is disabled.
+        query_id: data.query_id ?? undefined,
       };
       setMessages(prev => [...prev, assistantMsg]);
       // Refresh history so the just-submitted query appears in the
@@ -374,25 +377,46 @@ export default function ChatPanel() {
                   </span>
                 </div>
               )}
-              {msg.snapshot && msg.query_id && (
-                <button
-                  onClick={() => rerunSnapshot(msg.query_id!)}
-                  disabled={loading}
-                  className="mt-2 px-2 py-1 text-xs transition-colors"
-                  style={{
-                    background: 'transparent',
-                    color: 'var(--teal)',
-                    border: '1px solid var(--teal-deep)',
-                    borderRadius: 2,
-                    fontFamily: 'var(--f-mono)',
-                    letterSpacing: '0.08em',
-                    textTransform: 'uppercase',
-                    cursor: loading ? 'not-allowed' : 'pointer',
-                    opacity: loading ? 0.5 : 1,
-                  }}
-                >
-                  ↻ Re-run with fresh data
-                </button>
+              {msg.role === 'assistant' && msg.query_id && (
+                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                  {msg.snapshot && (
+                    <button
+                      onClick={() => rerunSnapshot(msg.query_id!)}
+                      disabled={loading}
+                      className="px-2 py-1 text-xs transition-colors"
+                      style={{
+                        background: 'transparent',
+                        color: 'var(--teal)',
+                        border: '1px solid var(--teal-deep)',
+                        borderRadius: 2,
+                        fontFamily: 'var(--f-mono)',
+                        letterSpacing: '0.08em',
+                        textTransform: 'uppercase',
+                        cursor: loading ? 'not-allowed' : 'pointer',
+                        opacity: loading ? 0.5 : 1,
+                      }}
+                    >
+                      ↻ Re-run with fresh data
+                    </button>
+                  )}
+                  <a
+                    href={`/api/export/query/${msg.query_id}`}
+                    className="px-2 py-1 text-xs transition-colors"
+                    style={{
+                      background: 'transparent',
+                      color: 'var(--ink-dim)',
+                      border: '1px solid var(--rule)',
+                      borderRadius: 2,
+                      fontFamily: 'var(--f-mono)',
+                      letterSpacing: '0.08em',
+                      textTransform: 'uppercase',
+                      textDecoration: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ↓ Export PDF
+                  </a>
+                </div>
               )}
             </div>
           </div>
