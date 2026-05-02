@@ -5,6 +5,7 @@ import {
   generateVerificationCode,
   sendEmailVerificationCode,
   sendSmsVerificationCode,
+  sendWhatsAppVerificationCode,
   verificationExpiresAt,
 } from '@/lib/notifications/channel-verification';
 
@@ -64,9 +65,12 @@ export async function POST(_req: NextRequest, ctx: { params: { id: string } }) {
     return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
 
+  const channelType = channel.channel_type as ChannelType;
   const send =
-    (channel.channel_type as ChannelType) === 'email'
+    channelType === 'email'
       ? await sendEmailVerificationCode(channel.handle, code)
+      : channelType === 'whatsapp'
+      ? await sendWhatsAppVerificationCode(channel.handle, code)
       : await sendSmsVerificationCode(channel.handle, code);
 
   if (!send.ok) {

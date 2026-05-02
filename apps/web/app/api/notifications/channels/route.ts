@@ -7,6 +7,7 @@ import {
   isValidHandle,
   sendEmailVerificationCode,
   sendSmsVerificationCode,
+  sendWhatsAppVerificationCode,
   verificationExpiresAt,
 } from '@/lib/notifications/channel-verification';
 
@@ -23,7 +24,7 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-const CREATE_ALLOWED_TYPES: ReadonlySet<ChannelType> = new Set(['email', 'sms']);
+const CREATE_ALLOWED_TYPES: ReadonlySet<ChannelType> = new Set(['email', 'sms', 'whatsapp']);
 
 export async function GET(_req: NextRequest) {
   const user = await getCurrentUser();
@@ -69,7 +70,6 @@ export async function POST(req: NextRequest) {
   const label = (body.label ?? '').trim() || null;
 
   if (!channelType || !CREATE_ALLOWED_TYPES.has(channelType)) {
-    // WhatsApp lands in PR 10 with the Twilio opt-in flow.
     return NextResponse.json(
       { error: 'unsupported_channel_type', allowed: Array.from(CREATE_ALLOWED_TYPES) },
       { status: 400 },
@@ -115,9 +115,16 @@ export async function POST(req: NextRequest) {
   // Fire the verification message. If sending fails we keep the row
   // (the user can hit /resend) but surface the error so the UI can
   // show a useful message instead of a silent stall.
+  //
+  // WhatsApp specifics: Twilio rejects the code with a 63007/21211
+  // error if the recipient hasn't opted in to the sandbox or template
+  // yet. The UI shows the opt-in instructions BEFORE the user submits;
+  // if Twilio rejects, the user opts in and clicks Resend to retry.
   const send =
     channelType === 'email'
       ? await sendEmailVerificationCode(handle, code)
+      : channelType === 'whatsapp'
+      ? await sendWhatsAppVerificationCode(handle, code)
       : await sendSmsVerificationCode(handle, code);
 
   if (!send.ok) {
