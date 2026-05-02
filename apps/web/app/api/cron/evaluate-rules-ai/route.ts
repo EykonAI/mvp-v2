@@ -15,11 +15,9 @@ import {
   truncateToTokenBudget,
 } from '@/lib/notifications/evaluator-ai';
 import { AI_INPUT_TOKEN_BUDGET } from '@/lib/notifications/tools';
-import {
-  dispatchToChannel,
-  type DispatchOutcome,
-  type VerifiedChannel,
-} from '@/lib/notifications/dispatch';
+import { dispatchWithCap } from '@/lib/notifications/dispatch-with-cap';
+import { findRecentFireCount, PER_RULE_PER_DAY_FIRE_LIMIT } from '@/lib/notifications/cap';
+import type { Tier } from '@/lib/auth/session';
 
 // /api/cron/evaluate-rules-ai — runs every 1 hour.
 //
@@ -49,6 +47,7 @@ type ProcessResult =
     }
   | { state: 'no_match'; ruleId: string; usage: AiUsage | null }
   | { state: 'cooldown'; ruleId: string }
+  | { state: 'rate_limited'; ruleId: string }
   | { state: 'skipped'; ruleId: string; reason: string }
   | { state: 'error'; ruleId: string; error: string };
 
@@ -115,6 +114,7 @@ export async function POST(req: NextRequest) {
     fired: results.filter(r => r.state === 'fired').length,
     cooldown: results.filter(r => r.state === 'cooldown').length,
     no_match: results.filter(r => r.state === 'no_match').length,
+    rate_limited: results.filter(r => r.state === 'rate_limited').length,
     skipped: results.filter(r => r.state === 'skipped').length,
     errors: results.filter(r => r.state === 'error').length,
     usage: usageTotals,
@@ -127,6 +127,14 @@ async function processAiRule(
 ): Promise<ProcessResult> {
   if (isCooldownActive(rule)) {
     return { state: 'cooldown', ruleId: rule.id };
+  }
+
+  // Per-rule per-day rate limit (brief §3.6) — same gate as the
+  // cheap cron. Applied BEFORE the Claude call so a runaway AI
+  // rule can't burn Anthropic spend.
+  const recentFires = await findRecentFireCount(admin, rule.id, 24);
+  if (recentFires >= PER_RULE_PER_DAY_FIRE_LIMIT) {
+    return { state: 'rate_limited', ruleId: rule.id };
   }
 
   // Validate the config has an outcome statement; reject loudly so
@@ -161,36 +169,26 @@ async function processAiRule(
 
   const firedAtIso = new Date().toISOString();
   const payload = buildAiFirePayload(rule, decision, firedAtIso);
-  const deliveryStatus: Record<string, DispatchOutcome> = {};
 
-  for (const channelId of rule.channel_ids) {
-    const row = (channelRows ?? []).find(c => c.id === channelId);
-    if (!row) {
-      deliveryStatus[channelId] = {
-        ok: false,
-        error: 'channel_not_found',
-        suppressed_reason: 'channel_deleted_or_inaccessible',
-      };
-      continue;
-    }
-    if (!row.verified_at) {
-      deliveryStatus[channelId] = {
-        ok: false,
-        error: 'channel_unverified',
-        suppressed_reason: 'channel_unverified',
-      };
-      continue;
-    }
-    if (!row.active) {
-      deliveryStatus[channelId] = {
-        ok: false,
-        error: 'channel_paused',
-        suppressed_reason: 'channel_paused',
-      };
-      continue;
-    }
-    deliveryStatus[channelId] = await dispatchToChannel(row as VerifiedChannel, payload);
-  }
+  const userTier = await getUserTier(admin, rule.user_id);
+  const userEmail = await getUserEmail(admin, rule.user_id);
+  const dispatchSummary = await dispatchWithCap({
+    supabase: admin,
+    userId: rule.user_id,
+    userTier,
+    userEmail,
+    rule: { channel_ids: rule.channel_ids },
+    payload,
+    channelRows: (channelRows ?? []) as Array<{
+      id: string;
+      channel_type: 'email' | 'sms' | 'whatsapp';
+      handle: string;
+      label: string | null;
+      verified_at: string | null;
+      active: boolean;
+    }>,
+  });
+  const deliveryStatus = dispatchSummary.delivery_status;
 
   const { data: logRow, error: logErr } = await admin
     .from('user_notification_log')
@@ -203,6 +201,11 @@ async function processAiRule(
         ...payload,
         events_considered: decision.eventsConsidered,
         usage: decision.usage,
+        cap_state: {
+          monthly_sms_wa_count: dispatchSummary.monthly_sms_wa_count,
+          soft_warn_triggered: dispatchSummary.soft_warn_triggered,
+          warning_email_sent: dispatchSummary.warning_email_sent,
+        },
       },
       delivery_status: deliveryStatus,
     })
@@ -218,4 +221,25 @@ async function processAiRule(
     .eq('id', rule.id);
 
   return { state: 'fired', ruleId: rule.id, logId: logRow?.id ?? null, usage: decision.usage };
+}
+
+// ─── User lookups (service-role only) ────────────────────────────
+
+async function getUserTier(admin: SupabaseClient, userId: string): Promise<Tier> {
+  const { data } = await admin
+    .from('user_profiles')
+    .select('tier')
+    .eq('id', userId)
+    .maybeSingle();
+  const tier = data?.tier as Tier | undefined;
+  return tier ?? 'pro';
+}
+
+async function getUserEmail(admin: SupabaseClient, userId: string): Promise<string | null> {
+  const { data } = await admin
+    .from('user_profiles')
+    .select('email')
+    .eq('id', userId)
+    .maybeSingle();
+  return data?.email ?? null;
 }

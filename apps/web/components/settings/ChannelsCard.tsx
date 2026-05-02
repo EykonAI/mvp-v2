@@ -25,6 +25,15 @@ interface Channel {
   created_at: string;
 }
 
+interface CapStatus {
+  period: string;
+  tier: string;
+  cap: number;
+  count: number;
+  soft_warn_at: number;
+  hard_stop_at: number;
+}
+
 type FormState = {
   type: 'email' | 'sms';
   handle: string;
@@ -35,6 +44,7 @@ const INITIAL_FORM: FormState = { type: 'email', handle: '', label: '' };
 
 export function ChannelsCard() {
   const [channels, setChannels] = useState<Channel[] | null>(null);
+  const [capStatus, setCapStatus] = useState<CapStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(INITIAL_FORM);
   const [creating, setCreating] = useState(false);
@@ -44,7 +54,19 @@ export function ChannelsCard() {
 
   useEffect(() => {
     void refresh();
+    void refreshCapStatus();
   }, []);
+
+  async function refreshCapStatus() {
+    try {
+      const r = await fetch('/api/notifications/cap-status', { cache: 'no-store' });
+      if (!r.ok) return;
+      const data = (await r.json()) as CapStatus;
+      setCapStatus(data);
+    } catch {
+      // Cap status is informational; failure is non-fatal.
+    }
+  }
 
   async function refresh() {
     try {
@@ -196,6 +218,8 @@ export function ChannelsCard() {
       <p style={{ color: 'var(--ink-faint)', fontSize: 12.5, marginBottom: 16 }}>
         Verified handles your alerts can fire to. WhatsApp arrives in a later release.
       </p>
+
+      {capStatus && capStatus.cap > 0 && <CapBar status={capStatus} />}
 
       {error && (
         <div
@@ -388,6 +412,76 @@ export function ChannelsCard() {
         </button>
       </form>
     </section>
+  );
+}
+
+function CapBar({ status }: { status: CapStatus }) {
+  const pct = Math.min(150, Math.round((status.count / Math.max(1, status.cap)) * 100));
+  // Soft-warn band: 80–149 %. Hard stop: ≥150 %. Below 80 % is the
+  // "nominal" band — teal fill, no callout.
+  const band: 'nominal' | 'warn' | 'hard' =
+    pct >= 150 ? 'hard' : pct >= 80 ? 'warn' : 'nominal';
+  const fillColor =
+    band === 'hard' ? 'var(--red)' : band === 'warn' ? 'var(--amber)' : 'var(--teal)';
+  return (
+    <div
+      style={{
+        background: 'var(--bg-void)',
+        border: '1px solid var(--rule)',
+        borderRadius: 4,
+        padding: '10px 12px',
+        marginBottom: 14,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          fontFamily: 'var(--f-mono)',
+          fontSize: 10.5,
+          letterSpacing: '0.16em',
+          textTransform: 'uppercase',
+          color: 'var(--ink-faint)',
+          marginBottom: 6,
+        }}
+      >
+        <span>SMS · WhatsApp · {status.period}</span>
+        <span style={{ color: band === 'nominal' ? 'var(--ink)' : fillColor }}>
+          {status.count} / {status.cap}
+          {band === 'hard' && ' · HARD STOP'}
+          {band === 'warn' && ' · APPROACHING CAP'}
+        </span>
+      </div>
+      <div
+        style={{
+          position: 'relative',
+          height: 6,
+          background: 'var(--rule-soft)',
+          borderRadius: 3,
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            width: `${Math.min(100, pct)}%`,
+            height: '100%',
+            background: fillColor,
+            transition: 'width 200ms',
+          }}
+        />
+      </div>
+      <div
+        style={{
+          fontSize: 11,
+          color: 'var(--ink-faint)',
+          marginTop: 6,
+          lineHeight: 1.5,
+        }}
+      >
+        Soft-warn at {status.soft_warn_at} · hard-stop at {status.hard_stop_at}. Email is
+        never capped.
+      </div>
+    </div>
   );
 }
 
