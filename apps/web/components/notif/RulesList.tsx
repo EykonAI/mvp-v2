@@ -1,7 +1,8 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useImperativeHandle, useState, forwardRef } from 'react';
 import { RuleBuilder } from './RuleBuilder';
 import type { PersonaId } from '@/lib/intelligence-analyst/personas';
+import type { Suggestion } from '@/lib/notifications/suggestion-library';
 
 // Section · C of /notif: list the user's rules with active toggle,
 // last-fire timestamp, and delete. Renders the RuleBuilder above the
@@ -22,10 +23,37 @@ export interface Rule {
   updated_at: string;
 }
 
-export function RulesList({ persona }: { persona: PersonaId }) {
+export interface RulesListHandle {
+  /** Open the builder pre-filled from a suggestion library card. */
+  openBuilderWith: (suggestion: Suggestion) => void;
+}
+
+export const RulesList = forwardRef<RulesListHandle, { persona: PersonaId }>(
+  function RulesList({ persona }, ref) {
   const [rules, setRules] = useState<Rule[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showBuilder, setShowBuilder] = useState(false);
+  const [prefill, setPrefill] = useState<Suggestion | undefined>(undefined);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      openBuilderWith: (s: Suggestion) => {
+        setPrefill(s);
+        setShowBuilder(true);
+        // Scroll the builder into view so the user sees the form
+        // they just summoned. The browser's smooth scroll matches
+        // every other in-page nav on /notif.
+        if (typeof window !== 'undefined') {
+          window.requestAnimationFrame(() => {
+            const el = document.getElementById('notif-rule-builder-anchor');
+            el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          });
+        }
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     void refresh();
@@ -84,6 +112,7 @@ export function RulesList({ persona }: { persona: PersonaId }) {
 
   return (
     <div>
+      <div id="notif-rule-builder-anchor" />
       {error && (
         <div
           style={{
@@ -103,17 +132,29 @@ export function RulesList({ persona }: { persona: PersonaId }) {
       {showBuilder && (
         <RuleBuilder
           persona={persona}
+          prefill={prefill}
           onCreated={() => {
             setShowBuilder(false);
+            setPrefill(undefined);
             void refresh();
           }}
-          onCancel={() => setShowBuilder(false)}
+          onCancel={() => {
+            setShowBuilder(false);
+            setPrefill(undefined);
+          }}
         />
       )}
 
       {!showBuilder && (
         <div style={{ marginBottom: 14 }}>
-          <button type="button" onClick={() => setShowBuilder(true)} style={btnPrimary}>
+          <button
+            type="button"
+            onClick={() => {
+              setPrefill(undefined);
+              setShowBuilder(true);
+            }}
+            style={btnPrimary}
+          >
             + New rule
           </button>
         </div>
@@ -197,7 +238,7 @@ export function RulesList({ persona }: { persona: PersonaId }) {
       )}
     </div>
   );
-}
+});
 
 function RuleMeta({ rule }: { rule: Rule }) {
   const cfg = (rule.config ?? {}) as {
