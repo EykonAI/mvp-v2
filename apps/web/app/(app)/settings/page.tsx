@@ -6,6 +6,7 @@ import { tierMeetsRequirement } from '@/lib/subscription';
 import { ReferralCard } from '@/components/settings/ReferralCard';
 import { ClearHistoryCard } from '@/components/settings/ClearHistoryCard';
 import { ChannelsCard } from '@/components/settings/ChannelsCard';
+import { RecentNotificationsCard } from '@/components/settings/RecentNotificationsCard';
 import { APP_URL } from '@/lib/url';
 
 export const metadata: Metadata = {
@@ -125,6 +126,8 @@ export default async function SettingsPage() {
       <ReferralCard referralCode={referralCode} baseUrl={baseUrl} />
 
       {tierMeetsRequirement(displayTier, 'pro') && <ChannelsCard />}
+
+      {tierMeetsRequirement(displayTier, 'pro') && <RecentNotificationsCard />}
 
       <ClearHistoryCard />
 

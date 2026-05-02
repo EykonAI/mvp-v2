@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import TopNav from '@/components/TopNav';
 import ChatPanel from '@/components/ChatPanel';
 import { RulesList, type RulesListHandle } from '@/components/notif/RulesList';
+import { RecentFiresList } from '@/components/notif/RecentFiresList';
 import { SuggestionGrid } from '@/components/notif/SuggestionCard';
 import {
   CROSS_DATA_SUGGESTIONS,
@@ -221,42 +222,11 @@ function SectionHeading({ index, title, hint }: { index: string; title: string; 
   );
 }
 
-function PlaceholderCard({ title, body }: { title: string; body: string }) {
-  return (
-    <div
-      style={{
-        padding: '20px 22px',
-        background: 'var(--bg-panel)',
-        border: '1px dashed var(--rule)',
-        borderRadius: 4,
-        color: 'var(--ink-dim)',
-      }}
-    >
-      <div
-        style={{
-          fontFamily: 'var(--f-mono)',
-          fontSize: 10.5,
-          letterSpacing: '0.18em',
-          textTransform: 'uppercase',
-          color: 'var(--ink-faint)',
-          marginBottom: 8,
-        }}
-      >
-        {title}
-      </div>
-      <p style={{ fontSize: 13, lineHeight: 1.5 }}>{body}</p>
-    </div>
-  );
-}
-
 function RecentFiresSection() {
   return (
     <section>
       <SectionHeading index="A" title="Recent fires · last 24 hours" />
-      <PlaceholderCard
-        title="No fires yet"
-        body="Once you enable a rule, every fire appears here with the matching event payload, AI rationale (where applicable), and per-channel delivery status."
-      />
+      <RecentFiresList hours={24} />
     </section>
   );
 }
