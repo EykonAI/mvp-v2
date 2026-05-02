@@ -20,6 +20,7 @@ import {
 } from '@/lib/notifications/tools';
 import { DEFAULT_COOLDOWN_MINUTES, MIN_COOLDOWN_MINUTES } from '@/lib/notifications/rule-limits';
 import type { PersonaId } from '@/lib/intelligence-analyst/personas';
+import type { Suggestion } from '@/lib/notifications/suggestion-library';
 
 // Inline rule builder. Supports single_event (PR 5) and multi_event
 // (PR 7). Outcome-AI / cross-data-AI panes arrive in PR 8 — the
@@ -48,31 +49,32 @@ interface RuleBuilderProps {
   persona: PersonaId;
   onCreated: () => void;
   onCancel: () => void;
+  /** Optional starting state; populated when the user clicks a card
+   *  in the suggestion library. The builder lands on the right mode
+   *  tab with the config already filled in; the user can still tweak
+   *  before saving. */
+  prefill?: Suggestion;
 }
 
-export function RuleBuilder({ persona, onCreated, onCancel }: RuleBuilderProps) {
-  const [mode, setMode] = useState<RuleMode>('single_event');
+export function RuleBuilder({ persona, onCreated, onCancel, prefill }: RuleBuilderProps) {
+  const initial = useMemo(() => derivePrefill(prefill), [prefill]);
+  const [mode, setMode] = useState<RuleMode>(initial.mode);
 
   // Single-event state
-  const [tool, setTool] = useState<SingleEventToolId>(SINGLE_EVENT_TOOLS[0].id);
-  const [filters, setFilters] = useState<Record<string, FilterValue>>(() =>
-    initialFilters(SINGLE_EVENT_TOOLS[0].id),
-  );
+  const [tool, setTool] = useState<SingleEventToolId>(initial.tool);
+  const [filters, setFilters] = useState<Record<string, FilterValue>>(initial.filters);
 
   // Multi-event state
-  const [predicates, setPredicates] = useState<PredicateState[]>(() => [
-    { tool: SINGLE_EVENT_TOOLS[0].id, filters: initialFilters(SINGLE_EVENT_TOOLS[0].id) },
-    { tool: SINGLE_EVENT_TOOLS[1].id, filters: initialFilters(SINGLE_EVENT_TOOLS[1].id) },
-  ]);
-  const [windowHours, setWindowHours] = useState<number>(MULTI_EVENT_DEFAULT_WINDOW_HOURS);
+  const [predicates, setPredicates] = useState<PredicateState[]>(initial.predicates);
+  const [windowHours, setWindowHours] = useState<number>(initial.windowHours);
 
   // AI rules state
-  const [outcomeStatement, setOutcomeStatement] = useState('');
-  const [aiBuckets, setAiBuckets] = useState<DataBucket[]>([]);
+  const [outcomeStatement, setOutcomeStatement] = useState(initial.outcomeStatement);
+  const [aiBuckets, setAiBuckets] = useState<DataBucket[]>(initial.aiBuckets);
 
   // Shared state
-  const [name, setName] = useState('');
-  const [cooldown, setCooldown] = useState<number>(DEFAULT_COOLDOWN_MINUTES);
+  const [name, setName] = useState(initial.name);
+  const [cooldown, setCooldown] = useState<number>(initial.cooldown);
   const [channels, setChannels] = useState<VerifiedChannel[] | null>(null);
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -657,6 +659,90 @@ function initialFilters(toolId: SingleEventToolId): Record<string, FilterValue> 
   const tool = SINGLE_EVENT_TOOLS.find(t => t.id === toolId);
   if (!tool) return {};
   return Object.fromEntries(tool.filters.map(f => [f.id, f.default]));
+}
+
+interface DerivedPrefill {
+  mode: RuleMode;
+  tool: SingleEventToolId;
+  filters: Record<string, FilterValue>;
+  predicates: PredicateState[];
+  windowHours: number;
+  outcomeStatement: string;
+  aiBuckets: DataBucket[];
+  name: string;
+  cooldown: number;
+}
+
+const DEFAULT_PREDICATES: PredicateState[] = [
+  { tool: SINGLE_EVENT_TOOLS[0].id, filters: initialFilters(SINGLE_EVENT_TOOLS[0].id) },
+  { tool: SINGLE_EVENT_TOOLS[1].id, filters: initialFilters(SINGLE_EVENT_TOOLS[1].id) },
+];
+
+/**
+ * Translate a Suggestion (from the §4 / §5 library) into the
+ * RuleBuilder's local state. Falls back to defaults for whichever
+ * fields the suggestion's mode doesn't specify, so the user can
+ * flip mode tabs without losing all context.
+ */
+function derivePrefill(suggestion: Suggestion | undefined): DerivedPrefill {
+  const baseTool: SingleEventToolId = SINGLE_EVENT_TOOLS[0].id;
+  const base: DerivedPrefill = {
+    mode: 'single_event',
+    tool: baseTool,
+    filters: initialFilters(baseTool),
+    predicates: DEFAULT_PREDICATES,
+    windowHours: MULTI_EVENT_DEFAULT_WINDOW_HOURS,
+    outcomeStatement: '',
+    aiBuckets: [],
+    name: '',
+    cooldown: DEFAULT_COOLDOWN_MINUTES,
+  };
+  if (!suggestion) return base;
+
+  const cfg = suggestion.config;
+  const cooldown = suggestion.cooldown_minutes ?? DEFAULT_COOLDOWN_MINUTES;
+  const name = suggestion.title;
+
+  switch (cfg.rule_type) {
+    case 'single_event': {
+      const toolId = (cfg.tool as SingleEventToolId) ?? baseTool;
+      const merged = { ...initialFilters(toolId), ...cfg.filters } as Record<string, FilterValue>;
+      return { ...base, mode: 'single_event', tool: toolId, filters: merged, name, cooldown };
+    }
+    case 'multi_event':
+      return {
+        ...base,
+        mode: 'multi_event',
+        predicates: cfg.predicates.map(p => {
+          const toolId = (p.tool as SingleEventToolId) ?? baseTool;
+          return {
+            tool: toolId,
+            filters: { ...initialFilters(toolId), ...p.filters } as Record<string, FilterValue>,
+          };
+        }),
+        windowHours: cfg.window_hours,
+        name,
+        cooldown,
+      };
+    case 'outcome_ai':
+      return {
+        ...base,
+        mode: 'outcome_ai',
+        outcomeStatement: cfg.outcome_statement,
+        aiBuckets: cfg.buckets ?? [],
+        name,
+        cooldown,
+      };
+    case 'cross_data_ai':
+      return {
+        ...base,
+        mode: 'cross_data_ai',
+        outcomeStatement: cfg.outcome_statement,
+        aiBuckets: cfg.buckets,
+        name,
+        cooldown,
+      };
+  }
 }
 
 function humanizeCreateError(data: {

@@ -1,8 +1,14 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import TopNav from '@/components/TopNav';
 import ChatPanel from '@/components/ChatPanel';
-import { RulesList } from '@/components/notif/RulesList';
+import { RulesList, type RulesListHandle } from '@/components/notif/RulesList';
+import { SuggestionGrid } from '@/components/notif/SuggestionCard';
+import {
+  CROSS_DATA_SUGGESTIONS,
+  PERSONA_SUGGESTIONS,
+  type Suggestion,
+} from '@/lib/notifications/suggestion-library';
 import { PERSONAS, DEFAULT_PERSONA, isValidPersona, type PersonaId } from '@/lib/intelligence-analyst/personas';
 
 // Single-key localStorage source of truth shared with the AI Chat
@@ -56,7 +62,7 @@ export function NotifShell({ recentFilter }: NotifShellProps) {
       <TopNav chatOpen={chatOpen} onChatToggle={() => setChatOpen(v => !v)} />
       <div className="flex-1 flex" style={{ minHeight: 0 }}>
         <main className="flex-1 min-w-0 overflow-auto">
-          <NotifContent
+          <NotifContentInner
             persona={persona}
             onPersonaChange={onPersonaChange}
             recentFilter={recentFilter}
@@ -78,7 +84,7 @@ export function NotifShell({ recentFilter }: NotifShellProps) {
 
 // ─── Main content ────────────────────────────────────────────────
 
-function NotifContent({
+function NotifContentInner({
   persona,
   onPersonaChange,
   recentFilter,
@@ -87,12 +93,21 @@ function NotifContent({
   onPersonaChange: (p: PersonaId) => void;
   recentFilter: boolean;
 }) {
+  // RulesList exposes openBuilderWith() so the suggestion cards
+  // above can pre-fill the same builder instance — no duplicate
+  // form code, no separate modal.
+  const rulesRef = useRef<RulesListHandle>(null);
+  const onPickSuggestion = (s: Suggestion) => {
+    rulesRef.current?.openBuilderWith(s);
+  };
+
   return (
     <div style={{ padding: '32px 40px 56px', maxWidth: 1200, margin: '0 auto' }}>
       <Header persona={persona} onPersonaChange={onPersonaChange} />
       {recentFilter && <RecentFiresSection />}
-      <SuggestionLibrarySection persona={persona} />
-      <RulesListSection persona={persona} />
+      <SuggestionLibrarySection persona={persona} onPick={onPickSuggestion} />
+      <CrossDataSuggestionsSection onPick={onPickSuggestion} />
+      <RulesListSection persona={persona} rulesRef={rulesRef} />
     </div>
   );
 }
@@ -246,7 +261,14 @@ function RecentFiresSection() {
   );
 }
 
-function SuggestionLibrarySection({ persona }: { persona: PersonaId }) {
+function SuggestionLibrarySection({
+  persona,
+  onPick,
+}: {
+  persona: PersonaId;
+  onPick: (s: Suggestion) => void;
+}) {
+  const list = PERSONA_SUGGESTIONS[persona] ?? [];
   return (
     <section>
       <SectionHeading
@@ -254,19 +276,35 @@ function SuggestionLibrarySection({ persona }: { persona: PersonaId }) {
         title="Suggested rules"
         hint={`tuned for ${persona}`}
       />
-      <PlaceholderCard
-        title="Suggestion library — landing in PR 11"
-        body="Persona-specific starter rules covering single-event, multi-event, outcome-driven AI, and cross-data AI types. Click any card to drop it into the rule builder pre-filled, then review channels and cooldown before enabling."
-      />
+      <SuggestionGrid suggestions={list} onPick={onPick} />
     </section>
   );
 }
 
-function RulesListSection({ persona }: { persona: PersonaId }) {
+function CrossDataSuggestionsSection({ onPick }: { onPick: (s: Suggestion) => void }) {
+  return (
+    <section>
+      <SectionHeading
+        index="B′"
+        title="Cross-data AI suggestions"
+        hint="multi-bucket · universal"
+      />
+      <SuggestionGrid suggestions={CROSS_DATA_SUGGESTIONS} onPick={onPick} />
+    </section>
+  );
+}
+
+function RulesListSection({
+  persona,
+  rulesRef,
+}: {
+  persona: PersonaId;
+  rulesRef: React.RefObject<RulesListHandle>;
+}) {
   return (
     <section>
       <SectionHeading index="C" title="Your rules" />
-      <RulesList persona={persona} />
+      <RulesList ref={rulesRef} persona={persona} />
     </section>
   );
 }
