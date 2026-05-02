@@ -102,6 +102,65 @@ export async function sendSmsVerificationCode(
   }
 }
 
+/**
+ * Send the verification code over WhatsApp via Twilio. Same wire shape
+ * as the SMS path — the only difference is the `whatsapp:` prefix on
+ * From and To, which Twilio uses to route through the WhatsApp Business
+ * channel instead of SMS.
+ *
+ * Twilio enforces opt-in at the API layer:
+ *   • Sandbox: the recipient must FIRST text "join <sandbox-code>" to
+ *     the sandbox number (see TWILIO_WHATSAPP_FROM). Until they do,
+ *     the API rejects the message with a 63007 / 21211-class error.
+ *   • Production: only Meta-approved templates can be sent outside a
+ *     24-h session window. v1 ships the opt-in copy verbatim from
+ *     Twilio's recommended templates — see PR description for the
+ *     exact body that legal must review.
+ */
+export async function sendWhatsAppVerificationCode(
+  to: string,
+  code: string,
+): Promise<VerificationSendResult> {
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  const from = process.env.TWILIO_WHATSAPP_FROM; // e.g. "whatsapp:+14155238886"
+  if (!sid || !token || !from) {
+    if (!shouldActuallySend()) {
+      console.log(`[notif:verify:dry_run] whatsapp → ${to} · code ${code}`);
+      return { ok: true, provider: 'dry_run' };
+    }
+    return { ok: false, error: 'TWILIO_WHATSAPP_FROM not configured' };
+  }
+  try {
+    const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
+    // Twilio expects both From and To prefixed with `whatsapp:` for
+    // the WhatsApp channel. We store the bare E.164 number on the row
+    // and add the prefix here, so the channel handle stays portable.
+    const whatsAppFrom = from.startsWith('whatsapp:') ? from : `whatsapp:${from}`;
+    const whatsAppTo = `whatsapp:${to}`;
+    const body = new URLSearchParams({
+      From: whatsAppFrom,
+      To: whatsAppTo,
+      Body: `eYKON: your verification code is ${code}. Expires in ${VERIFICATION_TTL_MINUTES} minutes. Reply STOP to opt out.`,
+    });
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${sid}:${token}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: body.toString(),
+    });
+    if (!r.ok) {
+      const detail = await r.text().catch(() => '');
+      return { ok: false, error: `Twilio ${r.status}: ${detail.slice(0, 200)}` };
+    }
+    return { ok: true, provider: 'twilio' };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'unknown Twilio error' };
+  }
+}
+
 // ─── Validators ──────────────────────────────────────────────────
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;

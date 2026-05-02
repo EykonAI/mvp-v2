@@ -35,7 +35,7 @@ interface CapStatus {
 }
 
 type FormState = {
-  type: 'email' | 'sms';
+  type: 'email' | 'sms' | 'whatsapp';
   handle: string;
   label: string;
 };
@@ -364,6 +364,8 @@ export function ChannelsCard() {
         </form>
       )}
 
+      {form.type === 'whatsapp' && <WhatsAppOptInHint />}
+
       <form
         onSubmit={onCreate}
         style={{
@@ -377,14 +379,14 @@ export function ChannelsCard() {
           Type
           <select
             value={form.type}
-            onChange={e => setForm({ ...form, type: e.target.value as 'email' | 'sms' })}
+            onChange={e =>
+              setForm({ ...form, type: e.target.value as 'email' | 'sms' | 'whatsapp' })
+            }
             style={inputStyle}
           >
             <option value="email">Email</option>
             <option value="sms">SMS</option>
-            <option value="whatsapp" disabled>
-              WhatsApp (PR 10)
-            </option>
+            <option value="whatsapp">WhatsApp</option>
           </select>
         </label>
         <label style={fieldLabel}>
@@ -412,6 +414,41 @@ export function ChannelsCard() {
         </button>
       </form>
     </section>
+  );
+}
+
+function WhatsAppOptInHint() {
+  return (
+    <div
+      style={{
+        background: 'rgba(25, 208, 184, 0.06)',
+        border: '1px solid var(--teal-deep)',
+        borderRadius: 4,
+        padding: '10px 14px',
+        marginBottom: 12,
+        fontSize: 12.5,
+        color: 'var(--ink-dim)',
+        lineHeight: 1.5,
+      }}
+    >
+      <div
+        style={{
+          fontFamily: 'var(--f-mono)',
+          fontSize: 10.5,
+          letterSpacing: '0.18em',
+          textTransform: 'uppercase',
+          color: 'var(--teal)',
+          marginBottom: 6,
+        }}
+      >
+        WhatsApp opt-in required
+      </div>
+      Twilio enforces opt-in before any WhatsApp message can be delivered. <strong style={{ color: 'var(--ink)' }}>
+        Before clicking &ldquo;Add channel&rdquo;</strong>, open WhatsApp on the phone you&#x2019;re
+      registering and follow the opt-in prompt your administrator shared (in the Twilio sandbox this
+      is a one-time &ldquo;join &lt;code&gt;&rdquo; message). If the verification message doesn&#x2019;t arrive, complete
+      the opt-in and click <strong style={{ color: 'var(--ink)' }}>Resend code</strong>.
+    </div>
   );
 }
 
