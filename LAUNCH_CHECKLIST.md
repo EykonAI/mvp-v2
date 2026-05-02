@@ -125,6 +125,8 @@ Add these scheduled triggers on the web service. Each must include the
 | `/api/cron/drain-notifications`               | every 1 min           | this branch   | Drains notification_queue → Resend                 |
 | `/api/cron/crypto-renewal-reminder`           | once daily 09:00 UTC  | this branch   | 30/7/1-day reminders before annual lapse           |
 | `/api/cron/expire-subscriptions`              | once daily 03:00 UTC  | this branch   | Demote lapsed crypto subs (status=expired, citizen)|
+| `/api/cron/evaluate-rules-cheap`              | every 15 min          | notif branch  | Notification Center · single + multi-event rules   |
+| `/api/cron/evaluate-rules-ai`                 | every 1 h             | notif branch  | Notification Center · outcome + cross-data AI rules|
 
 The `pre-existing` rows shipped with the Phase-9 Intelligence Center work and
 must already be configured on Railway — verify they are still present after
