@@ -12,11 +12,9 @@ import {
   type MultiEventMatchResult,
   type RuleRow,
 } from '@/lib/notifications/evaluator-cheap';
-import {
-  dispatchToChannel,
-  type DispatchOutcome,
-  type VerifiedChannel,
-} from '@/lib/notifications/dispatch';
+import { dispatchWithCap } from '@/lib/notifications/dispatch-with-cap';
+import { findRecentFireCount, PER_RULE_PER_DAY_FIRE_LIMIT } from '@/lib/notifications/cap';
+import type { Tier } from '@/lib/auth/session';
 
 // /api/cron/evaluate-rules-cheap — runs every 15 minutes.
 //
@@ -37,6 +35,7 @@ type ProcessResult =
   | { state: 'fired'; ruleId: string; logId: string | null }
   | { state: 'cooldown'; ruleId: string }
   | { state: 'no_match'; ruleId: string }
+  | { state: 'rate_limited'; ruleId: string }
   | { state: 'error'; ruleId: string; error: string };
 
 export async function POST(req: NextRequest) {
@@ -82,6 +81,7 @@ export async function POST(req: NextRequest) {
     fired: results.filter(r => r.state === 'fired').length,
     cooldown: results.filter(r => r.state === 'cooldown').length,
     no_match: results.filter(r => r.state === 'no_match').length,
+    rate_limited: results.filter(r => r.state === 'rate_limited').length,
     errors: results.filter(r => r.state === 'error').length,
   };
   return NextResponse.json(summary);
@@ -93,6 +93,16 @@ async function processRule(
 ): Promise<ProcessResult> {
   if (isCooldownActive(rule)) {
     return { state: 'cooldown', ruleId: rule.id };
+  }
+
+  // Per-rule per-day rate limit (brief §3.6) — defence-in-depth
+  // against runaway misconfigured rules. Applied BEFORE we even
+  // query the feed: if a rule has fired ≥20 times in 24 h, we
+  // short-circuit without writing a log row (the limit caps fires,
+  // not just dispatches).
+  const recentFires = await findRecentFireCount(admin, rule.id, 24);
+  if (recentFires >= PER_RULE_PER_DAY_FIRE_LIMIT) {
+    return { state: 'rate_limited', ruleId: rule.id };
   }
 
   let firePayloadInput:
@@ -110,9 +120,11 @@ async function processRule(
     return { state: 'no_match', ruleId: rule.id };
   }
 
-  // Resolve channel ids → verified, active rows. Anything that fails
-  // the filter (revoked, paused, deleted) gets dropped from the
-  // dispatch list but recorded in delivery_status with a reason.
+  // Resolve channel ids → verified, active rows. dispatchWithCap
+  // does the row-level filter (drops missing/unverified/paused with
+  // discriminated suppressed_reason) and applies the SMS+WhatsApp
+  // monthly cap (Pro 50, Desk 200, Enterprise 1000) with the soft-
+  // warn at 80 % / hard stop at 150 % semantics.
   const { data: channelRows, error: chErr } = await admin
     .from('user_channels')
     .select('id, channel_type, handle, label, verified_at, active')
@@ -127,36 +139,27 @@ async function processRule(
     firePayloadInput.kind === 'single'
       ? buildFirePayload(rule, firePayloadInput.match, firedAtIso)
       : buildMultiEventFirePayload(rule, firePayloadInput.result, firedAtIso);
-  const deliveryStatus: Record<string, DispatchOutcome> = {};
 
-  for (const channelId of rule.channel_ids) {
-    const row = (channelRows ?? []).find(c => c.id === channelId);
-    if (!row) {
-      deliveryStatus[channelId] = {
-        ok: false,
-        error: 'channel_not_found',
-        suppressed_reason: 'channel_deleted_or_inaccessible',
-      };
-      continue;
-    }
-    if (!row.verified_at) {
-      deliveryStatus[channelId] = {
-        ok: false,
-        error: 'channel_unverified',
-        suppressed_reason: 'channel_unverified',
-      };
-      continue;
-    }
-    if (!row.active) {
-      deliveryStatus[channelId] = {
-        ok: false,
-        error: 'channel_paused',
-        suppressed_reason: 'channel_paused',
-      };
-      continue;
-    }
-    deliveryStatus[channelId] = await dispatchToChannel(row as VerifiedChannel, payload);
-  }
+  const userTier = await getUserTier(admin, rule.user_id);
+  const userEmail = await getUserEmail(admin, rule.user_id);
+
+  const dispatchSummary = await dispatchWithCap({
+    supabase: admin,
+    userId: rule.user_id,
+    userTier,
+    userEmail,
+    rule: { channel_ids: rule.channel_ids },
+    payload,
+    channelRows: (channelRows ?? []) as Array<{
+      id: string;
+      channel_type: 'email' | 'sms' | 'whatsapp';
+      handle: string;
+      label: string | null;
+      verified_at: string | null;
+      active: boolean;
+    }>,
+  });
+  const deliveryStatus = dispatchSummary.delivery_status;
 
   const matchExtras =
     firePayloadInput.kind === 'single'
@@ -175,6 +178,11 @@ async function processRule(
       payload: {
         ...payload,
         ...matchExtras,
+        cap_state: {
+          monthly_sms_wa_count: dispatchSummary.monthly_sms_wa_count,
+          soft_warn_triggered: dispatchSummary.soft_warn_triggered,
+          warning_email_sent: dispatchSummary.warning_email_sent,
+        },
       },
       delivery_status: deliveryStatus,
     })
@@ -193,4 +201,25 @@ async function processRule(
     .eq('id', rule.id);
 
   return { state: 'fired', ruleId: rule.id, logId: logRow?.id ?? null };
+}
+
+// ─── User lookups (service-role only) ────────────────────────────
+
+async function getUserTier(admin: SupabaseClient, userId: string): Promise<Tier> {
+  const { data } = await admin
+    .from('user_profiles')
+    .select('tier')
+    .eq('id', userId)
+    .maybeSingle();
+  const tier = data?.tier as Tier | undefined;
+  return tier ?? 'pro';
+}
+
+async function getUserEmail(admin: SupabaseClient, userId: string): Promise<string | null> {
+  const { data } = await admin
+    .from('user_profiles')
+    .select('email')
+    .eq('id', userId)
+    .maybeSingle();
+  return data?.email ?? null;
 }
