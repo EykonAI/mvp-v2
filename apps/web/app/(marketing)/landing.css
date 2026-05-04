@@ -100,6 +100,36 @@
   display: inline-block;
 }
 .eykon-landing nav .cta:hover { background: var(--cyan); color: var(--bg-base); }
+.eykon-landing nav .nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.eykon-landing nav .cta-primary {
+  padding: 8px 16px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--bg-base);
+  background: var(--cyan);
+  border: 1px solid var(--cyan);
+  border-radius: 3px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all .2s;
+  display: inline-block;
+  font-weight: 600;
+}
+.eykon-landing nav .cta-primary:hover {
+  background: var(--cyan-dim, var(--cyan));
+  border-color: var(--cyan-dim, var(--cyan));
+  transform: translateY(-1px);
+}
+@media (max-width: 720px) {
+  /* On narrow viewports, Sign in collapses first; Sign up always visible. */
+  .eykon-landing nav .nav-actions .cta { display: none; }
+}
 
 /* ───── Hero ───── */
 .eykon-landing .hero {
