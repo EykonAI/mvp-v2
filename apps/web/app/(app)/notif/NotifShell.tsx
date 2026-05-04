@@ -10,14 +10,21 @@ import {
   PERSONA_SUGGESTIONS,
   type Suggestion,
 } from '@/lib/notifications/suggestion-library';
-import { PERSONAS, DEFAULT_PERSONA, isValidPersona, type PersonaId } from '@/lib/intelligence-analyst/personas';
-
-// Single-key localStorage source of truth shared with the AI Chat
-// panel. Brief §10: "reuse the single global persona stored in
-// localStorage". Same key as ChatPanel + intel PersonaContext —
-// keep these aligned so picking a persona on /notif also flips the
-// chat panel and vice versa.
-const PERSONA_STORAGE_KEY = 'eykon.persona';
+import {
+  PERSONAS,
+  DEFAULT_PERSONA,
+  isValidPersona,
+  personaVisibility,
+  type PersonaId,
+} from '@/lib/intelligence-analyst/personas';
+import {
+  PERSONA_STORAGE_KEY,
+  migrateAdvancedFlagFromActivePersona,
+  readAdvancedFlag,
+  resolvePersonaFromSearchParams,
+  subscribeAdvancedFlag,
+} from '@/lib/intelligence-analyst/persona-visibility';
+import { captureBrowser } from '@/lib/analytics/client';
 
 interface NotifShellProps {
   recentFilter: boolean;
@@ -41,18 +48,64 @@ interface NotifShellProps {
 export function NotifShell({ recentFilter }: NotifShellProps) {
   const [chatOpen, setChatOpen] = useState(false);
   const [persona, setPersona] = useState<PersonaId>(DEFAULT_PERSONA);
+  const [advancedEnabled, setAdvancedEnabled] = useState(false);
 
-  // Hydrate persona from localStorage on mount; fall back to default
-  // when nothing is stored (true first-time user). Reads only — write
-  // happens in the change handler below.
+  // Hydrate persona on mount. Order: storage migration → URL param
+  // (?persona=<id>, with ?p= as legacy alias) → localStorage → default.
   useEffect(() => {
     if (typeof window === 'undefined') return;
+
+    if (migrateAdvancedFlagFromActivePersona()) {
+      const stored = localStorage.getItem(PERSONA_STORAGE_KEY);
+      if (isValidPersona(stored)) {
+        captureBrowser({
+          event: 'persona_changed',
+          from: null,
+          to: stored,
+          visibility: personaVisibility(stored),
+          source: 'storage_migration',
+        });
+      }
+    }
+    setAdvancedEnabled(readAdvancedFlag());
+
+    const url = new URL(window.location.href);
+    const resolved = resolvePersonaFromSearchParams(url.searchParams);
+    if (resolved) {
+      setPersona(resolved.persona);
+      captureBrowser({
+        event: 'persona_changed',
+        from: null,
+        to: resolved.persona,
+        visibility: personaVisibility(resolved.persona),
+        source: 'url_param',
+      });
+      if (resolved.auto_enabled_advanced) setAdvancedEnabled(true);
+      return;
+    }
     const stored = localStorage.getItem(PERSONA_STORAGE_KEY);
     if (isValidPersona(stored)) setPersona(stored);
   }, []);
 
+  // Cross-component sync — flip the toggle on /settings and the
+  // dropdown above re-renders without a navigation.
+  useEffect(() => {
+    return subscribeAdvancedFlag(setAdvancedEnabled);
+  }, []);
+
   const onPersonaChange = (next: PersonaId) => {
-    setPersona(next);
+    setPersona(prev => {
+      if (prev !== next) {
+        captureBrowser({
+          event: 'persona_changed',
+          from: prev,
+          to: next,
+          visibility: personaVisibility(next),
+          source: 'dropdown',
+        });
+      }
+      return next;
+    });
     if (typeof window !== 'undefined') {
       localStorage.setItem(PERSONA_STORAGE_KEY, next);
     }
@@ -67,6 +120,7 @@ export function NotifShell({ recentFilter }: NotifShellProps) {
             persona={persona}
             onPersonaChange={onPersonaChange}
             recentFilter={recentFilter}
+            advancedEnabled={advancedEnabled}
           />
         </main>
         <aside
@@ -89,10 +143,12 @@ function NotifContentInner({
   persona,
   onPersonaChange,
   recentFilter,
+  advancedEnabled,
 }: {
   persona: PersonaId;
   onPersonaChange: (p: PersonaId) => void;
   recentFilter: boolean;
+  advancedEnabled: boolean;
 }) {
   // RulesList exposes openBuilderWith() so the suggestion cards
   // above can pre-fill the same builder instance — no duplicate
@@ -104,7 +160,7 @@ function NotifContentInner({
 
   return (
     <div style={{ padding: '32px 40px 56px', maxWidth: 1200, margin: '0 auto' }}>
-      <Header persona={persona} onPersonaChange={onPersonaChange} />
+      <Header persona={persona} onPersonaChange={onPersonaChange} advancedEnabled={advancedEnabled} />
       {recentFilter && <RecentFiresSection />}
       <SuggestionLibrarySection persona={persona} onPick={onPickSuggestion} />
       <CrossDataSuggestionsSection onPick={onPickSuggestion} />
@@ -116,9 +172,11 @@ function NotifContentInner({
 function Header({
   persona,
   onPersonaChange,
+  advancedEnabled,
 }: {
   persona: PersonaId;
   onPersonaChange: (p: PersonaId) => void;
+  advancedEnabled: boolean;
 }) {
   return (
     <header style={{ marginBottom: 32 }}>
@@ -142,7 +200,7 @@ function Header({
         through your verified channels, respects a 6-hour cooldown by default, and is
         auditable in a per-user log.
       </p>
-      <PersonaSelector persona={persona} onChange={onPersonaChange} />
+      <PersonaSelector persona={persona} onChange={onPersonaChange} advancedEnabled={advancedEnabled} />
     </header>
   );
 }
@@ -150,10 +208,19 @@ function Header({
 function PersonaSelector({
   persona,
   onChange,
+  advancedEnabled,
 }: {
   persona: PersonaId;
   onChange: (p: PersonaId) => void;
+  advancedEnabled: boolean;
 }) {
+  // Always include the active persona, even when it's advanced and
+  // the toggle is off — so the user is never confused about what is
+  // currently selected. Only the OPTIONS list narrows when the flag
+  // is off.
+  const options = PERSONAS.filter(
+    p => advancedEnabled || p.visibility === 'default' || p.id === persona,
+  );
   return (
     <label
       style={{
@@ -192,7 +259,7 @@ function PersonaSelector({
           paddingRight: 18,
         }}
       >
-        {PERSONAS.map(p => (
+        {options.map(p => (
           <option key={p.id} value={p.id} style={{ background: 'var(--bg-panel)' }}>
             {p.label}
           </option>

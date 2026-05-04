@@ -10,8 +10,17 @@ import {
   PERSONAS,
   DEFAULT_PERSONA,
   isValidPersona,
+  personaVisibility,
   type PersonaId,
 } from '@/lib/intelligence-analyst/personas';
+import {
+  PERSONA_STORAGE_KEY,
+  migrateAdvancedFlagFromActivePersona,
+  readAdvancedFlag,
+  resolvePersonaFromSearchParams,
+  subscribeAdvancedFlag,
+} from '@/lib/intelligence-analyst/persona-visibility';
+import { captureBrowser } from '@/lib/analytics/client';
 
 interface Message {
   id: string;
@@ -64,6 +73,10 @@ export default function ChatPanel() {
   // Persona overlay (§4.4) — restored from localStorage so the
   // selection persists per user across sessions on this browser.
   const [persona, setPersona] = useState<PersonaId>(DEFAULT_PERSONA);
+  // Advanced-personas gate. Default-off; the toggle on /settings
+  // flips it. Subscribed to so cross-tab + cross-component updates
+  // reach the dropdown without a reload.
+  const [advancedEnabled, setAdvancedEnabled] = useState(false);
   // Export-menu open state, keyed by assistant-message id. Only one
   // open at a time. null = nothing open.
   const [exportMenuFor, setExportMenuFor] = useState<string | null>(null);
@@ -110,20 +123,77 @@ export default function ChatPanel() {
     return () => { cancelled = true; };
   }, []);
 
-  // Restore persona from localStorage on mount.
+  // Restore persona on mount. Order:
+  //   1. Run the storage-migration check so existing users with a
+  //      gated persona keep that persona surfaced post-deploy.
+  //   2. Honour ?persona=<id> URL param (auto-flips advanced flag if
+  //      the resolved persona is gated).
+  //   3. Fall back to localStorage `eykon.persona`, then DEFAULT_PERSONA.
   useEffect(() => {
     try {
-      const stored = window.localStorage.getItem('eykon.persona');
+      if (migrateAdvancedFlagFromActivePersona()) {
+        const stored = window.localStorage.getItem(PERSONA_STORAGE_KEY);
+        if (isValidPersona(stored)) {
+          captureBrowser({
+            event: 'persona_changed',
+            from: null,
+            to: stored,
+            visibility: personaVisibility(stored),
+            source: 'storage_migration',
+          });
+        }
+      }
+      setAdvancedEnabled(readAdvancedFlag());
+
+      const url = new URL(window.location.href);
+      const resolved = resolvePersonaFromSearchParams(url.searchParams);
+      if (resolved) {
+        setPersona(resolved.persona);
+        captureBrowser({
+          event: 'persona_changed',
+          from: null,
+          to: resolved.persona,
+          visibility: personaVisibility(resolved.persona),
+          source: 'url_param',
+        });
+        if (resolved.auto_enabled_advanced) setAdvancedEnabled(true);
+        return;
+      }
+      const stored = window.localStorage.getItem(PERSONA_STORAGE_KEY);
       if (stored && isValidPersona(stored)) setPersona(stored);
     } catch { /* localStorage may be disabled */ }
+  }, []);
+
+  // Subscribe to the advanced-personas flag so the dropdown reacts
+  // when the toggle on /settings flips in another tab or pane.
+  useEffect(() => {
+    return subscribeAdvancedFlag(setAdvancedEnabled);
   }, []);
 
   // Persist persona on change.
   useEffect(() => {
     try {
-      window.localStorage.setItem('eykon.persona', persona);
+      window.localStorage.setItem(PERSONA_STORAGE_KEY, persona);
     } catch { /* ignore */ }
   }, [persona]);
+
+  // Wrap setPersona to fire telemetry on user-driven changes only.
+  // The migration / URL-param / mount paths fire their own events.
+  const onPersonaChange = useCallback((next: PersonaId) => {
+    setPersona(prev => {
+      if (prev !== next) {
+        captureBrowser({
+          event: 'persona_changed',
+          from: prev,
+          to: next,
+          visibility: personaVisibility(next),
+          source: 'dropdown',
+        });
+      }
+      return next;
+    });
+    setWelcomeDismissed(true);
+  }, []);
 
   // Last-active hint — fetch once on mount.
   useEffect(() => {
@@ -340,7 +410,7 @@ export default function ChatPanel() {
             </span>
           </div>
           <div className="flex items-center gap-3 shrink-0">
-            <PersonaPicker value={persona} onChange={p => { setPersona(p); setWelcomeDismissed(true); }} />
+            <PersonaPicker value={persona} onChange={onPersonaChange} advancedEnabled={advancedEnabled} />
             <span
               style={{
                 fontFamily: 'var(--f-mono)',
@@ -845,10 +915,19 @@ function StarterEmptyState({ onPick }: { onPick: (text: string) => void }) {
 function PersonaPicker({
   value,
   onChange,
+  advancedEnabled,
 }: {
   value: PersonaId;
   onChange: (p: PersonaId) => void;
+  advancedEnabled: boolean;
 }) {
+  // Show default rows always; show advanced rows only when the flag
+  // is on. Always include the active persona as a row even when it
+  // is advanced and the flag is off — so the user is never confused
+  // about which persona is currently active.
+  const options = PERSONAS.filter(
+    p => advancedEnabled || p.visibility === 'default' || p.id === value,
+  );
   return (
     <label
       className="flex items-center gap-1.5"
@@ -876,7 +955,7 @@ function PersonaPicker({
           cursor: 'pointer',
         }}
       >
-        {PERSONAS.map(p => (
+        {options.map(p => (
           <option key={p.id} value={p.id} style={{ background: 'var(--bg-panel)', color: 'var(--ink)' }}>
             {p.label}
           </option>

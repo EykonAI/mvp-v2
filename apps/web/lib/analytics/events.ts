@@ -20,6 +20,8 @@ export const EVENT = {
   CANCEL_CLICKED: 'cancel_clicked',
   REFERRAL_CLICKED: 'referral_clicked',
   WAITLIST_JOINED: 'waitlist_joined',
+  PERSONA_CHANGED: 'persona_changed',
+  ADVANCED_PERSONAS_TOGGLED: 'advanced_personas_toggled',
 } as const;
 
 export type EventName = (typeof EVENT)[keyof typeof EVENT];
@@ -42,4 +44,17 @@ export type EventProps =
   | { event: 'upgrade_clicked'; from_tier: string; target_tier: string; context?: string }
   | { event: 'cancel_clicked'; from_tier: string }
   | { event: 'referral_clicked'; target: 'link_copy' | 'share_twitter' | 'share_email' }
-  | { event: 'waitlist_joined'; tier: 'pro' | 'enterprise' };
+  | { event: 'waitlist_joined'; tier: 'pro' | 'enterprise' }
+  | {
+      event: 'persona_changed';
+      from: string | null;
+      to: string;
+      visibility: 'default' | 'advanced';
+      source: 'dropdown' | 'url_param' | 'storage_migration' | 'default';
+    }
+  | {
+      event: 'advanced_personas_toggled';
+      enabled: boolean;
+      active_persona: string;
+      active_persona_visibility: 'default' | 'advanced';
+    };

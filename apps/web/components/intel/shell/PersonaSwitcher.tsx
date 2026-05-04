@@ -1,16 +1,37 @@
 'use client';
+import { useEffect, useState } from 'react';
 import { usePersona, PERSONAS } from './PersonaContext';
+import {
+  readAdvancedFlag,
+  subscribeAdvancedFlag,
+} from '@/lib/intelligence-analyst/persona-visibility';
+import { personaVisibility } from '@/lib/intelligence-analyst/personas';
 
 /**
- * 2×4 persona chip grid. Changes the PersonaContext which is consumed
- * by feed cards, workspace heroes, and export templates. Feature 13/14/15/16/17 overlay.
+ * 2×4 persona chip grid. Filters to default-visible personas unless
+ * the user has flipped the advanced toggle on /settings. The active
+ * persona always shows as a chip even when advanced is off, so the
+ * user is never confused about which persona is active.
  */
 export default function PersonaSwitcher() {
   const { persona, setPersona } = usePersona();
+  const [advancedEnabled, setAdvancedEnabled] = useState(false);
+
+  useEffect(() => {
+    setAdvancedEnabled(readAdvancedFlag());
+    return subscribeAdvancedFlag(setAdvancedEnabled);
+  }, []);
+
+  const visible = PERSONAS.filter(
+    p =>
+      advancedEnabled ||
+      personaVisibility(p.slug) === 'default' ||
+      p.slug === persona,
+  );
 
   return (
     <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
-      {PERSONAS.map(p => {
+      {visible.map(p => {
         const active = persona === p.slug;
         return (
           <button
