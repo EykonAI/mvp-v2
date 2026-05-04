@@ -49,6 +49,36 @@ export const MODULE_TIER_REQUIREMENTS: Record<ModuleSlug, Tier> = {
   'shadow-fleet': 'pro',
 };
 
+// ─── Workspace surfacing tier (product decision 2026-05-04) ────────
+// Tiering is a presentation concern — every workspace stays Pro+
+// accessible (see MODULE_TIER_REQUIREMENTS above). Visibility:
+//   • 'hero'     — primary nav strip, prominent treatment, hero of
+//                  marketing material. Three workspaces: Calibration
+//                  Ledger, Shadow Fleet, Regime Shifts.
+//   • 'visible'  — secondary nav strip, subtler weight. Two: Commodities,
+//                  Critical Minerals.
+//   • 'advanced' — surfaced only via the right-aligned "Advanced
+//                  Scenarios" entry that lands on /intel/advanced.
+//                  Four: Chokepoint, Sanctions, Cascade, Precursor.
+
+export type ModuleTier = 'hero' | 'visible' | 'advanced';
+
+export const MODULE_TIERS: Record<ModuleSlug, ModuleTier> = {
+  calibration: 'hero',
+  'shadow-fleet': 'hero',
+  'regime-shifts': 'hero',
+  commodities: 'visible',
+  minerals: 'visible',
+  chokepoint: 'advanced',
+  sanctions: 'advanced',
+  cascade: 'advanced',
+  'precursor-analogs': 'advanced',
+};
+
+export function modulesByTier(tier: ModuleTier): ModuleSlug[] {
+  return MODULE_SLUGS.filter(slug => MODULE_TIERS[slug] === tier);
+}
+
 const TIER_ORDER: Record<Tier, number> = {
   citizen: 0,
   pro: 1,
