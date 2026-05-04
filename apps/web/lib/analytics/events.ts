@@ -36,7 +36,7 @@ export type EventProps =
   | { event: 'checkout_started'; plan: string; payment_method: PaymentMethod; amount_usd_cents?: number }
   | { event: 'checkout_succeeded'; plan: string; payment_method: PaymentMethod; amount_usd_cents?: number; founding_locked?: boolean }
   | { event: 'checkout_failed'; plan: string; payment_method: PaymentMethod; reason?: string }
-  | { event: 'module_opened'; module_slug: string }
+  | { event: 'module_opened'; module_slug: string; tier?: 'hero' | 'visible' | 'advanced' }
   | { event: 'ai_query'; tier: string; queries_this_month?: number }
   | { event: 'export_run'; format: string; size_bytes?: number }
   | { event: 'upgrade_clicked'; from_tier: string; target_tier: string; context?: string }
