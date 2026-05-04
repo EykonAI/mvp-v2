@@ -3,6 +3,11 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import './landing.css';
 import { captureBrowser } from '@/lib/analytics/client';
+import { AnalystWithTools } from '@/components/landing/AnalystWithTools';
+import { HeroWorkspaceShowcase } from '@/components/landing/HeroWorkspaceShowcase';
+import { NotificationCenterTease } from '@/components/landing/NotificationCenterTease';
+import { AdvancedScenariosBrief } from '@/components/landing/AdvancedScenariosBrief';
+import { CalibrationAnchor } from '@/components/landing/CalibrationAnchor';
 
 // Billing cycle state — drives prices and CTAs across the pricing grid.
 type Cycle = 'monthly' | 'annual' | 'annual-crypto';
@@ -157,9 +162,23 @@ export function Landing() {
             </a>
           ))}
         </div>
-        <Link href="/auth/signin" className="cta">
-          Sign in →
-        </Link>
+        <div className="nav-actions">
+          <Link href="/auth/signin" className="cta">
+            Sign in
+          </Link>
+          <Link
+            href="/auth/signup"
+            className="cta-primary"
+            onClick={() => {
+              captureBrowser({
+                event: 'signup_started',
+                plan: null,
+              });
+            }}
+          >
+            Sign up →
+          </Link>
+        </div>
       </nav>
 
       {/* ─── HERO ────────────────────────────────────────────────── */}
@@ -176,7 +195,7 @@ export function Landing() {
         <p className="hero-sub">
           Real-time geopolitical signals — maritime chokepoints, energy infrastructure,
           sanctions events, conflict escalation — translated into trade-relevant cues.
-          Built for day-traders, independent analysts, and the journalists who cover them.
+          Built for OSINT analysts and day-traders.
         </p>
         <p className="hero-meta">
           <span className="count">■ 847</span> of <span className="count">1,000</span>{' '}
@@ -237,6 +256,18 @@ export function Landing() {
           </div>
         </div>
       </section>
+
+      {/* ─── AI Analyst differentiation (PARAGRAPH 1, prompt §6.1) ─ */}
+      <AnalystWithTools />
+
+      {/* ─── Hero workspace showcase ─────────────────────────────── */}
+      <HeroWorkspaceShowcase />
+
+      {/* ─── Notification Center tease ───────────────────────────── */}
+      <NotificationCenterTease />
+
+      {/* ─── Advanced Scenarios brief mention ────────────────────── */}
+      <AdvancedScenariosBrief />
 
       {/* ─── INTELLIGENCE MENU ───────────────────────────────────── */}
       <section className="section" id="intelligence">
@@ -319,6 +350,9 @@ export function Landing() {
           <a href="#pricing">▸ See every module in action — start free as Observer</a>
         </div>
       </section>
+
+      {/* ─── Calibration anchor (PARAGRAPH 2, prompt §6.2) ───────── */}
+      <CalibrationAnchor />
 
       {/* ─── PRICING ─────────────────────────────────────────────── */}
       <section id="pricing" style={{ paddingTop: 60 }}>
@@ -417,8 +451,7 @@ export function Landing() {
             <div className="tier-code">T-01 · PRO</div>
             <div className="tier-name">Pro</div>
             <div className="tier-tag">
-              For individual day-traders, independent analysts, and journalists. Full platform,
-              single seat.
+              For OSINT analysts and day-traders. Full platform, single seat.
             </div>
             <div className="price-original">
               <span className="strike">{pro.strike}</span>
