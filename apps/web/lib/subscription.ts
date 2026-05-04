@@ -1,121 +1,31 @@
 import type { Tier } from './pricing';
 import { getUserProfile } from './auth/session';
 
+// SERVER-ONLY MODULE: this file imports from ./auth/session, which
+// uses next/headers. It cannot be imported from a client component.
+// All pure-data exports (MODULE_SLUGS, MODULE_LABELS, MODULE_TIERS,
+// modulesByTier, tierMeetsRequirement, canAccessModule, etc.) live in
+// ./intel/modules and are re-exported below for backwards compat with
+// existing server-side consumers.
+//
+// Client components must import directly from '@/lib/intel/modules'.
+
 export type { Tier } from './pricing';
-// Re-exported for backwards compat with any server callers that used to
-// read TIER_LABELS from here. Client components should import it from
-// '@/lib/pricing' directly (to avoid pulling in the server-only
-// getUserProfile dependency).
 export { TIER_LABELS } from './pricing';
 
-export const MODULE_SLUGS = [
-  'calibration',
-  'cascade',
-  'chokepoint',
-  'commodities',
-  'minerals',
-  'precursor-analogs',
-  'regime-shifts',
-  'sanctions',
-  'shadow-fleet',
-] as const;
-export type ModuleSlug = (typeof MODULE_SLUGS)[number];
-
-export const MODULE_LABELS: Record<ModuleSlug, string> = {
-  calibration: 'Calibration Ledger',
-  cascade: 'Cascade Propagation',
-  chokepoint: 'Chokepoint Simulator',
-  commodities: 'Commodities Workspace',
-  minerals: 'Critical Minerals',
-  'precursor-analogs': 'Precursor Analogs',
-  'regime-shifts': 'Regime Shifts',
-  sanctions: 'Sanctions Wargame',
-  'shadow-fleet': 'Shadow Fleet',
-};
-
-// Minimum tier to access each Intelligence Center workspace. Day-10 launch:
-// every module requires Pro. Citizen gets the globe + daily briefing only.
-// Per-module tuning is open — edit this map in a migration-scoped PR so the
-// pricing page FAQ and marketing copy can be updated alongside.
-export const MODULE_TIER_REQUIREMENTS: Record<ModuleSlug, Tier> = {
-  calibration: 'pro',
-  cascade: 'pro',
-  chokepoint: 'pro',
-  commodities: 'pro',
-  minerals: 'pro',
-  'precursor-analogs': 'pro',
-  'regime-shifts': 'pro',
-  sanctions: 'pro',
-  'shadow-fleet': 'pro',
-};
-
-// ─── Workspace surfacing tier (product decision 2026-05-04) ────────
-// Tiering is a presentation concern — every workspace stays Pro+
-// accessible (see MODULE_TIER_REQUIREMENTS above). Visibility:
-//   • 'hero'     — primary nav strip, prominent treatment, hero of
-//                  marketing material. Three workspaces: Calibration
-//                  Ledger, Shadow Fleet, Regime Shifts.
-//   • 'visible'  — secondary nav strip, subtler weight. Two: Commodities,
-//                  Critical Minerals.
-//   • 'advanced' — surfaced only via the right-aligned "Advanced
-//                  Scenarios" entry that lands on /intel/advanced.
-//                  Four: Chokepoint, Sanctions, Cascade, Precursor.
-
-export type ModuleTier = 'hero' | 'visible' | 'advanced';
-
-export const MODULE_TIERS: Record<ModuleSlug, ModuleTier> = {
-  calibration: 'hero',
-  'shadow-fleet': 'hero',
-  'regime-shifts': 'hero',
-  commodities: 'visible',
-  minerals: 'visible',
-  chokepoint: 'advanced',
-  sanctions: 'advanced',
-  cascade: 'advanced',
-  'precursor-analogs': 'advanced',
-};
-
-export function modulesByTier(tier: ModuleTier): ModuleSlug[] {
-  return MODULE_SLUGS.filter(slug => MODULE_TIERS[slug] === tier);
-}
-
-const TIER_ORDER: Record<Tier, number> = {
-  citizen: 0,
-  pro: 1,
-  desk: 2,
-  enterprise: 3,
-};
-
-export function tierMeetsRequirement(userTier: Tier, requirement: Tier): boolean {
-  return TIER_ORDER[userTier] >= TIER_ORDER[requirement];
-}
-
-export function canAccessModule(userTier: Tier, slug: ModuleSlug): boolean {
-  return tierMeetsRequirement(userTier, MODULE_TIER_REQUIREMENTS[slug]);
-}
-
-// Monthly caps per tier — source of truth for /api/chat rate limiting.
-// memory/project_pricing_tiers.md: Pro 500/mo, Desk 5,000/mo/seat.
-export const AI_QUERY_LIMITS: Record<Tier, number> = {
-  citizen: 0,
-  pro: 500,
-  desk: 5_000,
-  enterprise: 1_000_000, // enforced via custom contract; effectively unlimited
-};
-
-export const API_CALL_LIMITS: Record<Tier, number> = {
-  citizen: 0,
-  pro: 0,
-  desk: 10_000,
-  enterprise: 1_000_000,
-};
-
-export const EXPORT_LIMITS: Record<Tier, number> = {
-  citizen: 0,
-  pro: 100,
-  desk: 1_000,
-  enterprise: 1_000_000,
-};
+export {
+  MODULE_SLUGS,
+  MODULE_LABELS,
+  MODULE_TIER_REQUIREMENTS,
+  MODULE_TIERS,
+  modulesByTier,
+  tierMeetsRequirement,
+  canAccessModule,
+  AI_QUERY_LIMITS,
+  API_CALL_LIMITS,
+  EXPORT_LIMITS,
+} from './intel/modules';
+export type { ModuleSlug, ModuleTier } from './intel/modules';
 
 /**
  * Returns the viewer's tier. When NEXT_PUBLIC_AUTH_ENABLED is still 'false'
@@ -123,6 +33,8 @@ export const EXPORT_LIMITS: Record<Tier, number> = {
  * explorable without a signed-in user. Once the flag flips to 'true', the
  * middleware guarantees a session on any (app)/* path, so getUserProfile()
  * returns a real row and we read tier from user_profiles.
+ *
+ * Server-only — uses next/headers cookies via getUserProfile.
  */
 export async function getCurrentTier(): Promise<Tier> {
   if (process.env.NEXT_PUBLIC_AUTH_ENABLED !== 'true') {

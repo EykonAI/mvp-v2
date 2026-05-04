@@ -6,7 +6,7 @@ import {
   MODULE_TIERS,
   modulesByTier,
   type ModuleSlug,
-} from '@/lib/subscription';
+} from '@/lib/intel/modules';
 
 // Workspace nav for the Intelligence Center. Three surfaced regions:
 //   • Primary strip (hero)     — Calibration Ledger · Shadow Fleet · Regime Shifts.
