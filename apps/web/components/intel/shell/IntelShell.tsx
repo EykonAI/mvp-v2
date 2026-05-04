@@ -12,7 +12,7 @@ import {
   MODULE_TIERS,
   type ModuleSlug,
   type ModuleTier,
-} from '@/lib/subscription';
+} from '@/lib/intel/modules';
 
 /**
  * Client-side /intel chrome: TopNav, calibration strip, chat panel, persona
