@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { captureServer, identifyServer } from '@/lib/analytics/server';
+import { createServerSupabase } from '@/lib/supabase-server';
+import { EYKON_REF_COOKIE, isValidPublicId } from '@/lib/referral/attribution';
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -91,6 +93,14 @@ export async function GET(request: NextRequest) {
       plan: plan ?? null,
       has_referrer: typeof referralCode === 'string' && referralCode.length > 0,
     });
+
+    // Component A — OAuth signup fallback. Email/password signups carry
+    // eykon_ref through raw_user_meta_data and the handle_new_user
+    // trigger (migration 026) resolves it at insert time. OAuth
+    // signups have no such metadata path, so we resolve the cookie
+    // post-exchange here. No-op when the trigger already populated
+    // referred_by, or when the cookie is absent / invalid / unknown.
+    await resolveEykonRefForOAuthSignup(user.id, request);
   }
 
   // Preserve ?plan for downstream checkout handoff (Phase 4/5).
@@ -103,4 +113,37 @@ export async function GET(request: NextRequest) {
   }
 
   return response;
+}
+
+async function resolveEykonRefForOAuthSignup(userId: string, request: NextRequest) {
+  const ref = request.cookies.get(EYKON_REF_COOKIE)?.value ?? null;
+  if (!ref || !isValidPublicId(ref)) return;
+
+  const admin = createServerSupabase();
+
+  const { data: profile } = await admin
+    .from('user_profiles')
+    .select('id, referred_by, referred_by_pending, public_id')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (!profile) return;
+  // Trigger already resolved it (email/password path) — leave alone.
+  if (profile.referred_by) return;
+  // Self-ref guard: a user signing up via OAuth using a link they
+  // themselves shared previously. Discard.
+  if (profile.public_id === ref) return;
+
+  const { data: referrer } = await admin
+    .from('user_profiles')
+    .select('id')
+    .eq('public_id', ref)
+    .maybeSingle();
+  if (!referrer) return;
+
+  await admin
+    .from('user_profiles')
+    .update({ referred_by: referrer.id, referred_by_pending: null })
+    .eq('id', userId)
+    .is('referred_by', null);
 }

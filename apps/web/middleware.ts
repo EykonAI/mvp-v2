@@ -89,10 +89,15 @@ function applyAttributionCookie(request: NextRequest, response: NextResponse): N
   const ref = parseEykonRefFromSearchParams(request.nextUrl.searchParams);
   if (!ref) return response;
 
+  // Not httpOnly — the signup page reads this cookie client-side to
+  // forward into raw_user_meta_data so the handle_new_user trigger
+  // (migration 026) can resolve it via public_id at insert time. The
+  // cookie value is itself a public identifier (the referrer's
+  // public_id appears in URLs) so there is no secret to protect.
   response.cookies.set(EYKON_REF_COOKIE, ref, {
     maxAge: EYKON_REF_COOKIE_MAX_AGE_SECONDS,
     sameSite: 'lax',
-    httpOnly: true,
+    httpOnly: false,
     secure: process.env.NODE_ENV === 'production',
     path: '/',
   });
