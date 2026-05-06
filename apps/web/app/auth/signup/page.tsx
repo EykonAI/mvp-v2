@@ -7,6 +7,7 @@ import { AuthInput, AuthButton, Divider } from '@/components/auth/AuthControls';
 import { OAuthButtons } from '@/components/auth/OAuthButtons';
 import { isValidReferralCode } from '@/lib/auth/referral';
 import { getRewardfulReferral } from '@/components/referral/RewardfulScript';
+import { EYKON_REF_COOKIE, isValidPublicId } from '@/lib/referral/attribution';
 
 export default function SignUpPage() {
   return (
@@ -14,6 +15,16 @@ export default function SignUpPage() {
       <SignUpForm />
     </Suspense>
   );
+}
+
+function readEykonRefCookie(): string | null {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(
+    new RegExp(`(?:^|;\\s*)${EYKON_REF_COOKIE}=([^;]+)`),
+  );
+  if (!match) return null;
+  const value = decodeURIComponent(match[1]);
+  return isValidPublicId(value) ? value : null;
 }
 
 function SignUpForm() {
@@ -56,6 +67,12 @@ function SignUpForm() {
     // paying user even if the internal eyk- referral code is absent.
     const rewardful = getRewardfulReferral();
     if (rewardful) metadata.rewardful_referral = rewardful;
+    // Component A (?ref=u_<10 hex>): middleware writes the eykon_ref
+    // cookie on first ?ref= visit; we forward it here so the
+    // handle_new_user trigger (migration 026) resolves it via
+    // public_id and writes referred_by on the new user_profiles row.
+    const eykonRef = readEykonRefCookie();
+    if (eykonRef) metadata.eykon_ref = eykonRef;
 
     const { data, error: signUpError } = await supabase.auth.signUp({
       email,
