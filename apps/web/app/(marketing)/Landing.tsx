@@ -750,7 +750,7 @@ export function Landing() {
               <li><a href="#intelligence">Intelligence Menu</a></li>
               <li><a href="#pricing">Pricing</a></li>
               <li><a href="#faq">FAQ</a></li>
-              <li><a href="#referral">Referral Program</a></li>
+              <li><Link href="/grow">How eYKON grows</Link></li>
               <li>
                 <a href="https://status.eykon.ai" target="_blank" rel="noreferrer">
                   Status Page
