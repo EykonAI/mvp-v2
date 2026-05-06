@@ -7,6 +7,7 @@ type CookieToSet = { name: string; value: string; options: CookieOptions };
 export type Tier = 'citizen' | 'pro' | 'desk' | 'enterprise';
 export type BillingCycle = 'monthly' | 'annual' | 'lifetime';
 export type VerifiedDiscount = 'journalist' | 'nonprofit' | 'academic';
+export type AdvocateState = 'none' | 'invited' | 'active' | 'paused' | 'terminated';
 
 export type UserProfile = {
   id: string;
@@ -23,6 +24,15 @@ export type UserProfile = {
   nowpayments_customer_ref: string | null;
   lifetime_purchased_at: string | null;
   verified_discount_type: VerifiedDiscount | null;
+  // Referral program (migration 025).
+  public_id: string;
+  referred_by_pending: string | null;
+  advocate_state: AdvocateState;
+  advocate_invited_at: string | null;
+  advocate_onboarded_at: string | null;
+  advocate_terminated_at: string | null;
+  rewardful_affiliate_id: string | null;
+  first_paid_at: string | null;
   created_at: string;
   updated_at: string;
 };
