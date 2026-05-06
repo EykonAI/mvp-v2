@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { ShareButton } from '@/components/share/ShareButton';
 
 // Shared recent-fires list, used in two places:
 //   • /notif?filter=recent  — 24-hour window, deep-linked from the
@@ -216,31 +217,47 @@ function FireRowItem({
             {summary}
           </div>
         )}
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 10,
-            marginTop: 8,
-            fontFamily: 'var(--f-mono)',
-            fontSize: 10,
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: 'var(--ink-faint)',
-          }}
-        >
-          {!compact && ruleType && <span>{ruleType.replace('_', ' ')}</span>}
-          {okCount > 0 && (
-            <span style={{ color: 'var(--teal)' }}>● {okCount} delivered</span>
-          )}
-          {failCount > 0 && (
-            <span style={{ color: 'var(--amber)' }}>● {failCount} suppressed</span>
-          )}
-          <span style={{ marginLeft: 'auto', color: 'var(--ink-dim)' }}>
-            {expanded ? '▾ Hide details' : '▸ Show details'}
-          </span>
-        </div>
       </button>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 10,
+          alignItems: 'center',
+          marginTop: 8,
+          fontFamily: 'var(--f-mono)',
+          fontSize: 10,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          color: 'var(--ink-faint)',
+        }}
+      >
+        {!compact && ruleType && <span>{ruleType.replace('_', ' ')}</span>}
+        {okCount > 0 && <span style={{ color: 'var(--teal)' }}>● {okCount} delivered</span>}
+        {failCount > 0 && (
+          <span style={{ color: 'var(--amber)' }}>● {failCount} suppressed</span>
+        )}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <ShareButton kind="notification" id={fire.id} />
+          <button
+            type="button"
+            onClick={onToggle}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              padding: 0,
+              fontFamily: 'var(--f-mono)',
+              fontSize: 10,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-dim)',
+              cursor: 'pointer',
+            }}
+          >
+            {expanded ? '▾ Hide details' : '▸ Show details'}
+          </button>
+        </div>
+      </div>
 
       {expanded && (
         <div
