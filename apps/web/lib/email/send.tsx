@@ -17,8 +17,21 @@ import {
   CryptoRenewalReminder,
   type CryptoRenewalReminderProps,
 } from './templates/CryptoRenewalReminder';
+import {
+  AdvocateInvitation,
+  type AdvocateInvitationProps,
+} from './templates/AdvocateInvitation';
+import {
+  AdvocateWelcome,
+  type AdvocateWelcomeProps,
+} from './templates/AdvocateWelcome';
 
-type TemplateId = 'waitlist_confirmation' | 'receipt_crypto' | 'crypto_renewal_reminder';
+type TemplateId =
+  | 'waitlist_confirmation'
+  | 'receipt_crypto'
+  | 'crypto_renewal_reminder'
+  | 'advocate_invitation'
+  | 'advocate_welcome';
 
 type SendResult =
   | { state: 'sent'; resendMessageId: string; logId: string }
@@ -201,6 +214,45 @@ export async function sendCryptoRenewalReminder(
       currentPeriodEndIso: input.currentPeriodEndIso,
       renewalCheckoutUrl: input.renewalCheckoutUrl,
       amountUsd: input.amountUsd,
+    },
+    input.userId,
+    input.notificationQueueId,
+  );
+}
+
+export async function sendAdvocateInvitation(
+  input: BaseSendInput & AdvocateInvitationProps,
+): Promise<SendResult> {
+  const html = await render(<AdvocateInvitation {...input} />);
+  const subject = 'An invitation to the eYKON founder advocate program';
+  return deliver(
+    input.to,
+    subject,
+    html,
+    'advocate_invitation',
+    {
+      displayName: input.displayName,
+      partnershipDocUrl: input.partnershipDocUrl,
+    },
+    input.userId,
+    input.notificationQueueId,
+  );
+}
+
+export async function sendAdvocateWelcome(
+  input: BaseSendInput & AdvocateWelcomeProps,
+): Promise<SendResult> {
+  const html = await render(<AdvocateWelcome {...input} />);
+  const subject = 'Welcome to the eYKON founder advocate program';
+  return deliver(
+    input.to,
+    subject,
+    html,
+    'advocate_welcome',
+    {
+      displayName: input.displayName,
+      rewardfulPayoutSetupUrl: input.rewardfulPayoutSetupUrl,
+      channelUrl: input.channelUrl,
     },
     input.userId,
     input.notificationQueueId,
