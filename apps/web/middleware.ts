@@ -10,7 +10,7 @@ type CookieToSet = { name: string; value: string; options: CookieOptions };
 
 // Paths that belong to the (app) route group. Route groups are URL-transparent
 // in the Next.js App Router, so the matcher lives in userland — not the filesystem.
-const APP_PATHS = ['/app', '/intel', '/dashboard', '/settings', '/billing'];
+const APP_PATHS = ['/app', '/intel', '/dashboard', '/settings', '/billing', '/admin'];
 
 function isAppPath(pathname: string): boolean {
   return APP_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
