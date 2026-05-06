@@ -21,6 +21,7 @@ import {
   subscribeAdvancedFlag,
 } from '@/lib/intelligence-analyst/persona-visibility';
 import { captureBrowser } from '@/lib/analytics/client';
+import { ShareButton } from '@/components/share/ShareButton';
 
 interface Message {
   id: string;
@@ -559,6 +560,7 @@ export default function ChatPanel() {
                     onToggle={() => setExportMenuFor(prev => (prev === msg.id ? null : msg.id))}
                     onClose={() => setExportMenuFor(null)}
                   />
+                  <ShareButton kind="analyst" id={msg.query_id} />
                 </div>
               )}
             </div>
