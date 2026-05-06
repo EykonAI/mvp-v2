@@ -55,3 +55,57 @@ export function redactAnalystRow(row: RawAnalystRow): PublicAnalystView | null {
     last_run_day: row.last_run_at ? row.last_run_at.slice(0, 10) : '',
   };
 }
+
+// ─── Notification fire ─────────────────────────────────────────
+
+export type PublicNotificationView = {
+  share_token: string;
+  shared_at: string;
+  fired_day: string;
+  rule_name: string;
+  rule_type: 'single_event' | 'multi_event' | 'outcome_ai' | 'cross_data_ai' | null;
+  summary: string;
+  rationale: string | null;
+  detail_lines: string[];
+};
+
+type RawNotificationRow = {
+  share_token: string | null;
+  shared_at: string | null;
+  fired_at: string | null;
+  payload: unknown;
+};
+
+const RULE_TYPES = ['single_event', 'multi_event', 'outcome_ai', 'cross_data_ai'] as const;
+type RuleType = (typeof RULE_TYPES)[number];
+
+function isRuleType(value: unknown): value is RuleType {
+  return typeof value === 'string' && (RULE_TYPES as readonly string[]).includes(value);
+}
+
+export function redactNotificationFire(row: RawNotificationRow): PublicNotificationView | null {
+  if (!row.share_token || !row.shared_at) return null;
+  const payload = (row.payload ?? {}) as Record<string, unknown>;
+
+  const rule_name = typeof payload.ruleName === 'string' ? payload.ruleName : '(unnamed rule)';
+  const summary = typeof payload.summary === 'string' ? payload.summary : '';
+  const rationale = typeof payload.rationale === 'string' ? payload.rationale : null;
+  const rule_type = isRuleType(payload.ruleType) ? payload.ruleType : null;
+
+  const detail_lines = Array.isArray(payload.detailLines)
+    ? (payload.detailLines as unknown[])
+        .filter((line): line is string => typeof line === 'string')
+        .slice(0, 8)
+    : [];
+
+  return {
+    share_token: row.share_token,
+    shared_at: row.shared_at,
+    fired_day: row.fired_at ? row.fired_at.slice(0, 10) : '',
+    rule_name,
+    rule_type,
+    summary,
+    rationale,
+    detail_lines,
+  };
+}
