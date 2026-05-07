@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import TopNav from '@/components/TopNav';
 import { getUserProfile } from '@/lib/auth/session';
 import { TIER_LABELS } from '@/lib/pricing';
 import { tierMeetsRequirement } from '@/lib/subscription';
@@ -8,7 +9,6 @@ import { ClearHistoryCard } from '@/components/settings/ClearHistoryCard';
 import { ChannelsCard } from '@/components/settings/ChannelsCard';
 import { RecentNotificationsCard } from '@/components/settings/RecentNotificationsCard';
 import { AdvancedPersonasCard } from '@/components/settings/AdvancedPersonasCard';
-import { APP_URL } from '@/lib/url';
 
 export const metadata: Metadata = {
   title: 'Settings — eYKON.ai',
@@ -23,19 +23,23 @@ export default async function SettingsPage() {
   // helpful placeholder instead of crashing so the route is browsable.
   const displayEmail = profile?.email ?? 'you@example.com (dev)';
   const displayTier = profile?.tier ?? 'pro';
-  const referralCode = profile?.referral_code ?? 'eyk-preview1';
   const foundingLocked = profile?.founding_rate_locked ?? false;
-  const baseUrl = APP_URL;
+  const advocateState = profile?.advocate_state ?? 'none';
+  const advocateInvitedAt = profile?.advocate_invited_at ?? null;
+  const advocateOnboardedAt = profile?.advocate_onboarded_at ?? null;
+  const rewardfulAffiliateId = profile?.rewardful_affiliate_id ?? null;
 
   return (
-    <section
-      style={{
-        maxWidth: 760,
-        margin: '0 auto',
-        padding: '56px 32px 120px',
-        color: 'var(--ink)',
-      }}
-    >
+    <>
+      <TopNav />
+      <section
+        style={{
+          maxWidth: 760,
+          margin: '0 auto',
+          padding: '56px 32px 120px',
+          color: 'var(--ink)',
+        }}
+      >
       <div
         style={{
           fontFamily: 'var(--f-mono)',
@@ -124,7 +128,12 @@ export default async function SettingsPage() {
         </dl>
       </section>
 
-      <ReferralCard referralCode={referralCode} baseUrl={baseUrl} />
+      <ReferralCard
+        advocateState={advocateState}
+        advocateInvitedAt={advocateInvitedAt}
+        advocateOnboardedAt={advocateOnboardedAt}
+        rewardfulAffiliateId={rewardfulAffiliateId}
+      />
 
       {tierMeetsRequirement(displayTier, 'pro') && <ChannelsCard />}
 
@@ -149,6 +158,7 @@ export default async function SettingsPage() {
         </a>{' '}
         and we&apos;ll handle it within 2 business days (GDPR-compliant).
       </p>
-    </section>
+      </section>
+    </>
   );
 }
