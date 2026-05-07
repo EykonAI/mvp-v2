@@ -25,13 +25,23 @@ import {
   AdvocateWelcome,
   type AdvocateWelcomeProps,
 } from './templates/AdvocateWelcome';
+import {
+  AdvocateSubmissionConfirmation,
+  type AdvocateSubmissionConfirmationProps,
+} from './templates/AdvocateSubmissionConfirmation';
+import {
+  AdvocateSubmissionFounderNotification,
+  type AdvocateSubmissionFounderNotificationProps,
+} from './templates/AdvocateSubmissionFounderNotification';
 
 type TemplateId =
   | 'waitlist_confirmation'
   | 'receipt_crypto'
   | 'crypto_renewal_reminder'
   | 'advocate_invitation'
-  | 'advocate_welcome';
+  | 'advocate_welcome'
+  | 'advocate_submission_confirmation'
+  | 'advocate_submission_founder_notification';
 
 type SendResult =
   | { state: 'sent'; resendMessageId: string; logId: string }
@@ -253,6 +263,45 @@ export async function sendAdvocateWelcome(
       displayName: input.displayName,
       rewardfulPayoutSetupUrl: input.rewardfulPayoutSetupUrl,
       channelUrl: input.channelUrl,
+    },
+    input.userId,
+    input.notificationQueueId,
+  );
+}
+
+export async function sendAdvocateSubmissionConfirmation(
+  input: BaseSendInput & AdvocateSubmissionConfirmationProps,
+): Promise<SendResult> {
+  const html = await render(<AdvocateSubmissionConfirmation {...input} />);
+  const subject = 'We received your eYKON advocate program submission';
+  return deliver(
+    input.to,
+    subject,
+    html,
+    'advocate_submission_confirmation',
+    { fullName: input.fullName },
+    input.userId,
+    input.notificationQueueId,
+  );
+}
+
+export async function sendAdvocateSubmissionFounderNotification(
+  input: BaseSendInput & AdvocateSubmissionFounderNotificationProps,
+): Promise<SendResult> {
+  const html = await render(<AdvocateSubmissionFounderNotification {...input} />);
+  const subject = `[eYKON] New advocate submission · ${input.fullName}`;
+  return deliver(
+    input.to,
+    subject,
+    html,
+    'advocate_submission_founder_notification',
+    {
+      submissionId: input.submissionId,
+      fullName: input.fullName,
+      primaryHandle: input.primaryHandle,
+      preferredContactEmail: input.preferredContactEmail,
+      spamFlagged: input.spamFlagged,
+      spamReason: input.spamReason,
     },
     input.userId,
     input.notificationQueueId,
