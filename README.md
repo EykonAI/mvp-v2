@@ -102,3 +102,4 @@ Layer 4  — Next.js + Deck.gl (3D globe, dashboard, SSR)
 ## License
 
 Proprietary — CONFIDENTIAL
+
