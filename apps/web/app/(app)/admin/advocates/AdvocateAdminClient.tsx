@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState, useTransition } from 'react';
 import { nextStatesFor } from '@/lib/admin/advocate-transitions';
 import type { AdvocateState } from '@/lib/auth/session';
@@ -127,12 +128,27 @@ export function AdvocateAdminClient({ advocates, initialCandidates }: Props) {
           fontFamily: 'var(--f-body)',
           fontSize: 13,
           color: 'var(--ink-dim)',
-          margin: '0 0 24px',
+          margin: '0 0 16px',
         }}
       >
         Hand-curated. Invitations send the partnership document; the activation
         email carries the Rewardful payout-setup link.
       </p>
+      <div style={{ marginBottom: 24 }}>
+        <Link
+          href="/admin/advocates/overrides"
+          style={{
+            fontFamily: 'var(--f-mono)',
+            fontSize: 11,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: 'var(--teal)',
+            textDecoration: 'none',
+          }}
+        >
+          Overrides &amp; manual operations →
+        </Link>
+      </div>
 
       {error && (
         <div
