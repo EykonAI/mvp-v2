@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import TopNav from '@/components/TopNav';
 import ChatPanel from '@/components/ChatPanel';
@@ -195,11 +196,28 @@ function Header({
       >
         Personalised event alerts
       </h1>
-      <p style={{ color: 'var(--ink-dim)', fontSize: 13.5, maxWidth: 720, marginBottom: 20 }}>
+      <p style={{ color: 'var(--ink-dim)', fontSize: 13.5, maxWidth: 720, marginBottom: 12 }}>
         Pick a persona to surface starter rules tuned for your workflow. Every rule fires
         through your verified channels, respects a 6-hour cooldown by default, and is
         auditable in a per-user log.
       </p>
+      <div style={{ marginBottom: 20 }}>
+        <Link
+          href="/settings"
+          style={{
+            fontFamily: 'var(--f-mono)',
+            fontSize: 11,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: 'var(--ink-dim)',
+            textDecoration: 'none',
+            borderBottom: '1px dashed var(--rule-strong)',
+            paddingBottom: 1,
+          }}
+        >
+          Manage notification channels in Settings →
+        </Link>
+      </div>
       <PersonaSelector persona={persona} onChange={onPersonaChange} advancedEnabled={advancedEnabled} />
     </header>
   );
