@@ -158,6 +158,11 @@ export default async function SettingsPage() {
         </a>{' '}
         and we&apos;ll handle it within 2 business days (GDPR-compliant).
       </p>
+      <footer style={{ marginTop: 32, fontSize: 12 }}>
+        <Link href="/" style={{ color: 'var(--teal)', textDecoration: 'underline' }}>
+          ← Back to eYKON.ai
+        </Link>
+      </footer>
       </section>
     </>
   );
