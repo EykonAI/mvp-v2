@@ -136,8 +136,8 @@ export default function GrowPage() {
         a="We review every submission, usually within a week. If we think there is a strong fit, we will reach out via your provided email with the partnership document and an invitation. If the fit is not yet right — for example, we feel your audience is in a category we are not currently optimised for — we will reply honestly. We do not auto-reject submissions; every response comes from the founder."
       />
 
-      <footer style={{ marginTop: 64, color: 'var(--ink-faint)', fontSize: 12 }}>
-        <Link href="/" style={{ color: 'var(--ink-faint)', textDecoration: 'underline' }}>
+      <footer style={{ marginTop: 64, fontSize: 12 }}>
+        <Link href="/" style={{ color: 'var(--teal)', textDecoration: 'underline' }}>
           ← Back to eYKON.ai
         </Link>
       </footer>
