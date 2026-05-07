@@ -556,61 +556,59 @@ export function Landing() {
         </div>
       </section>
 
-      {/* ─── REFERRAL ────────────────────────────────────────────── */}
+      {/* ─── HOW EYKON GROWS ─────────────────────────────────────── */}
       <div className="referral-bg">
         <section className="section" id="referral">
           <div className="section-head">
-            <div className="section-kicker">·· Referral Program ··</div>
+            <div className="section-kicker">·· How eYKON grows ··</div>
             <h2 className="section-title">
-              Bring your network — <span className="accent">earn for life</span>.
+              Through the work, <span className="accent">not the funnel</span>.
             </h2>
             <p className="section-sub">
-              Every paying member gets a unique referral link. Share it, get paid.
+              eYKON grows through what its users build. Every analytical view you create is
+              shareable, and every share is attributed automatically. Practitioners with weight
+              in their networks become founder advocates by invitation.
             </p>
           </div>
           <div className="referral-steps">
             <div className="step">
               <div className="step-num">1</div>
-              <div className="step-title">Get your link.</div>
+              <div className="step-title">Share your work.</div>
               <p className="step-body">
-                Every Pro and Enterprise member automatically gets a unique referral link in
-                their dashboard.
+                Every analyst conversation, notification fire, and replayable view inside
+                eYKON has a Share button. Clicking it copies a public link that automatically
+                carries your attribution.
               </p>
             </div>
             <div className="step">
               <div className="step-num">2</div>
-              <div className="step-title">Share it.</div>
+              <div className="step-title">Attribution is silent.</div>
               <p className="step-body">
-                Post it on X, Substack, your trading Discord, or email it directly to analyst
-                colleagues.
+                When someone signs up after viewing what you shared, we know it came from you.
+                No dashboard to check, no commission to chase, no link to remember. The
+                mechanic runs in the background.
               </p>
             </div>
             <div className="step">
               <div className="step-num">3</div>
-              <div className="step-title">Earn.</div>
+              <div className="step-title">Become a founder advocate.</div>
               <p className="step-body">
-                For every referral that converts to paid, choose one:{' '}
-                <strong style={{ color: 'var(--text-primary)' }}>
-                  30% lifetime commission
-                </strong>{' '}
-                on their subscription, OR{' '}
-                <strong style={{ color: 'var(--text-primary)' }}>
-                  2 months of your own subscription free
-                </strong>
-                .
+                Practitioners whose endorsement carries real weight — analysts, traders,
+                journalists, researchers, podcast hosts — are invited into a hand-curated
+                partnership program with cash compensation on bilateral terms.
               </p>
             </div>
           </div>
           <div className="referral-unlock">
-            <strong>Founding Referrer badge</strong> · Unlock at 5 paid referrals. Public
-            recognition, priority feature requests, and early access to new Intelligence Menu
-            modules. Referrals tracked via Rewardful · commissions paid monthly via Stripe
-            Connect, PayPal, or USDC · referred users receive 25% off their first year.
+            The full program — philosophy, attribution mechanics, FAQ, and the inbound
+            application form — lives on a dedicated page. We do not run an open affiliate
+            program because we do not believe that is the right shape for an intelligence
+            platform.
           </div>
           <div className="referral-cta">
-            <a href="#pricing" className="btn-primary">
-              Join as Pro — your referral link is waiting →
-            </a>
+            <Link href="/grow" className="btn-primary">
+              How eYKON grows →
+            </Link>
           </div>
         </section>
       </div>
@@ -696,11 +694,17 @@ export function Landing() {
           students receive an additional 50% off Pro and Enterprise tiers, stackable with the
           Founding rate. Email <code>verify@eykon.ai</code> with your credentials.
         </Faq>
-        <Faq q="How does the referral program pay out?">
-          Referrals are tracked via <strong>Rewardful</strong>. You choose one reward model
-          per referred customer: 30% lifetime commission (paid monthly via Stripe Connect,
-          PayPal, or USDC), OR 2 months of your own subscription free. Referred users
-          receive 25% off their first year. See the Referral section above for mechanics.
+        <Faq q="How does the referral program work?">
+          eYKON does not run a public open-enrollment affiliate program. Sharing inside the
+          product is silent and automatically attributed — every shareable view carries the
+          source&apos;s identifier without any setup. Beyond that, we run a hand-curated{' '}
+          <strong>founder advocate program</strong> for practitioners whose endorsement
+          carries weight in their networks; advocates receive cash compensation on agreed
+          terms. Full mechanics and the inbound application form are on the{' '}
+          <Link href="/grow" style={{ color: 'var(--cyan)' }}>
+            How eYKON grows
+          </Link>{' '}
+          page.
         </Faq>
         <Faq q="Will the Intelligence Menu keep growing?">
           Yes. Pro and Enterprise members get every new module as it ships, at no additional
