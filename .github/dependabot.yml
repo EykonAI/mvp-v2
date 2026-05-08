@@ -1,7 +1,19 @@
 # Dependabot config for EykonAI/mvp-v2.
 # Two npm ecosystems: the workspace root + apps/web.
-# Weekly schedule. Minor/patch updates grouped per ecosystem;
+# Weekly schedule (Monday). Minor/patch updates grouped per ecosystem;
 # majors and security updates get their own PRs.
+#
+# IGNORE LIST: pre-1.0 packages where "minor" semver bumps are
+# effectively breaking. The package's API contract isn't stable yet,
+# so what looks like a routine patch can rewrite types or rename
+# props. These are upgraded manually as deliberate migrations, not
+# via auto-grouping.
+#
+# Lesson learned the hard way: PR #68 grouped @anthropic-ai/sdk
+# 0.32.1 → 0.95.1 into a "minor-patch" group, which broke type-check
+# across api/chat, api/user_queries, api/intel/briefing, etc. The pin
+# in PR #75 restored main; this config prevents recurrence.
+#
 # Docs: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 
 version: 2
@@ -15,10 +27,23 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(deps)"
+    ignore:
+      # Pre-1.0 packages — manual migration only.
+      - dependency-name: "@anthropic-ai/sdk"
+      - dependency-name: "zod"
+      - dependency-name: "react-map-gl"
+      - dependency-name: "recharts"
+      - dependency-name: "lucide-react"
     groups:
       root-minor-patch:
         patterns:
           - "*"
+        exclude-patterns:
+          - "@anthropic-ai/sdk"
+          - "zod"
+          - "react-map-gl"
+          - "recharts"
+          - "lucide-react"
         update-types:
           - "minor"
           - "patch"
@@ -32,10 +57,23 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(deps,web)"
+    ignore:
+      # Pre-1.0 packages — manual migration only.
+      - dependency-name: "@anthropic-ai/sdk"
+      - dependency-name: "zod"
+      - dependency-name: "react-map-gl"
+      - dependency-name: "recharts"
+      - dependency-name: "lucide-react"
     groups:
       web-minor-patch:
         patterns:
           - "*"
+        exclude-patterns:
+          - "@anthropic-ai/sdk"
+          - "zod"
+          - "react-map-gl"
+          - "recharts"
+          - "lucide-react"
         update-types:
           - "minor"
           - "patch"
