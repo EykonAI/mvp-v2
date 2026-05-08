@@ -1,6 +1,6 @@
 {
   "name": "eykon-web",
-  "version": "2.0.0",
+  "version":"2.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.95.1",
+    "@anthropic-ai/sdk": "^0.32.1",
     "@deck.gl/core": "^9.3.2",
     "@deck.gl/geo-layers": "^9.3.2",
     "@deck.gl/layers": "^9.3.2",
