@@ -28,15 +28,26 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     ignore:
-      # Pre-1.0 packages — manual migration only.
+      # Block ALL major version updates across every package. Major
+      # bumps are deliberate migrations — they ship as their own
+      # carefully-tested PRs, never as routine auto-updates. Security
+      # updates still flow through normally (they bypass the
+      # version-update filter).
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # Pre-1.0 packages — manual migration only (full block including
+      # security). For these, even "minor" bumps are effectively
+      # breaking, and security updates would still attempt cross-major
+      # jumps that we want to vet manually.
       - dependency-name: "@anthropic-ai/sdk"
       - dependency-name: "zod"
       - dependency-name: "react-map-gl"
       - dependency-name: "recharts"
       - dependency-name: "lucide-react"
-      # Next.js — auto-PR #74 jumped 14 → 15 (major) and broke
-      # the build (NotifPageProps / async params). Manual bumps only,
-      # within the 14.2.x line until a deliberate Next 15 migration.
+      # Next.js — full block (no security PRs either). Auto-PR #74
+      # tried to security-update 14 → 15 and failed due to React 19
+      # peer-dep cascade. The next migration ships as deliberate work
+      # post-launch, not via Dependabot.
       - dependency-name: "next"
     groups:
       root-minor-patch:
@@ -63,15 +74,26 @@ updates:
     commit-message:
       prefix: "chore(deps,web)"
     ignore:
-      # Pre-1.0 packages — manual migration only.
+      # Block ALL major version updates across every package. Major
+      # bumps are deliberate migrations — they ship as their own
+      # carefully-tested PRs, never as routine auto-updates. Security
+      # updates still flow through normally (they bypass the
+      # version-update filter).
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # Pre-1.0 packages — manual migration only (full block including
+      # security). For these, even "minor" bumps are effectively
+      # breaking, and security updates would still attempt cross-major
+      # jumps that we want to vet manually.
       - dependency-name: "@anthropic-ai/sdk"
       - dependency-name: "zod"
       - dependency-name: "react-map-gl"
       - dependency-name: "recharts"
       - dependency-name: "lucide-react"
-      # Next.js — auto-PR #74 jumped 14 → 15 (major) and broke
-      # the build (NotifPageProps / async params). Manual bumps only,
-      # within the 14.2.x line until a deliberate Next 15 migration.
+      # Next.js — full block (no security PRs either). Auto-PR #74
+      # tried to security-update 14 → 15 and failed due to React 19
+      # peer-dep cascade. The next migration ships as deliberate work
+      # post-launch, not via Dependabot.
       - dependency-name: "next"
     groups:
       web-minor-patch:
