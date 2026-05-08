@@ -34,6 +34,10 @@ updates:
       - dependency-name: "react-map-gl"
       - dependency-name: "recharts"
       - dependency-name: "lucide-react"
+      # Next.js — auto-PR #74 jumped 14 → 15 (major) and broke
+      # the build (NotifPageProps / async params). Manual bumps only,
+      # within the 14.2.x line until a deliberate Next 15 migration.
+      - dependency-name: "next"
     groups:
       root-minor-patch:
         patterns:
@@ -44,6 +48,7 @@ updates:
           - "react-map-gl"
           - "recharts"
           - "lucide-react"
+          - "next"
         update-types:
           - "minor"
           - "patch"
@@ -64,6 +69,10 @@ updates:
       - dependency-name: "react-map-gl"
       - dependency-name: "recharts"
       - dependency-name: "lucide-react"
+      # Next.js — auto-PR #74 jumped 14 → 15 (major) and broke
+      # the build (NotifPageProps / async params). Manual bumps only,
+      # within the 14.2.x line until a deliberate Next 15 migration.
+      - dependency-name: "next"
     groups:
       web-minor-patch:
         patterns:
@@ -74,6 +83,7 @@ updates:
           - "react-map-gl"
           - "recharts"
           - "lucide-react"
+          - "next"
         update-types:
           - "minor"
           - "patch"
