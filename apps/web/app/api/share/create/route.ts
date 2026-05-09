@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, getServerSupabase } from '@/lib/auth/session';
 import { createServerSupabase } from '@/lib/supabase-server';
+import { checkUserShareRate, retryAfterSeconds } from '@/lib/rate-limit';
 import {
   buildShareUrl,
   generateShareToken,
@@ -25,11 +26,24 @@ import {
 // SELECT/UPDATE rows where user_id = auth.uid(). A request for an
 // id the caller does not own yields PGRST116 (no row), which we
 // translate to 404.
+//
+// PR-S2 adds a per-user rate limit on NEW shares (30 per rolling
+// hour, summed across analyst + notification artifacts). The limit
+// only fires on the create-token path; idempotent re-clicks on an
+// already-shared row bypass it.
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const MAX_TOKEN_RETRIES = 5;
+
+// Per-user rate limit (PR-S2). Counts rows in user_queries +
+// user_notification_log where shared_at > now() - window. Sized for
+// legitimate sharing burst (~one share per minute over an hour) while
+// stopping a compromised client from spraying tokens to fill the
+// share_token namespace.
+const SHARE_RATE_WINDOW_SECONDS = 3600;
+const SHARE_RATE_MAX = 30;
 
 type CreateBody = {
   kind?: string;
@@ -71,10 +85,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
   }
 
-  // Reuse existing token (idempotent re-click).
+  // Reuse existing token (idempotent re-click). The rate limit only
+  // fires on the create path below — re-clicks are free.
   let token: string | null = (existing as { share_token: string | null }).share_token;
 
   if (!token) {
+    // Per-user rate limit on new shares. Counted across both shareable
+    // tables; idempotent re-clicks above don't reach this point.
+    const limit = await checkUserShareRate({
+      userId: user.id,
+      windowSeconds: SHARE_RATE_WINDOW_SECONDS,
+      max: SHARE_RATE_MAX,
+    });
+    if (limit.exceeded) {
+      const retryAfter = retryAfterSeconds(SHARE_RATE_WINDOW_SECONDS);
+      return NextResponse.json(
+        { error: 'rate_limited', retry_after: retryAfter },
+        { status: 429, headers: { 'Retry-After': String(retryAfter) } },
+      );
+    }
+
     // Generate, write, retry on UNIQUE collision (vanishingly rare
     // at 64 bits but the constraint is the safety net).
     for (let attempt = 0; attempt < MAX_TOKEN_RETRIES; attempt++) {
