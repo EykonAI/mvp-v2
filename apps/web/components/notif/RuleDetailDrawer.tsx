@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import { ShareButton } from '@/components/share/ShareButton';
 
 // PR-NF-1 — slide-in drawer that surfaces one rule's fire history.
 // Triggered by clicking a row in RulesList. Read-only for now;
@@ -456,24 +457,26 @@ function FireRow({
         {failCount > 0 && (
           <span style={{ color: 'var(--amber)' }}>● {failCount} suppressed</span>
         )}
-        <button
-          type="button"
-          onClick={onToggle}
-          style={{
-            marginLeft: 'auto',
-            background: 'transparent',
-            border: 'none',
-            padding: 0,
-            fontFamily: 'var(--f-mono)',
-            fontSize: 10,
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: 'var(--ink-dim)',
-            cursor: 'pointer',
-          }}
-        >
-          {expanded ? '▾ Hide details' : '▸ Show details'}
-        </button>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <ShareButton kind="notification" id={fire.id} />
+          <button
+            type="button"
+            onClick={onToggle}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              padding: 0,
+              fontFamily: 'var(--f-mono)',
+              fontSize: 10,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-dim)',
+              cursor: 'pointer',
+            }}
+          >
+            {expanded ? '▾ Hide details' : '▸ Show details'}
+          </button>
+        </div>
       </div>
 
       {expanded && (

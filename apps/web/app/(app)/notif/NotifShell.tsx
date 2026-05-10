@@ -309,7 +309,10 @@ function SectionHeading({ index, title, hint }: { index: string; title: string; 
 
 function RecentFiresSection() {
   return (
-    <section>
+    // id used by the TopNav bell glyph's onClick fallback to scroll
+    // here when the user is already on /notif?filter=recent (the
+    // same-route Link would otherwise be a no-op).
+    <section id="recent-fires">
       <SectionHeading index="A" title="Recent fires · last 24 hours" />
       <RecentFiresList hours={24} />
     </section>
