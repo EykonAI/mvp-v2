@@ -19,6 +19,29 @@ import { useEffect, useState } from 'react';
 const POLL_INTERVAL_MS = 30_000;
 const AMBER_THRESHOLD = 10;
 
+// Brief outline pulse on the recent-fires section so a bell click
+// produces visible feedback even when the section is already in the
+// viewport (where scrollIntoView is a silent no-op).
+function pulseSection(el: HTMLElement) {
+  const prevTransition = el.style.transition;
+  const prevOutline = el.style.outline;
+  const prevOutlineOffset = el.style.outlineOffset;
+  const prevBorderRadius = el.style.borderRadius;
+  el.style.transition = 'outline-color 320ms ease-out';
+  el.style.outline = '2px solid var(--teal)';
+  el.style.outlineOffset = '6px';
+  el.style.borderRadius = '4px';
+  window.setTimeout(() => {
+    el.style.outline = '2px solid transparent';
+    window.setTimeout(() => {
+      el.style.transition = prevTransition;
+      el.style.outline = prevOutline;
+      el.style.outlineOffset = prevOutlineOffset;
+      el.style.borderRadius = prevBorderRadius;
+    }, 360);
+  }, 700);
+}
+
 export default function NotificationBell() {
   const [count, setCount] = useState(0);
   const pathname = usePathname();
@@ -55,12 +78,17 @@ export default function NotificationBell() {
   // Link to the same route. Intercept the click and either scroll
   // the recent-fires section into view (if rendered) or do a soft
   // route replace to add ?filter=recent so the section appears.
+  //
+  // Always pulse the section's outline regardless of scroll state so
+  // the user gets unambiguous visual feedback — scrollIntoView alone
+  // is a silent no-op when the target is already in viewport.
   const onClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
     if (pathname !== '/notif') return; // let Link handle the nav
     const el = document.getElementById('recent-fires');
     if (el) {
       e.preventDefault();
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      pulseSection(el);
       return;
     }
     // Section not rendered (user is on /notif without ?filter=recent).
