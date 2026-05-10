@@ -10,6 +10,7 @@ import {
   type Tier,
 } from '@/lib/subscription';
 import { captureServer } from '@/lib/analytics/server';
+import { safeError } from '@/lib/log';
 import {
   persistUserQuery,
   rowCountFromToolResult,
@@ -209,7 +210,7 @@ export async function POST(req: NextRequest) {
       query_id: queryId,
     });
   } catch (err: any) {
-    console.error('Chat API error:', err);
+    safeError('Chat API error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

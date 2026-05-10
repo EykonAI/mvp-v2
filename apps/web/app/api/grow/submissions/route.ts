@@ -8,6 +8,7 @@ import {
   sendAdvocateSubmissionConfirmation,
   sendAdvocateSubmissionFounderNotification,
 } from '@/lib/email/send';
+import { safeError } from '@/lib/log';
 
 // POST /api/grow/submissions
 // Inbound advocate-program submission. Spec §3.3.
@@ -153,7 +154,7 @@ export async function POST(req: NextRequest) {
     to: fields.preferred_contact_email,
     userId: submitter?.id ?? null,
     fullName: fields.full_name,
-  }).catch((err) => console.error('[grow.confirm.email]', err));
+  }).catch((err) => safeError('[grow.confirm.email]', err));
 
   for (const founderEmail of getFounderEmails()) {
     sendAdvocateSubmissionFounderNotification({
@@ -168,7 +169,7 @@ export async function POST(req: NextRequest) {
       preferredContactEmail: fields.preferred_contact_email,
       spamFlagged: spamReason !== null,
       spamReason,
-    }).catch((err) => console.error('[grow.founder.email]', err));
+    }).catch((err) => safeError('[grow.founder.email]', err));
   }
 
   return NextResponse.json({ ok: true });

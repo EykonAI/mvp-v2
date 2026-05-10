@@ -9,8 +9,7 @@
  *
  * Failure mode: fail-open. If the count query errors, the helper
  * returns `{ exceeded: false }` so a buggy limiter never breaks the
- * existing flow. Errors are logged server-side via console.error
- * (PR-S3 will sweep these into safeError).
+ * existing flow. Errors are logged via safeError (lib/log).
  *
  * Layering note: this is the SOLE rate-limit layer for these routes
  * under Path A (Cloudflare WAF deferred until DNS migrates). Do not
@@ -25,6 +24,7 @@
  */
 
 import { createServerSupabase } from '@/lib/supabase-server';
+import { safeError } from '@/lib/log';
 
 export type RateLimitResult = {
   /** true when the caller has hit or exceeded the configured ceiling */
@@ -59,14 +59,14 @@ export async function checkAttributionIpRate(opts: {
       .gt('created_at', cutoff);
 
     if (error) {
-      console.error('[rate-limit] attribution count failed', error.message);
+      safeError('[rate-limit] attribution count failed', error.message);
       return FAIL_OPEN;
     }
 
     const current = count ?? 0;
     return { exceeded: current >= opts.max, current };
   } catch (err) {
-    console.error('[rate-limit] attribution count threw', err);
+    safeError('[rate-limit] attribution count threw', err);
     return FAIL_OPEN;
   }
 }
@@ -102,7 +102,7 @@ export async function checkUserShareRate(opts: {
     ]);
 
     if (analyst.error || notif.error) {
-      console.error(
+      safeError(
         '[rate-limit] share count failed',
         analyst.error?.message ?? notif.error?.message,
       );
@@ -112,7 +112,7 @@ export async function checkUserShareRate(opts: {
     const current = (analyst.count ?? 0) + (notif.count ?? 0);
     return { exceeded: current >= opts.max, current };
   } catch (err) {
-    console.error('[rate-limit] share count threw', err);
+    safeError('[rate-limit] share count threw', err);
     return FAIL_OPEN;
   }
 }

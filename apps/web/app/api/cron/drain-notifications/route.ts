@@ -3,6 +3,7 @@ import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { sendReceiptCrypto } from '@/lib/email/send';
 import { formatUsd, getCryptoVariant } from '@/lib/pricing';
+import { safeError } from '@/lib/log';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -95,7 +96,7 @@ export async function POST(req: NextRequest) {
       }
     } catch (err) {
       results.failed++;
-      console.error('[drain] send threw', err);
+      safeError('[drain] send threw', err);
       continue;
     }
 

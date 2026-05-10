@@ -4,6 +4,7 @@ import { createServerSupabase } from '@/lib/supabase-server';
 import { isValidReferralCode } from '@/lib/auth/referral';
 import { sendWaitlistConfirmation } from '@/lib/email/send';
 import { captureServer } from '@/lib/analytics/server';
+import { safeError } from '@/lib/log';
 
 export const dynamic = 'force-dynamic';
 
@@ -103,7 +104,7 @@ export async function POST(request: NextRequest) {
     email,
     tier: tier as 'pro' | 'enterprise',
   }).catch((err) => {
-    console.error('[waitlist] confirmation send failed', err);
+    safeError('[waitlist] confirmation send failed', err);
   });
 
   // PostHog: waitlist entries have no auth user yet, so use the hashed

@@ -13,6 +13,7 @@ import {
   tierMeetsRequirement,
 } from '@/lib/subscription';
 import { captureServer } from '@/lib/analytics/server';
+import { safeError } from '@/lib/log';
 import {
   inferDomainTags,
   rowCountFromToolResult,
@@ -179,7 +180,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       query_id: row.id,
     });
   } catch (err: any) {
-    console.error('[rerun] error', err);
+    safeError('[rerun] error', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

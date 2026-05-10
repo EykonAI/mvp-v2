@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth/session';
 import { EYKON_REF_COOKIE } from '@/lib/referral/attribution';
 import { captureAttribution, hashIpAddress } from '@/lib/referral/capture';
+import { safeError } from '@/lib/log';
 import { checkAttributionIpRate } from '@/lib/rate-limit';
 
 // POST /api/attribution/capture
@@ -81,7 +82,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     // Silent failure — log server-side, never surface. Attribution must
     // never disrupt the user-facing artifact view.
-    console.error('[attribution.capture] failed', err);
+    safeError('[attribution.capture] failed', err);
   }
 
   return NO_CONTENT;

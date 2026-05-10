@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { getAnthropic } from '@/lib/anthropic';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
+import { safeError } from '@/lib/log';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 180;
@@ -64,7 +65,7 @@ export async function POST(req: NextRequest) {
       const txt = r.content.filter((b): b is { type: 'text'; text: string } => b.type === 'text').map(b => b.text).join(' ').trim();
       if (txt) synthesis = txt;
     } catch (err) {
-      console.error('compute-convergences synthesis failed:', err instanceof Error ? err.message : err);
+      safeError('compute-convergences synthesis failed:', err);
     }
 
     writes.push({
