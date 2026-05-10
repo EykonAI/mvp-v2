@@ -245,7 +245,7 @@ export const RulesList = forwardRef<RulesListHandle, { persona: PersonaId }>(
                 // row-level trigger that opens the detail drawer.
                 onClick={e => e.stopPropagation()}
               >
-                <ShareButton kind="rule" id={rule.id} />
+                <ShareButton kind="rule" id={rule.id} variant="row-action" />
                 <button
                   type="button"
                   onClick={e => {
