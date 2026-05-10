@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useImperativeHandle, useState, forwardRef } from 'react';
 import { RuleBuilder } from './RuleBuilder';
+import { RuleDetailDrawer, type DrawerRule } from './RuleDetailDrawer';
 import type { PersonaId } from '@/lib/intelligence-analyst/personas';
 import type { Suggestion } from '@/lib/notifications/suggestion-library';
 
@@ -34,6 +35,7 @@ export const RulesList = forwardRef<RulesListHandle, { persona: PersonaId }>(
   const [error, setError] = useState<string | null>(null);
   const [showBuilder, setShowBuilder] = useState(false);
   const [prefill, setPrefill] = useState<Suggestion | undefined>(undefined);
+  const [openRule, setOpenRule] = useState<DrawerRule | null>(null);
 
   useImperativeHandle(
     ref,
@@ -199,7 +201,6 @@ export const RulesList = forwardRef<RulesListHandle, { persona: PersonaId }>(
                 background: 'var(--bg-panel)',
                 border: '1px solid var(--rule)',
                 borderRadius: 4,
-                padding: '14px 16px',
                 marginBottom: 10,
                 display: 'grid',
                 gridTemplateColumns: '1fr auto',
@@ -207,7 +208,23 @@ export const RulesList = forwardRef<RulesListHandle, { persona: PersonaId }>(
                 alignItems: 'center',
               }}
             >
-              <div>
+              <button
+                type="button"
+                onClick={() =>
+                  setOpenRule({
+                    id: rule.id,
+                    name: rule.name,
+                    rule_type: rule.rule_type,
+                    active: rule.active,
+                    cooldown_minutes: rule.cooldown_minutes,
+                    channel_ids: rule.channel_ids,
+                    last_fired_at: rule.last_fired_at,
+                    created_at: rule.created_at,
+                  })
+                }
+                aria-label={`Open detail for ${rule.name}`}
+                style={ruleTrigger}
+              >
                 <div
                   style={{
                     color: 'var(--ink)',
@@ -219,14 +236,24 @@ export const RulesList = forwardRef<RulesListHandle, { persona: PersonaId }>(
                   {rule.name}
                 </div>
                 <RuleMeta rule={rule} />
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button type="button" onClick={() => void onToggle(rule)} style={btnGhost}>
+              </button>
+              <div style={{ display: 'flex', gap: 8, paddingRight: 16 }}>
+                <button
+                  type="button"
+                  onClick={e => {
+                    e.stopPropagation();
+                    void onToggle(rule);
+                  }}
+                  style={btnGhost}
+                >
                   {rule.active ? 'Pause' : 'Resume'}
                 </button>
                 <button
                   type="button"
-                  onClick={() => void onDelete(rule)}
+                  onClick={e => {
+                    e.stopPropagation();
+                    void onDelete(rule);
+                  }}
                   style={{ ...btnGhost, color: 'var(--red)' }}
                 >
                   Delete
@@ -236,6 +263,8 @@ export const RulesList = forwardRef<RulesListHandle, { persona: PersonaId }>(
           ))}
         </ul>
       )}
+
+      <RuleDetailDrawer rule={openRule} onClose={() => setOpenRule(null)} />
     </div>
   );
 });
@@ -329,4 +358,19 @@ const btnGhost: React.CSSProperties = {
   border: '1px solid var(--rule-strong)',
   borderRadius: 2,
   cursor: 'pointer',
+};
+
+// The whole left column of a rule row is a button so clicking
+// anywhere in the name + meta block opens the detail drawer.
+// Pause / Delete buttons live in the right column and stop
+// propagation so they continue to work on click.
+const ruleTrigger: React.CSSProperties = {
+  display: 'block',
+  width: '100%',
+  textAlign: 'left',
+  padding: '14px 16px',
+  background: 'transparent',
+  border: 'none',
+  cursor: 'pointer',
+  color: 'inherit',
 };
