@@ -107,17 +107,32 @@ export async function POST(req: NextRequest) {
 
     // Generate, write, retry on UNIQUE collision (vanishingly rare
     // at 64 bits but the constraint is the safety net).
+    //
+    // `.select('id')` is load-bearing — without it, an RLS-denied
+    // UPDATE returns no error AND no row count, leaving us unable to
+    // distinguish "wrote 1 row" from "wrote 0 rows". When 0 rows are
+    // affected we MUST NOT return a token that was never persisted
+    // (caused a 404 on the public page; fixed in migration 029 by
+    // adding the missing self-update RLS policy on
+    // user_notification_log).
     for (let attempt = 0; attempt < MAX_TOKEN_RETRIES; attempt++) {
       const candidate = generateShareToken();
-      const { error: updateErr } = await supabase
+      const { data: updatedRows, error: updateErr } = await supabase
         .from(table)
         .update({ share_token: candidate, shared_at: new Date().toISOString() })
         .eq('id', body.id)
-        .is('share_token', null);
+        .is('share_token', null)
+        .select('id');
 
       if (!updateErr) {
-        token = candidate;
-        break;
+        if (updatedRows && updatedRows.length > 0) {
+          token = candidate;
+          break;
+        }
+        // No error but 0 rows changed — RLS, missing row, or the
+        // row gained a share_token between SELECT and UPDATE. Either
+        // way, the candidate did NOT persist; do not return it.
+        return NextResponse.json({ error: 'share_write_failed' }, { status: 500 });
       }
       // 23505 = unique_violation. Anything else aborts.
       if (!updateErr.code || updateErr.code !== '23505') {

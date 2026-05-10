@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 // Bell glyph in the top-nav. Polls /api/notifications/unread-count
@@ -20,6 +21,7 @@ const AMBER_THRESHOLD = 10;
 
 export default function NotificationBell() {
   const [count, setCount] = useState(0);
+  const pathname = usePathname();
 
   useEffect(() => {
     let cancelled = false;
@@ -49,9 +51,27 @@ export default function NotificationBell() {
   const badgeColor =
     count >= AMBER_THRESHOLD ? 'var(--amber)' : count > 0 ? 'var(--teal)' : null;
 
+  // When already on /notif, clicking the bell would be a no-op
+  // Link to the same route. Intercept the click and either scroll
+  // the recent-fires section into view (if rendered) or do a soft
+  // route replace to add ?filter=recent so the section appears.
+  const onClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (pathname !== '/notif') return; // let Link handle the nav
+    const el = document.getElementById('recent-fires');
+    if (el) {
+      e.preventDefault();
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    // Section not rendered (user is on /notif without ?filter=recent).
+    // Let Link handle the nav — the section will mount and the browser
+    // will scroll to the #recent-fires anchor.
+  };
+
   return (
     <Link
-      href="/notif?filter=recent"
+      href="/notif?filter=recent#recent-fires"
+      onClick={onClick}
       aria-label={
         count > 0 ? `${count} notifications in the last 24 hours` : 'Notifications'
       }
