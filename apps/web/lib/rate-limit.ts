@@ -88,7 +88,7 @@ export async function checkUserShareRate(opts: {
   const cutoff = new Date(Date.now() - opts.windowSeconds * 1000).toISOString();
   try {
     const admin = createServerSupabase();
-    const [analyst, notif] = await Promise.all([
+    const [analyst, notif, rule] = await Promise.all([
       admin
         .from('user_queries')
         .select('id', { count: 'exact', head: true })
@@ -99,17 +99,22 @@ export async function checkUserShareRate(opts: {
         .select('id', { count: 'exact', head: true })
         .eq('user_id', opts.userId)
         .gt('shared_at', cutoff),
+      admin
+        .from('user_notification_rules')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', opts.userId)
+        .gt('shared_at', cutoff),
     ]);
 
-    if (analyst.error || notif.error) {
+    if (analyst.error || notif.error || rule.error) {
       safeError(
         '[rate-limit] share count failed',
-        analyst.error?.message ?? notif.error?.message,
+        analyst.error?.message ?? notif.error?.message ?? rule.error?.message,
       );
       return FAIL_OPEN;
     }
 
-    const current = (analyst.count ?? 0) + (notif.count ?? 0);
+    const current = (analyst.count ?? 0) + (notif.count ?? 0) + (rule.count ?? 0);
     return { exceeded: current >= opts.max, current };
   } catch (err) {
     safeError('[rate-limit] share count threw', err);

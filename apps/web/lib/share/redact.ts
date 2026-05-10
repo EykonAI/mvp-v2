@@ -109,3 +109,131 @@ export function redactNotificationFire(row: RawNotificationRow): PublicNotificat
     detail_lines,
   };
 }
+
+// ─── Notification rule (PR-NF-2) ───────────────────────────────
+// Public view of a notification rule definition. Strips user_id,
+// channel_ids, last_fired_at, persona, cooldown_minutes — anything
+// that leaks the owner's monitoring posture beyond the rule shape
+// itself. Recipient sees what the rule WATCHES, not how/where the
+// owner gets pinged when it fires.
+
+export type PublicRuleView = {
+  share_token: string;
+  shared_at: string;
+  rule_name: string;
+  rule_type: 'single_event' | 'multi_event' | 'outcome_ai' | 'cross_data_ai' | null;
+  // Shape of the rule. Each variant exposes only the fields needed
+  // to describe what triggers it; identifiers, channels, cooldowns,
+  // and timestamps are intentionally omitted.
+  config: PublicRuleConfig;
+  created_day: string;
+};
+
+export type PublicRuleConfig =
+  | { kind: 'single_event'; tool: string; filters: Record<string, string | number | boolean> }
+  | {
+      kind: 'multi_event';
+      window_hours: number;
+      predicates: Array<{ tool: string; filters: Record<string, string | number | boolean> }>;
+    }
+  | { kind: 'outcome_ai'; outcome_statement: string; k_events: number; buckets: string[] }
+  | { kind: 'cross_data_ai'; outcome_statement: string; buckets: string[] }
+  | { kind: 'unknown' };
+
+type RawRuleRow = {
+  share_token: string | null;
+  shared_at: string | null;
+  name: string | null;
+  rule_type: string | null;
+  config: unknown;
+  created_at: string | null;
+};
+
+function sanitiseFilters(value: unknown): Record<string, string | number | boolean> {
+  if (!value || typeof value !== 'object') return {};
+  const out: Record<string, string | number | boolean> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === 'string' && v.length > 0 && v.length <= 200) out[k] = v;
+    else if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+    else if (typeof v === 'boolean') out[k] = v;
+  }
+  return out;
+}
+
+function sanitiseBuckets(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const b of value) {
+    if (typeof b === 'string' && b.length > 0 && b.length <= 80) out.push(b);
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
+function buildPublicConfig(
+  ruleType: PublicRuleView['rule_type'],
+  raw: unknown,
+): PublicRuleConfig {
+  const cfg = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+
+  if (ruleType === 'single_event') {
+    const tool = typeof cfg.tool === 'string' ? cfg.tool : 'unknown';
+    return { kind: 'single_event', tool, filters: sanitiseFilters(cfg.filters) };
+  }
+  if (ruleType === 'multi_event') {
+    const windowHours = Number(cfg.window_hours);
+    const predicatesRaw = Array.isArray(cfg.predicates) ? cfg.predicates : [];
+    const predicates = predicatesRaw
+      .slice(0, 8)
+      .map(p => {
+        const pp = (p && typeof p === 'object' ? p : {}) as Record<string, unknown>;
+        return {
+          tool: typeof pp.tool === 'string' ? pp.tool : 'unknown',
+          filters: sanitiseFilters(pp.filters),
+        };
+      });
+    return {
+      kind: 'multi_event',
+      window_hours: Number.isFinite(windowHours) ? windowHours : 0,
+      predicates,
+    };
+  }
+  if (ruleType === 'outcome_ai') {
+    const k = Number(cfg.k_events);
+    const outcome = typeof cfg.outcome_statement === 'string' ? cfg.outcome_statement : '';
+    return {
+      kind: 'outcome_ai',
+      outcome_statement: outcome.slice(0, 600),
+      k_events: Number.isFinite(k) && k > 0 ? Math.floor(k) : 10,
+      buckets: sanitiseBuckets(cfg.buckets),
+    };
+  }
+  if (ruleType === 'cross_data_ai') {
+    const outcome = typeof cfg.outcome_statement === 'string' ? cfg.outcome_statement : '';
+    return {
+      kind: 'cross_data_ai',
+      outcome_statement: outcome.slice(0, 600),
+      buckets: sanitiseBuckets(cfg.buckets),
+    };
+  }
+  return { kind: 'unknown' };
+}
+
+export function redactRule(row: RawRuleRow): PublicRuleView | null {
+  if (!row.share_token || !row.shared_at) return null;
+
+  const ruleType = isRuleType(row.rule_type) ? row.rule_type : null;
+  const ruleName = typeof row.name === 'string' && row.name.trim()
+    ? row.name.trim().slice(0, 200)
+    : '(unnamed rule)';
+  const config = buildPublicConfig(ruleType, row.config);
+
+  return {
+    share_token: row.share_token,
+    shared_at: row.shared_at,
+    rule_name: ruleName,
+    rule_type: ruleType,
+    config,
+    created_day: row.created_at ? row.created_at.slice(0, 10) : '',
+  };
+}

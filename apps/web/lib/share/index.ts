@@ -1,9 +1,9 @@
 /**
- * Public-share framework for eYKON artifacts. Two artifact kinds are
- * supported in this PR:
+ * Public-share framework for eYKON artifacts. Three artifact kinds:
  *
- *   analyst       → user_queries.share_token       (artifact type A2)
- *   notification  → user_notification_log.share_token (artifact type A4)
+ *   analyst       → user_queries.share_token              (A2)
+ *   notification  → user_notification_log.share_token     (A4)
+ *   rule          → user_notification_rules.share_token   (A9, PR-NF-2)
  *
  * Owner clicks Share → POST /api/share/create generates an opaque
  * share_token (s_<16 hex>), writes it on the row alongside shared_at,
@@ -20,21 +20,27 @@
 import { randomBytes } from 'crypto';
 import type { ArtifactType } from '@/lib/referral/attribution';
 
-export type ShareKind = 'analyst' | 'notification';
+export type ShareKind = 'analyst' | 'notification' | 'rule';
 
 export const SHARE_KIND_ARTIFACT_TYPE: Record<ShareKind, ArtifactType> = {
   analyst: 'A2',
   notification: 'A4',
+  rule: 'A9',
 };
 
-export const SHARE_KIND_TABLE: Record<ShareKind, 'user_queries' | 'user_notification_log'> = {
+export const SHARE_KIND_TABLE: Record<
+  ShareKind,
+  'user_queries' | 'user_notification_log' | 'user_notification_rules'
+> = {
   analyst: 'user_queries',
   notification: 'user_notification_log',
+  rule: 'user_notification_rules',
 };
 
 export const SHARE_KIND_PATH: Record<ShareKind, string> = {
   analyst: '/analyst',
   notification: '/notification',
+  rule: '/rule',
 };
 
 // 's_' + 16 hex chars (64 bits of entropy). Matches the format
@@ -54,7 +60,7 @@ export function isValidShareToken(value: string | null | undefined): boolean {
 }
 
 export function isShareKind(value: unknown): value is ShareKind {
-  return value === 'analyst' || value === 'notification';
+  return value === 'analyst' || value === 'notification' || value === 'rule';
 }
 
 /**
