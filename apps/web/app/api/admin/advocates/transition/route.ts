@@ -7,6 +7,7 @@ import {
   timestampUpdatesFor,
 } from '@/lib/admin/advocate-transitions';
 import { sendAdvocateInvitation, sendAdvocateWelcome } from '@/lib/email/send';
+import { safeError } from '@/lib/log';
 import type { AdvocateState } from '@/lib/auth/session';
 
 // POST /api/admin/advocates/transition
@@ -101,7 +102,7 @@ export async function POST(req: NextRequest) {
         userId: body.user_id,
         displayName: targetName,
         partnershipDocUrl: process.env.PARTNERSHIP_DOC_URL ?? null,
-      }).catch((err) => console.error('[advocate.invitation.email]', err));
+      }).catch((err) => safeError('[advocate.invitation.email]', err));
     } else if (from === 'invited' && to === 'active') {
       await sendAdvocateWelcome({
         to: targetEmail,
@@ -113,7 +114,7 @@ export async function POST(req: NextRequest) {
         // the link entirely.
         rewardfulPayoutSetupUrl: process.env.REWARDFUL_PAYOUT_SETUP_URL ?? null,
         channelUrl: process.env.ADVOCATE_CHANNEL_URL ?? null,
-      }).catch((err) => console.error('[advocate.welcome.email]', err));
+      }).catch((err) => safeError('[advocate.welcome.email]', err));
     }
   }
 
