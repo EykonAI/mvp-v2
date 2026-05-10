@@ -24,11 +24,12 @@ export const ARTIFACT_TYPES = [
   'A1', // replayable view URL (cases, replays)
   'A2', // AI Analyst conversation link
   'A3', // Calibration Ledger snapshot
-  'A4', // Notification public view
+  'A4', // Notification public view (per fire)
   'A5', // Shadow Fleet ranking link
   'A6', // Regime Shifts detector output
   'A7', // Posture score view
   'A8', // generic share-this-view button
+  'A9', // Notification rule public view (PR-NF-2)
 ] as const;
 
 export type ArtifactType = (typeof ARTIFACT_TYPES)[number];

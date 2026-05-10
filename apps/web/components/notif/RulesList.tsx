@@ -2,6 +2,7 @@
 import { useEffect, useImperativeHandle, useState, forwardRef } from 'react';
 import { RuleBuilder } from './RuleBuilder';
 import { RuleDetailDrawer, type DrawerRule } from './RuleDetailDrawer';
+import { ShareButton } from '@/components/share/ShareButton';
 import type { PersonaId } from '@/lib/intelligence-analyst/personas';
 import type { Suggestion } from '@/lib/notifications/suggestion-library';
 
@@ -237,7 +238,14 @@ export const RulesList = forwardRef<RulesListHandle, { persona: PersonaId }>(
                 </div>
                 <RuleMeta rule={rule} />
               </button>
-              <div style={{ display: 'flex', gap: 8, paddingRight: 16 }}>
+              <div
+                style={{ display: 'flex', gap: 8, paddingRight: 16, alignItems: 'center' }}
+                // The ShareButton renders its own button element; clicks
+                // anywhere in this column must not bubble up to the
+                // row-level trigger that opens the detail drawer.
+                onClick={e => e.stopPropagation()}
+              >
+                <ShareButton kind="rule" id={rule.id} />
                 <button
                   type="button"
                   onClick={e => {
