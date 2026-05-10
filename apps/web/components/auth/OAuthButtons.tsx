@@ -4,10 +4,11 @@ import { getSupabaseBrowser } from '@/lib/supabase-browser';
 import { AuthButton } from './AuthControls';
 import { FormError } from './AuthCard';
 
-// Note: Supabase identifies X (formerly Twitter) by the legacy provider key
-// `twitter`. The dashboard UI labels it "X / Twitter (OAuth 2.0)" but the
-// signInWithOAuth value is still 'twitter'.
-type Provider = 'google' | 'github' | 'twitter';
+// The "X / Twitter (OAuth 2.0)" panel in Supabase maps to provider key `x`.
+// `twitter` is the separate legacy OAuth 1.0a panel and is not configured.
+// Verified empirically: GET /auth/v1/authorize?provider=twitter returns 400
+// while ?provider=x returns 302 to https://x.com/i/oauth2/authorize.
+type Provider = 'google' | 'github' | 'x';
 
 export function OAuthButtons({
   next = '/app',
@@ -63,11 +64,11 @@ export function OAuthButtons({
         <AuthButton
           type="button"
           variant="secondary"
-          onClick={() => signInWith('twitter')}
+          onClick={() => signInWith('x')}
           disabled={loading !== null}
         >
           <XIcon />
-          {loading === 'twitter' ? 'Opening X…' : 'Continue with X'}
+          {loading === 'x' ? 'Opening X…' : 'Continue with X'}
         </AuthButton>
       </div>
     </div>
