@@ -206,9 +206,14 @@ export function Landing() {
             Claim Founding Rate →
           </a>
           <a href="#pricing" className="btn-text">
-            Or start free as Observer
+            Or start free as Observer — no time limit
           </a>
         </div>
+        <p className="hero-trial-note">
+          Observer is free forever. Use it as your trial: a live workspace, daily
+          briefing, weekly intelligence email, and 5 AI analyst queries / month —
+          no countdown, no card required.
+        </p>
       </section>
 
       {/* ─── PLATFORM ────────────────────────────────────────────── */}
@@ -417,32 +422,39 @@ export function Landing() {
             <div className="tier-code">T-00 · OBSERVER</div>
             <div className="tier-name">Citizen</div>
             <div className="tier-tag">
-              For concerned observers. Read-only access to the operational globe.
+              Free forever. Your trial that never expires.
             </div>
             <div className="price-original">&nbsp;</div>
             <div className="price-block">
               <span className="price-amt">Free</span>
             </div>
-            <div className="price-note dim">No card required</div>
+            <div className="price-note dim">No card required · no time limit</div>
             <Link href="/auth/signup" className="tier-btn">
               Start Observing Free
             </Link>
             <div className="tier-section-label">Includes</div>
             <ul className="tier-features">
               <li>
-                <strong>IM-01</strong> Operational Globe (limited view)
+                Operational <strong>Globe</strong> with all map layers
               </li>
               <li>
-                <strong>1 watchlist</strong>, up to 5 assets
+                1 <strong>watchlist</strong> · 24h-delayed feeds
               </li>
               <li>
-                24-hour <strong>delayed</strong> data feeds
+                Daily personalised <strong>briefing</strong> on the home screen
               </li>
               <li>
-                Daily plain-language <strong>citizen briefing</strong> (IM-25)
+                Weekly <strong>briefing email</strong> · Tuesday 09:00 UTC
               </li>
-              <li className="disabled">AI analyst access</li>
-              <li className="disabled">Intelligence Menu (25+ modules)</li>
+              <li>
+                <strong>5 AI Analyst</strong> queries / month
+              </li>
+              <li>
+                1 live <strong>notification rule</strong> · email-only
+              </li>
+              <li>
+                <strong>Calibration Ledger</strong> preview · 8 more workspaces visible
+              </li>
             </ul>
           </div>
 
@@ -528,6 +540,10 @@ export function Landing() {
             </ul>
           </div>
         </div>
+        <p className="refund-disclosure">
+          <strong>14-day full refund.</strong> Single-click from billing. No questions.
+          Crypto refunds settle in USDC.
+        </p>
       </section>
 
       {/* ─── CRYPTO CALLOUT ──────────────────────────────────────── */}
@@ -681,9 +697,9 @@ export function Landing() {
         </Faq>
         <Faq q="Can I cancel? Is there a refund?">
           Yes. Cancel anytime from the billing portal — you keep access until the end of your
-          paid period. We offer a no-questions 14-day refund on first monthly purchases and a
-          30-day refund on first annual purchases. Crypto annual refunds are returned in the
-          same coin at the rate paid. Full details in the{' '}
+          paid period. We offer a no-questions <strong>14-day refund</strong> on any first
+          purchase (monthly or annual, fiat or crypto). Single-click from billing. Crypto
+          refunds settle in <strong>USDC</strong> within 5 business days. Full details in the{' '}
           <Link href="/refund" style={{ color: 'var(--cyan)' }}>
             Refund Policy
           </Link>
