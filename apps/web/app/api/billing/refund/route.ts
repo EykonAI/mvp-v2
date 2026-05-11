@@ -21,7 +21,11 @@ import { captureServer } from '@/lib/analytics/server';
 // transition only when the operator marks the refund sent.
 
 export const dynamic = 'force-dynamic';
-export const REFUND_WINDOW_DAYS = 14;
+
+// Local — Next.js App Router rejects non-route exports from route.ts at
+// build time. If another module needs to import this, move it to a
+// shared lib file (e.g. lib/refund/window.ts).
+const REFUND_WINDOW_DAYS = 14;
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
