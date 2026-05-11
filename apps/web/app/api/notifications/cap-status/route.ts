@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, getServerSupabase } from '@/lib/auth/session';
-import { getCurrentTier, tierMeetsRequirement } from '@/lib/subscription';
+import { getCurrentTier } from '@/lib/subscription';
 import {
   HARD_STOP_RATIO,
   SMS_WA_MONTHLY_CAPS,
@@ -21,9 +21,10 @@ export async function GET(_req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
 
   const tier = await getCurrentTier();
-  if (!tierMeetsRequirement(tier, 'pro')) {
-    return NextResponse.json({ error: 'forbidden', requiredTier: 'pro' }, { status: 403 });
-  }
+  // Citizens reach this endpoint too. SMS_WA_MONTHLY_CAPS.citizen is
+  // 0, so the response correctly tells the client they have no
+  // SMS/WhatsApp quota — the UI uses this to render a "Pro" pill on
+  // those channel options (trial-mechanism brief §5.3).
 
   const supabase = getServerSupabase();
   const cap = SMS_WA_MONTHLY_CAPS[tier] ?? 0;

@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAnthropic, CLAUDE_TOOLS, CONVERSATIONAL_SYSTEM_PROMPT } from '@/lib/anthropic';
+import { getAnthropic, toolsForTier, CONVERSATIONAL_SYSTEM_PROMPT } from '@/lib/anthropic';
 import { executeToolCall } from '@/lib/tool-executor';
 import { getCurrentUser } from '@/lib/auth/session';
 import { createServerSupabase } from '@/lib/supabase-server';
 import {
   AI_QUERY_LIMITS,
   getCurrentTier,
-  tierMeetsRequirement,
   type Tier,
 } from '@/lib/subscription';
 import { captureServer } from '@/lib/analytics/server';
@@ -73,20 +72,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
     }
 
-    // Citizen and below have no AI quota.
-    if (!tierMeetsRequirement(tier, 'pro')) {
-      return NextResponse.json(
-        {
-          error: 'AI analyst is a Pro feature.',
-          upgrade_url: '/pricing',
-          current_tier: tier,
-        },
-        { status: 403 },
-      );
-    }
-
     // Atomic per-user monthly cap. The RPC returns allowed=false when the
     // user has already hit the limit for the current calendar month.
+    // Citizens are capped at AI_QUERY_LIMITS.citizen (=5) per the
+    // trial-mechanism brief §5.1 — no longer hard-blocked.
     if (userId) {
       const limit = AI_QUERY_LIMITS[tier];
       const admin = createServerSupabase();
@@ -101,6 +90,16 @@ export async function POST(req: NextRequest) {
       }
       const row = Array.isArray(data) ? data[0] : data;
       if (!row?.allowed) {
+        // Citizen → /pricing?from=ai_cap (the trial-mechanism funnel hook).
+        // Pro → /pricing?plan=desk_founding_annual (the upsell to Desk).
+        // Desk/Enterprise hit cap → no upgrade_url, the operator handles
+        // it out-of-band.
+        const upgrade_url =
+          tier === 'citizen'
+            ? '/pricing?from=ai_cap'
+            : tier === 'pro'
+            ? '/pricing?plan=desk_founding_annual'
+            : undefined;
         return NextResponse.json(
           {
             error: `Monthly AI analyst limit reached (${limit} queries).`,
@@ -108,7 +107,7 @@ export async function POST(req: NextRequest) {
             limit,
             period_start: row?.period_start,
             tier,
-            upgrade_url: tier === 'pro' ? '/pricing?plan=desk_founding_annual' : undefined,
+            upgrade_url,
           },
           { status: 429 },
         );
@@ -129,11 +128,15 @@ export async function POST(req: NextRequest) {
       .filter((m: any) => m.role === 'user' || m.role === 'assistant')
       .map((m: any) => ({ role: m.role, content: m.content }));
 
+    // Tier-aware tool surface. Citizens get the "cheap" single-source
+    // subset per the trial-mechanism brief §5.1; Pro+ get the full set.
+    const tools = toolsForTier(tier);
+
     let response = await anthropic.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 4096,
       system: systemPrompt,
-      tools: CLAUDE_TOOLS,
+      tools,
       messages: apiMessages,
     });
 
@@ -172,7 +175,7 @@ export async function POST(req: NextRequest) {
         model: 'claude-sonnet-4-5',
         max_tokens: 4096,
         system: systemPrompt,
-        tools: CLAUDE_TOOLS,
+        tools,
         messages: allMessages,
       });
     }
@@ -185,8 +188,12 @@ export async function POST(req: NextRequest) {
     // Persist for the Query History tab and the Suggested-tab ranker.
     // Awaited so the row exists before the client re-fetches history;
     // failures are logged inside persistUserQuery and never thrown.
+    //
+    // Citizen tier skips persistence per the trial-mechanism brief §5.1
+    // — Observer sees the answer in-session only, no user_queries row,
+    // which removes the scraping hook and saves storage on free traffic.
     let queryId: string | null = null;
-    if (userId) {
+    if (userId && tier !== 'citizen') {
       const userQueryText = extractLastUserText(apiMessages);
       if (userQueryText) {
         try {

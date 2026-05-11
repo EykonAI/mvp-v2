@@ -13,6 +13,7 @@ import {
   type ModuleSlug,
   type ModuleTier,
 } from '@/lib/intel/modules';
+import type { Tier } from '@/lib/pricing';
 
 /**
  * Client-side /intel chrome: TopNav, calibration strip, chat panel, persona
@@ -46,7 +47,13 @@ function tierForPath(pathname: string | null): ModuleTier | null {
   return MODULE_TIERS[slug as ModuleSlug] ?? null;
 }
 
-export function IntelShell({ children }: { children: React.ReactNode }) {
+export function IntelShell({
+  children,
+  viewerTier,
+}: {
+  children: React.ReactNode;
+  viewerTier?: Tier;
+}) {
   const [chatOpen, setChatOpen] = useState(false);
   const pathname = usePathname();
 

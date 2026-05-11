@@ -92,9 +92,13 @@ export function canAccessModule(userTier: Tier, slug: ModuleSlug): boolean {
 }
 
 // Monthly caps per tier — source of truth for /api/chat rate limiting.
-// memory/project_pricing_tiers.md: Pro 500/mo, Desk 5,000/mo/seat.
+// Citizen = 5 per the trial-mechanism brief §5.1: enough for a prospect
+// to feel the analyst's quality on a real question, low enough that
+// freeloader scraping is cost-prohibitive. Citizen queries are also
+// constrained to the "cheap" tool subset — see CITIZEN_AI_TOOLS in
+// lib/anthropic.ts. Pro+ get the full tool surface.
 export const AI_QUERY_LIMITS: Record<Tier, number> = {
-  citizen: 0,
+  citizen: 5,
   pro: 500,
   desk: 5_000,
   enterprise: 1_000_000,
@@ -113,3 +117,39 @@ export const EXPORT_LIMITS: Record<Tier, number> = {
   desk: 1_000,
   enterprise: 1_000_000,
 };
+
+// Maximum concurrent watchlists per user, per tier. Citizen is capped at 1
+// to create real pressure on heavy free-tier users (Path 1 conversion in
+// the trial-mechanism brief §5.4). Pro/Desk/Enterprise are generous.
+export const WATCHLIST_LIMITS: Record<Tier, number> = {
+  citizen: 1,
+  pro: 25,
+  desk: 100,
+  enterprise: 1_000_000,
+};
+
+// Citizen feed delay in milliseconds. Reads of /api/vessels and
+// /api/conflicts return data as-of NOW - this offset for Citizen tier.
+// /api/aircraft is a live proxy to adsb.lol (no Supabase backing) and
+// is exempted in code — Citizens see live aircraft data, the trade-off
+// is documented in the trial-mechanism brief §5.4.
+export const CITIZEN_FEED_DELAY_MS = 24 * 60 * 60 * 1000;
+
+// ─── Citizen Intelligence Center access (trial-mechanism brief §5.2) ───
+// Citizens see one live workspace (Calibration Ledger, read-only) and
+// eight visible-but-inert tiles. Any click on an inert tile routes to
+// /pricing?from=intel_<slug>. Pro+ users see all nine live.
+export const MODULE_PREVIEW_FOR_CITIZEN: readonly ModuleSlug[] = ['calibration'];
+export const MODULE_INERT_FOR_CITIZEN: readonly ModuleSlug[] = MODULE_SLUGS.filter(
+  slug => !MODULE_PREVIEW_FOR_CITIZEN.includes(slug),
+);
+
+export type CitizenIntelAccess = 'preview' | 'inert';
+
+export function citizenIntelAccess(slug: ModuleSlug): CitizenIntelAccess {
+  return MODULE_PREVIEW_FOR_CITIZEN.includes(slug) ? 'preview' : 'inert';
+}
+
+export function isCitizenInert(slug: ModuleSlug): boolean {
+  return citizenIntelAccess(slug) === 'inert';
+}
