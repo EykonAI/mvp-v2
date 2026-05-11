@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, getServerSupabase } from '@/lib/auth/session';
-import { getCurrentTier, tierMeetsRequirement } from '@/lib/subscription';
 
 // GET /api/notifications/rules/[id]/fires?cursor=<fired_at>|<id>&limit=20
 //
@@ -44,10 +43,10 @@ export async function GET(req: NextRequest, ctx: { params: { id: string } }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
 
-  const tier = await getCurrentTier();
-  if (!tierMeetsRequirement(tier, 'pro')) {
-    return NextResponse.json({ error: 'forbidden', requiredTier: 'pro' }, { status: 403 });
-  }
+  // Citizens see fires of their one email-only rule (trial-mechanism
+  // brief §5.3). The RLS policy on user_notification_log scopes rows
+  // to the rule owner — Citizens viewing this endpoint only see their
+  // own fires.
 
   const supabase = getServerSupabase();
 
