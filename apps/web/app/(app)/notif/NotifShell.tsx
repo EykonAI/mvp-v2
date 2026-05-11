@@ -27,8 +27,15 @@ import {
 } from '@/lib/intelligence-analyst/persona-visibility';
 import { captureBrowser } from '@/lib/analytics/client';
 
+import type { Tier } from '@/lib/pricing';
+
 interface NotifShellProps {
   recentFilter: boolean;
+  // Citizen-aware UI (Pro pill on SMS/WhatsApp channel options, hidden
+  // "Build a custom rule" entry, etc.) is wired in PR-OBS-4 server-side
+  // and surfaced progressively in the UI. The prop is accepted now so
+  // child components can branch without another plumbing pass.
+  viewerTier?: Tier;
 }
 
 /**
@@ -46,7 +53,7 @@ interface NotifShellProps {
  * rule rows, and recent-fire rows are placeholders pointing at the
  * subsequent PRs.
  */
-export function NotifShell({ recentFilter }: NotifShellProps) {
+export function NotifShell({ recentFilter, viewerTier: _viewerTier }: NotifShellProps) {
   const [chatOpen, setChatOpen] = useState(false);
   const [persona, setPersona] = useState<PersonaId>(DEFAULT_PERSONA);
   const [advancedEnabled, setAdvancedEnabled] = useState(false);
