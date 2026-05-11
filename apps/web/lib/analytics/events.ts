@@ -24,6 +24,7 @@ export const EVENT = {
   ADVANCED_PERSONAS_TOGGLED: 'advanced_personas_toggled',
   REFUND_REQUESTED: 'refund_requested',
   REFUND_SENT: 'refund_sent',
+  WELCOME_EMAIL_SENT: 'welcome_email_sent',
 } as const;
 
 export type EventName = (typeof EVENT)[keyof typeof EVENT];
@@ -80,4 +81,14 @@ export type EventProps =
       usd_value_at_purchase: number;
       days_since_purchase: number;
       operator_id: string;
+    }
+  | {
+      // Fired server-side once per user lifetime by
+      // /api/cron/welcome-observer-users after a successful Resend send.
+      // The user_profiles.welcome_email_sent_at column makes this an
+      // exactly-once event.
+      event: 'welcome_email_sent';
+      persona: string | null;
+      had_first_name: boolean;
+      deferred_from_quiet_hours: boolean;
     };
