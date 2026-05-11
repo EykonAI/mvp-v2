@@ -113,3 +113,20 @@ export const EXPORT_LIMITS: Record<Tier, number> = {
   desk: 1_000,
   enterprise: 1_000_000,
 };
+
+// Maximum concurrent watchlists per user, per tier. Citizen is capped at 1
+// to create real pressure on heavy free-tier users (Path 1 conversion in
+// the trial-mechanism brief §5.4). Pro/Desk/Enterprise are generous.
+export const WATCHLIST_LIMITS: Record<Tier, number> = {
+  citizen: 1,
+  pro: 25,
+  desk: 100,
+  enterprise: 1_000_000,
+};
+
+// Citizen feed delay in milliseconds. Reads of /api/vessels and
+// /api/conflicts return data as-of NOW - this offset for Citizen tier.
+// /api/aircraft is a live proxy to adsb.lol (no Supabase backing) and
+// is exempted in code — Citizens see live aircraft data, the trade-off
+// is documented in the trial-mechanism brief §5.4.
+export const CITIZEN_FEED_DELAY_MS = 24 * 60 * 60 * 1000;
