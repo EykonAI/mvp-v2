@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
+import { getCurrentTier } from '@/lib/subscription';
+import { tierMeetsRequirement, CITIZEN_FEED_DELAY_MS } from '@/lib/intel/modules';
+import type { Tier } from '@/lib/pricing';
 
 // Provider selection mirrors the conflicts pattern:
 //   VESSEL_PROVIDER=aishub    -> live proxy to AIS Hub (requires feeder station)
@@ -9,18 +12,28 @@ const PROVIDER = (process.env.VESSEL_PROVIDER || 'supabase').toLowerCase();
 
 const FRESH_WINDOW_MS = 60 * 60 * 1000; // only return vessels seen in last hour
 
-async function fetchFromSupabase(params: URLSearchParams) {
+async function fetchFromSupabase(params: URLSearchParams, tier: Tier) {
   const supabase = createServerSupabase();
 
   const limit = Math.min(parseInt(params.get('limit') || '5000'), 20000);
-  const since = new Date(Date.now() - FRESH_WINDOW_MS).toISOString();
+
+  // Citizen tier sees the snapshot from 24h ago (a 1h window ending at
+  // NOW - 24h). Pro+ sees the most recent hour.
+  const isCitizen = !tierMeetsRequirement(tier, 'pro');
+  const now = Date.now();
+  const upperBoundMs = isCitizen ? now - CITIZEN_FEED_DELAY_MS : now;
+  const lowerBoundMs = upperBoundMs - FRESH_WINDOW_MS;
+  const sinceISO = new Date(lowerBoundMs).toISOString();
 
   let query = supabase
     .from('vessel_positions')
     .select('mmsi,name,vessel_type,latitude,longitude,speed,heading,course,destination,callsign,flag,imo,nav_status,updated_at')
-    .gte('updated_at', since)
+    .gte('updated_at', sinceISO)
     .order('updated_at', { ascending: false })
     .limit(limit);
+  if (isCitizen) {
+    query = query.lte('updated_at', new Date(upperBoundMs).toISOString());
+  }
 
   const latmin = params.get('latmin');
   if (latmin) {
@@ -110,8 +123,12 @@ async function fetchFromAishub(params: URLSearchParams) {
 export async function GET(req: NextRequest) {
   try {
     const params = req.nextUrl.searchParams;
+    // AIS Hub live proxy is preserved for feeder-station setups and does
+    // not currently honour the Citizen delay (no historical window
+    // available from that provider). Default Supabase path applies it.
     if (PROVIDER === 'aishub') return await fetchFromAishub(params);
-    return await fetchFromSupabase(params);
+    const tier = await getCurrentTier();
+    return await fetchFromSupabase(params, tier);
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
