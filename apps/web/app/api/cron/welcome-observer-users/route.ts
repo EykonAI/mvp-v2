@@ -85,68 +85,88 @@ export async function POST(req: NextRequest) {
   };
 
   for (const profile of candidates ?? []) {
-    // Pair with auth.users to read email_confirmed_at. Supabase admin
-    // client can read this; service-role bypasses RLS.
-    const { data: authUser } = await admin
-      .schema('auth')
-      .from('users')
-      .select('email_confirmed_at, email')
-      .eq('id', profile.id)
-      .maybeSingle();
+    try {
+      // Read email_confirmed_at via the Auth admin API. Supabase's
+      // PostgREST does NOT expose the `auth` schema by default, so a
+      // .schema('auth').from('users') call fails at runtime. The Auth
+      // admin namespace is the supported service-role read path for
+      // auth.users data.
+      const { data: authData, error: authErr } =
+        await admin.auth.admin.getUserById(profile.id as string);
+      if (authErr || !authData?.user) {
+        results.failed++;
+        console.error(
+          '[welcome-cron] getUserById failed',
+          profile.id,
+          authErr?.message ?? 'no user returned',
+        );
+        continue;
+      }
+      const authUser = authData.user;
+      const confirmedAt = authUser.email_confirmed_at;
+      if (!confirmedAt) {
+        results.not_yet_confirmed++;
+        continue;
+      }
 
-    const confirmedAt = authUser?.email_confirmed_at as string | null | undefined;
-    if (!confirmedAt) {
-      results.not_yet_confirmed++;
-      continue;
-    }
+      const scheduled = scheduledSendTime(new Date(confirmedAt));
+      if (Date.now() < scheduled.getTime()) {
+        results.deferred++;
+        continue;
+      }
 
-    const scheduled = scheduledSendTime(new Date(confirmedAt));
-    if (Date.now() < scheduled.getTime()) {
-      results.deferred++;
-      continue;
-    }
+      const to =
+        (profile.email as string | null) ?? (authUser.email ?? null);
+      if (!to) {
+        // Defensive — every confirmed user should have an email. Skip
+        // rather than fail the run.
+        results.failed++;
+        continue;
+      }
 
-    const to = (profile.email as string | null) ?? (authUser?.email as string | null) ?? null;
-    if (!to) {
-      // Defensive — every confirmed user should have an email. Skip
-      // rather than fail the run.
+      const persona = (profile.persona as string | null) ?? '';
+      const personaPhrase = PERSONA_PHRASES[persona] ?? '';
+      const firstName = firstNameFromFull(profile.full_name as string | null);
+
+      const send = await sendObserverWelcome({
+        to,
+        userId: profile.id as string,
+        firstName,
+        personaPhrase,
+      });
+
+      if (send.state === 'error') {
+        results.failed++;
+        continue;
+      }
+
+      // Mark sent so this user is never re-emailed. We update on both
+      // 'sent' and 'dry_run' — the latter only happens in dev and we
+      // don't want the cron to keep re-trying.
+      await admin
+        .from('user_profiles')
+        .update({ welcome_email_sent_at: new Date().toISOString() })
+        .eq('id', profile.id);
+
+      // PostHog event — fires once per user lifetime by construction.
+      void captureServer(profile.id as string, {
+        event: 'welcome_email_sent',
+        persona: persona || null,
+        had_first_name: !!firstName,
+        deferred_from_quiet_hours: false,
+      });
+
+      results.sent++;
+    } catch (err) {
+      // Per-user isolation: one user's failure shouldn't 500 the
+      // whole run. Bump failed, log, move on.
       results.failed++;
-      continue;
+      console.error(
+        '[welcome-cron] iteration threw',
+        profile.id,
+        err instanceof Error ? err.message : String(err),
+      );
     }
-
-    const persona = (profile.persona as string | null) ?? '';
-    const personaPhrase = PERSONA_PHRASES[persona] ?? '';
-    const firstName = firstNameFromFull(profile.full_name as string | null);
-
-    const send = await sendObserverWelcome({
-      to,
-      userId: profile.id as string,
-      firstName,
-      personaPhrase,
-    });
-
-    if (send.state === 'error') {
-      results.failed++;
-      continue;
-    }
-
-    // Mark sent so this user is never re-emailed. We update on both
-    // 'sent' and 'dry_run' — the latter only happens in dev and we
-    // don't want the cron to keep re-trying.
-    await admin
-      .from('user_profiles')
-      .update({ welcome_email_sent_at: new Date().toISOString() })
-      .eq('id', profile.id);
-
-    // PostHog event — fires once per user lifetime by construction.
-    void captureServer(profile.id as string, {
-      event: 'welcome_email_sent',
-      persona: persona || null,
-      had_first_name: !!firstName,
-      deferred_from_quiet_hours: false,
-    });
-
-    results.sent++;
   }
 
   return NextResponse.json(results);
