@@ -130,3 +130,22 @@ export const WATCHLIST_LIMITS: Record<Tier, number> = {
 // is exempted in code — Citizens see live aircraft data, the trade-off
 // is documented in the trial-mechanism brief §5.4.
 export const CITIZEN_FEED_DELAY_MS = 24 * 60 * 60 * 1000;
+
+// ─── Citizen Intelligence Center access (trial-mechanism brief §5.2) ───
+// Citizens see one live workspace (Calibration Ledger, read-only) and
+// eight visible-but-inert tiles. Any click on an inert tile routes to
+// /pricing?from=intel_<slug>. Pro+ users see all nine live.
+export const MODULE_PREVIEW_FOR_CITIZEN: readonly ModuleSlug[] = ['calibration'];
+export const MODULE_INERT_FOR_CITIZEN: readonly ModuleSlug[] = MODULE_SLUGS.filter(
+  slug => !MODULE_PREVIEW_FOR_CITIZEN.includes(slug),
+);
+
+export type CitizenIntelAccess = 'preview' | 'inert';
+
+export function citizenIntelAccess(slug: ModuleSlug): CitizenIntelAccess {
+  return MODULE_PREVIEW_FOR_CITIZEN.includes(slug) ? 'preview' : 'inert';
+}
+
+export function isCitizenInert(slug: ModuleSlug): boolean {
+  return citizenIntelAccess(slug) === 'inert';
+}
