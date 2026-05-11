@@ -22,6 +22,8 @@ export const EVENT = {
   WAITLIST_JOINED: 'waitlist_joined',
   PERSONA_CHANGED: 'persona_changed',
   ADVANCED_PERSONAS_TOGGLED: 'advanced_personas_toggled',
+  REFUND_REQUESTED: 'refund_requested',
+  REFUND_SENT: 'refund_sent',
 } as const;
 
 export type EventName = (typeof EVENT)[keyof typeof EVENT];
@@ -57,4 +59,25 @@ export type EventProps =
       enabled: boolean;
       active_persona: string;
       active_persona_visibility: 'default' | 'advanced';
+    }
+  | {
+      // Fired server-side when a user clicks "Request refund" on /billing
+      // and the eligibility checks pass (within 14 days, no prior lifetime
+      // refund). Carries enough context for the weekly founder digest.
+      event: 'refund_requested';
+      purchase_id: string;
+      coin: string | null;             // null when pre-crypto / unknown
+      usd_value_at_purchase: number;   // cents
+      days_since_purchase: number;
+    }
+  | {
+      // Fired server-side when the operator clicks "Mark sent" on the
+      // /admin/refunds panel. Carries the same fields as refund_requested
+      // plus the operator_id (which user.id pressed the button).
+      event: 'refund_sent';
+      purchase_id: string;
+      coin: string | null;
+      usd_value_at_purchase: number;
+      days_since_purchase: number;
+      operator_id: string;
     };

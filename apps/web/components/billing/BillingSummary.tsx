@@ -1,6 +1,11 @@
 import Link from 'next/link';
 import { TIER_LABELS, type Tier, type BillingCycle, formatUsd } from '@/lib/pricing';
 import { CancelButton } from './CancelButton';
+import { RefundButton } from './RefundButton';
+
+// Trial-mechanism brief §6: flat 14-day refund window from purchase
+// date. The button is rendered when daysSincePurchase < this constant.
+const REFUND_WINDOW_DAYS = 14;
 
 type Subscription = {
   id: string;
@@ -32,10 +37,17 @@ export function BillingSummary({
   subscription,
   amountCents,
   foundingLocked,
+  daysSincePurchase,
+  refundAlreadyRequested,
 }: {
   subscription: Subscription | null;
   amountCents: number;
   foundingLocked: boolean;
+  // Days since the most recent completed purchase. -1 when no purchase.
+  daysSincePurchase: number;
+  // True when the user has already used their lifetime refund slot
+  // (status in pending/sent/confirmed). Hides the refund button.
+  refundAlreadyRequested: boolean;
 }) {
   if (!subscription) {
     return (
@@ -244,6 +256,14 @@ export function BillingSummary({
               Renew early →
             </Link>
             <CancelButton subscriptionId={subscription.id} tier={tier} />
+            {!refundAlreadyRequested &&
+              daysSincePurchase >= 0 &&
+              daysSincePurchase < REFUND_WINDOW_DAYS && (
+                <RefundButton
+                  daysSincePurchase={daysSincePurchase}
+                  daysRemaining={REFUND_WINDOW_DAYS - daysSincePurchase}
+                />
+              )}
           </>
         )}
 
