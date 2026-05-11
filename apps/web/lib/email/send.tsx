@@ -33,6 +33,10 @@ import {
   AdvocateSubmissionFounderNotification,
   type AdvocateSubmissionFounderNotificationProps,
 } from './templates/AdvocateSubmissionFounderNotification';
+import {
+  ObserverWelcome,
+  type ObserverWelcomeProps,
+} from './templates/ObserverWelcome';
 
 type TemplateId =
   | 'waitlist_confirmation'
@@ -41,7 +45,8 @@ type TemplateId =
   | 'advocate_invitation'
   | 'advocate_welcome'
   | 'advocate_submission_confirmation'
-  | 'advocate_submission_founder_notification';
+  | 'advocate_submission_founder_notification'
+  | 'observer_welcome';
 
 type SendResult =
   | { state: 'sent'; resendMessageId: string; logId: string }
@@ -280,6 +285,22 @@ export async function sendAdvocateSubmissionConfirmation(
     html,
     'advocate_submission_confirmation',
     { fullName: input.fullName },
+    input.userId,
+    input.notificationQueueId,
+  );
+}
+
+export async function sendObserverWelcome(
+  input: BaseSendInput & ObserverWelcomeProps,
+): Promise<SendResult> {
+  const html = await render(<ObserverWelcome {...input} />);
+  const subject = 'Welcome to eYKON — what your Observer access unlocks';
+  return deliver(
+    input.to,
+    subject,
+    html,
+    'observer_welcome',
+    { firstName: input.firstName, personaPhrase: input.personaPhrase },
     input.userId,
     input.notificationQueueId,
   );

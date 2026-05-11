@@ -22,6 +22,7 @@ export const EVENT = {
   WAITLIST_JOINED: 'waitlist_joined',
   PERSONA_CHANGED: 'persona_changed',
   ADVANCED_PERSONAS_TOGGLED: 'advanced_personas_toggled',
+  WELCOME_EMAIL_SENT: 'welcome_email_sent',
 } as const;
 
 export type EventName = (typeof EVENT)[keyof typeof EVENT];
@@ -57,4 +58,14 @@ export type EventProps =
       enabled: boolean;
       active_persona: string;
       active_persona_visibility: 'default' | 'advanced';
+    }
+  | {
+      // Fired server-side once per user lifetime by
+      // /api/cron/welcome-observer-users after a successful Resend send.
+      // The user_profiles.welcome_email_sent_at column makes this an
+      // exactly-once event.
+      event: 'welcome_email_sent';
+      persona: string | null;
+      had_first_name: boolean;
+      deferred_from_quiet_hours: boolean;
     };
