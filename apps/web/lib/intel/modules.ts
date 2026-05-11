@@ -92,9 +92,13 @@ export function canAccessModule(userTier: Tier, slug: ModuleSlug): boolean {
 }
 
 // Monthly caps per tier — source of truth for /api/chat rate limiting.
-// memory/project_pricing_tiers.md: Pro 500/mo, Desk 5,000/mo/seat.
+// Citizen = 5 per the trial-mechanism brief §5.1: enough for a prospect
+// to feel the analyst's quality on a real question, low enough that
+// freeloader scraping is cost-prohibitive. Citizen queries are also
+// constrained to the "cheap" tool subset — see CITIZEN_AI_TOOLS in
+// lib/anthropic.ts. Pro+ get the full tool surface.
 export const AI_QUERY_LIMITS: Record<Tier, number> = {
-  citizen: 0,
+  citizen: 5,
   pro: 500,
   desk: 5_000,
   enterprise: 1_000_000,
