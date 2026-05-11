@@ -26,6 +26,8 @@ export default async function BillingPage() {
 
   let subscription = null;
   let purchases: Array<Record<string, unknown>> = [];
+  let daysSincePurchase = -1;
+  let refundAlreadyRequested = false;
 
   if (user) {
     const { data: subs } = await admin
@@ -43,6 +45,27 @@ export default async function BillingPage() {
       .order('created_at', { ascending: false })
       .limit(20);
     purchases = purchaseRows ?? [];
+
+    // Most recent completed non-refund purchase drives the refund-window
+    // calculation. -1 means "never bought anything" → no refund button.
+    const lastPurchase = purchases.find(
+      p => p.status === 'completed' && p.kind !== 'refund',
+    );
+    if (lastPurchase) {
+      const ageMs = Date.now() - new Date(lastPurchase.created_at as string).getTime();
+      daysSincePurchase = Math.floor(ageMs / 86_400_000);
+    }
+
+    // One refund per user lifetime — hide the button entirely if they
+    // have a pending / sent / confirmed refund already on file.
+    const { data: priorRefund } = await admin
+      .from('refund_requests')
+      .select('id')
+      .eq('user_id', user.id)
+      .in('status', ['pending', 'sent', 'confirmed'])
+      .limit(1)
+      .maybeSingle();
+    refundAlreadyRequested = !!priorRefund;
   }
 
   // For the BillingSummary "Amount" line, derive from pricing.ts when we
@@ -124,6 +147,8 @@ export default async function BillingPage() {
         }
         amountCents={amountCents}
         foundingLocked={profile?.founding_rate_locked ?? false}
+        daysSincePurchase={daysSincePurchase}
+        refundAlreadyRequested={refundAlreadyRequested}
       />
 
       <PurchaseHistory

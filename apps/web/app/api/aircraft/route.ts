@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// ADS-B data from adsb.lol (free, no key required)
+// ADS-B data from adsb.lol (free, no key required).
+//
+// NOTE on Citizen 24h feed delay (trial-mechanism brief §5.4): adsb.lol
+// is a live proxy with no historical archive in our infrastructure, so
+// the snapshot-from-24h-ago technique used by /api/vessels and
+// /api/conflicts is not applicable here. Citizens see live aircraft data
+// as a documented exception. If we later ingest aircraft positions into
+// Supabase, this route should mirror the vessels-route pattern.
 export async function GET(req: NextRequest) {
   try {
     const params = req.nextUrl.searchParams;

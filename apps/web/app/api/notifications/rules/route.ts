@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, getServerSupabase } from '@/lib/auth/session';
-import { getCurrentTier, tierMeetsRequirement } from '@/lib/subscription';
+import { getCurrentTier } from '@/lib/subscription';
 import {
   ACTIVE_RULE_LIMITS,
   DEFAULT_COOLDOWN_MINUTES,
@@ -54,10 +54,9 @@ export async function GET(_req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
 
-  const tier = await getCurrentTier();
-  if (!tierMeetsRequirement(tier, 'pro')) {
-    return NextResponse.json({ error: 'forbidden', requiredTier: 'pro' }, { status: 403 });
-  }
+  // Citizens listed alongside Pro+ per the trial-mechanism brief §5.3:
+  // Observer users get one email-only rule. The ACTIVE_RULE_LIMITS map
+  // and the channel-type gate on POST do the constraining.
 
   const supabase = getServerSupabase();
   const { data, error } = await supabase
@@ -97,9 +96,10 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
 
   const tier = await getCurrentTier();
-  if (!tierMeetsRequirement(tier, 'pro')) {
-    return NextResponse.json({ error: 'forbidden', requiredTier: 'pro' }, { status: 403 });
-  }
+  // No tier 403 — Citizens can create one rule. The active-rule cap
+  // below enforces the count and the channel resolution below enforces
+  // email-only (verified email channel required; SMS/WA channels are
+  // rejected at /api/notifications/channels POST for Citizens).
 
   const body = (await req.json().catch(() => null)) as CreateBody | null;
   if (!body) return NextResponse.json({ error: 'invalid_body' }, { status: 400 });

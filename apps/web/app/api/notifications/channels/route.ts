@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, getServerSupabase } from '@/lib/auth/session';
-import { getCurrentTier, tierMeetsRequirement } from '@/lib/subscription';
+import { getCurrentTier } from '@/lib/subscription';
 import {
   ChannelType,
   generateVerificationCode,
@@ -30,10 +30,9 @@ export async function GET(_req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
 
-  const tier = await getCurrentTier();
-  if (!tierMeetsRequirement(tier, 'pro')) {
-    return NextResponse.json({ error: 'forbidden', requiredTier: 'pro' }, { status: 403 });
-  }
+  // Citizens can list their channels (typically just email per the
+  // trial-mechanism brief §5.3). The POST gate below blocks SMS/WA
+  // creation for Citizens.
 
   const supabase = getServerSupabase();
   const { data, error } = await supabase
@@ -58,9 +57,6 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
 
   const tier = await getCurrentTier();
-  if (!tierMeetsRequirement(tier, 'pro')) {
-    return NextResponse.json({ error: 'forbidden', requiredTier: 'pro' }, { status: 403 });
-  }
 
   const body = (await req.json().catch(() => null)) as CreateBody | null;
   if (!body) return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
@@ -73,6 +69,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: 'unsupported_channel_type', allowed: Array.from(CREATE_ALLOWED_TYPES) },
       { status: 400 },
+    );
+  }
+
+  // Citizens (Observer free tier) are email-only per the trial-mechanism
+  // brief §5.3 — SMS and WhatsApp channels are a Pro feature. Pro+ can
+  // mix all three.
+  if (tier === 'citizen' && channelType !== 'email') {
+    return NextResponse.json(
+      {
+        error: 'forbidden_channel_type_for_tier',
+        tier,
+        allowed_for_tier: ['email'],
+        upgrade_url: '/pricing?from=notif_channel',
+      },
+      { status: 403 },
     );
   }
   if (!isValidHandle(channelType, handle)) {

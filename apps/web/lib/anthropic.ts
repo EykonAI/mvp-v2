@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import type { Tier } from './pricing';
 
 let anthropicClient: Anthropic | null = null;
 
@@ -8,6 +9,41 @@ export function getAnthropic(): Anthropic {
   if (!apiKey) throw new Error('Missing ANTHROPIC_API_KEY');
   anthropicClient = new Anthropic({ apiKey });
   return anthropicClient;
+}
+
+// ─── Citizen tool subset (trial-mechanism brief §5.1) ────────────
+// Citizens get cheap single-source reads (vessels, aircraft, conflicts,
+// infrastructure inventory, weather, calibration, agent reports). They
+// do NOT get the expensive cross-data / compute tools: convergences,
+// posture scores, shadow-fleet analysis, chokepoint scenarios, sanctions
+// wargames, regime-shift detection, precursor analogs, actor-network
+// expansion. Those carry meaningful Anthropic-token and compute cost
+// that would burn freeloader spend; they ship as Pro+ value.
+//
+// The allow-list is intentionally explicit (not a deny-list) so any
+// future tool added to CLAUDE_TOOLS defaults to Pro+ — opt-in for
+// Citizens, not opt-out.
+export const CITIZEN_AI_TOOLS: ReadonlySet<string> = new Set([
+  'query_vessels',
+  'query_aircraft',
+  'query_conflicts',
+  'query_refineries',
+  'query_mines',
+  'query_power_plants',
+  'query_pipelines',
+  'query_airports',
+  'query_ports',
+  'query_weather',
+  'query_agent_reports',
+  'query_calibration',
+  'query_entities',
+]);
+
+export function toolsForTier(tier: Tier): Anthropic.Tool[] {
+  if (tier === 'citizen') {
+    return CLAUDE_TOOLS.filter(t => CITIZEN_AI_TOOLS.has(t.name));
+  }
+  return CLAUDE_TOOLS;
 }
 
 // ─── Claude Tool Definitions ───────────────────────────────────
