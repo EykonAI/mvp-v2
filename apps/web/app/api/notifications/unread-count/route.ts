@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, getServerSupabase } from '@/lib/auth/session';
 
-// GET /api/notifications/unread-count — last-24-h fire count for the
-// authenticated user. Powers the bell-glyph badge in the top-nav.
+// GET /api/notifications/unread-count — bell-badge count.
 //
-// Live as of PR 6 (cheap cron starts writing user_notification_log).
-// Wire shape and Cache-Control headers were stable from PR 2; the
-// only swap here is the count source.
+// Semantics:
+//   count = fires with fired_at > MAX(last_notifications_seen_at,
+//                                     now - 24 h).
+//
+// • A user who clicks the bell sets last_notifications_seen_at = NOW()
+//   via POST /api/notifications/mark-seen (migration 030). The next
+//   poll then reads zero until a new fire lands.
+// • A user who has never clicked the bell (NULL seen_at) gets the
+//   legacy "last 24 h" behaviour — no regression on pre-existing rows.
+// • A user who clicked > 24 h ago is still capped at the 24-h window
+//   so the badge doesn't surface a multi-week backlog as one number.
 
 export const dynamic = 'force-dynamic';
 
@@ -17,11 +24,24 @@ export async function GET(_req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
 
   const supabase = getServerSupabase();
-  const since = new Date(Date.now() - WINDOW_HOURS * 60 * 60_000).toISOString();
+
+  const { data: profile } = await supabase
+    .from('user_profiles')
+    .select('last_notifications_seen_at')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  const cutoff24h = Date.now() - WINDOW_HOURS * 60 * 60_000;
+  const seenAtMs = profile?.last_notifications_seen_at
+    ? new Date(profile.last_notifications_seen_at).getTime()
+    : 0;
+  const sinceMs = Math.max(cutoff24h, Number.isFinite(seenAtMs) ? seenAtMs : 0);
+  const since = new Date(sinceMs).toISOString();
+
   const { count, error } = await supabase
     .from('user_notification_log')
     .select('id', { count: 'exact', head: true })
-    .gte('fired_at', since);
+    .gt('fired_at', since);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

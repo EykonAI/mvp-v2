@@ -74,15 +74,21 @@ export default function NotificationBell() {
   const badgeColor =
     count >= AMBER_THRESHOLD ? 'var(--amber)' : count > 0 ? 'var(--teal)' : null;
 
-  // When already on /notif, clicking the bell would be a no-op
-  // Link to the same route. Intercept the click and either scroll
-  // the recent-fires section into view (if rendered) or do a soft
-  // route replace to add ?filter=recent so the section appears.
+  // Click always marks the bell "seen" so the badge clears, regardless
+  // of where the user is. Optimistic local clear keeps the UI snappy
+  // before the POST round-trips; if the POST fails the next 30 s poll
+  // will re-fetch the truth.
   //
-  // Always pulse the section's outline regardless of scroll state so
-  // the user gets unambiguous visual feedback — scrollIntoView alone
-  // is a silent no-op when the target is already in viewport.
+  // When already on /notif, also scroll + pulse the recent-fires
+  // section (scrollIntoView alone is a silent no-op when the section
+  // is already in viewport).
   const onClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (count > 0) {
+      setCount(0);
+      void fetch('/api/notifications/mark-seen', { method: 'POST' }).catch(() => {
+        // Swallow — the poll will reconcile.
+      });
+    }
     if (pathname !== '/notif') return; // let Link handle the nav
     const el = document.getElementById('recent-fires');
     if (el) {
