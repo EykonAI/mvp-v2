@@ -140,7 +140,7 @@ export default async function BillingPage() {
           marginTop: 20,
         }}
       >
-        Need a VAT invoice, a refund inside the 14/30-day window, or help
+        Need a VAT invoice, a refund inside the 14-day window, or help
         switching from crypto to fiat? Reply to{' '}
         <a href="mailto:support@eykon.ai" style={{ color: 'var(--teal)' }}>
           support@eykon.ai
