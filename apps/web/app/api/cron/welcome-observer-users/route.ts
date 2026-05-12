@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
   // function over its time budget — the next run picks up the rest.
   const { data: candidates, error } = await admin
     .from('user_profiles')
-    .select('id, email, full_name, persona')
+    .select('id, email, display_name, persona')
     .is('welcome_email_sent_at', null)
     .limit(100);
 
@@ -126,7 +126,7 @@ export async function POST(req: NextRequest) {
 
       const persona = (profile.persona as string | null) ?? '';
       const personaPhrase = PERSONA_PHRASES[persona] ?? '';
-      const firstName = firstNameFromFull(profile.full_name as string | null);
+      const firstName = firstNameFromFull(profile.display_name as string | null);
 
       const send = await sendObserverWelcome({
         to,
