@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
   // function over its time budget — the next run picks up the rest.
   const { data: candidates, error } = await admin
     .from('user_profiles')
-    .select('id, email, display_name, persona')
+    .select('id, email, display_name')
     .is('welcome_email_sent_at', null)
     .limit(100);
 
@@ -124,15 +124,19 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const persona = (profile.persona as string | null) ?? '';
-      const personaPhrase = PERSONA_PHRASES[persona] ?? '';
+      // Persona personalization is deliberate scope-out for now: persona
+      // is stored client-side only (localStorage `eykon.persona`) and is
+      // not persisted to user_profiles, so the cron has no per-user value
+      // to read. The welcome-email template handles an empty personaPhrase
+      // gracefully — the sentence reads naturally without the persona
+      // clause. Persona persistence is a Phase-2 enhancement.
       const firstName = firstNameFromFull(profile.display_name as string | null);
 
       const send = await sendObserverWelcome({
         to,
         userId: profile.id as string,
         firstName,
-        personaPhrase,
+        personaPhrase: '',
       });
 
       if (send.state === 'error') {
@@ -151,7 +155,7 @@ export async function POST(req: NextRequest) {
       // PostHog event — fires once per user lifetime by construction.
       void captureServer(profile.id as string, {
         event: 'welcome_email_sent',
-        persona: persona || null,
+        persona: null,
         had_first_name: !!firstName,
         deferred_from_quiet_hours: false,
       });
