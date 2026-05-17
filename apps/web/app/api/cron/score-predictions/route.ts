@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
+import { resolveBySource, type PredictionRow } from '@/lib/predictions/resolvers';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 180;
@@ -8,8 +9,14 @@ export const maxDuration = 180;
 /**
  * Score-predictions · hourly.
  * Finds predictions_register rows whose resolves_at ≤ now but have
- * no prediction_outcomes row yet, scores them, and materialises the
+ * no prediction_outcomes row yet, dispatches each to its per-source
+ * resolver (PR-CAL-5), scores the result, and materialises the
  * aggregate into calibration_summary.
+ *
+ * Per-source resolvers live in lib/predictions/resolvers/*.ts. A
+ * resolver returning null means "data not yet available, retry on the
+ * next tick" — the row stays in the unscored pool until it resolves
+ * or the operator intervenes.
  */
 export async function POST(req: NextRequest) {
   const unauth = requireCronSecret(req);
@@ -20,7 +27,7 @@ export async function POST(req: NextRequest) {
 
   const { data: pending, error } = await supabase
     .from('predictions_register')
-    .select('id, feature, predicted_distribution, target_observable, resolves_at, context, persona, prediction_outcomes(prediction_id)')
+    .select('id, feature, source, predicted_distribution, target_observable, resolves_at, issued_at, context, persona, prediction_outcomes(prediction_id)')
     .lte('resolves_at', now.toISOString())
     .limit(500);
 
@@ -28,10 +35,15 @@ export async function POST(req: NextRequest) {
 
   const toScore = (pending ?? []).filter((r: any) => !r.prediction_outcomes || r.prediction_outcomes.length === 0);
   const writes: any[] = [];
+  let deferred = 0;
 
   for (const r of toScore) {
-    const observed = await resolveObservable(r, supabase);
-    if (observed == null) continue;
+    const resolution = await resolveBySource(r as PredictionRow, supabase);
+    if (resolution == null) {
+      deferred++;
+      continue;
+    }
+    const observed = resolution.observed;
     const predicted = Number((r.predicted_distribution as any)?.mean ?? 0);
     const brier = (predicted - observed) ** 2;
     const logLoss = -Math.log(Math.max(1e-6, 1 - Math.abs(predicted - observed)));
@@ -43,6 +55,7 @@ export async function POST(req: NextRequest) {
       brier: round3(brier),
       log_loss: round3(logLoss),
       calibration_bin: bin,
+      resolution_source_url: resolution.source_url,
     });
   }
 
@@ -53,14 +66,7 @@ export async function POST(req: NextRequest) {
   // Materialise the aggregate into calibration_summary.
   await materialiseSummary(supabase);
 
-  return NextResponse.json({ ok: true, scored: writes.length });
-}
-
-async function resolveObservable(_row: any, _supabase: any): Promise<number | null> {
-  // In v1 we stub the observable lookup — upgrade to a per-feature resolver
-  // as the scoring pipeline hardens. For now return a deterministic fake so
-  // the Prediction Register starts populating with numbers.
-  return 0.5;
+  return NextResponse.json({ ok: true, scored: writes.length, deferred });
 }
 
 async function materialiseSummary(supabase: any) {
