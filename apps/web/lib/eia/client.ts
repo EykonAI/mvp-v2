@@ -42,12 +42,15 @@ export async function fetchEiaWeeklyStocks(opts: {
 }): Promise<EiaObservation[]> {
   const length = opts.length ?? 12;
   const url = new URL(`${EIA_BASE}/petroleum/stoc/wstk/data/`);
+  // EIA v2's query parser requires explicit numeric indices for nested
+  // arrays — `data[]`, `sort[][column]` etc. all reject with HTTP 400.
+  // Single-level arrays like `facets[series][]` are accepted.
   url.searchParams.set('api_key', opts.apiKey);
   url.searchParams.set('frequency', 'weekly');
-  url.searchParams.append('data[]', 'value');
+  url.searchParams.set('data[0]', 'value');
   url.searchParams.append('facets[series][]', opts.seriesId);
-  url.searchParams.append('sort[][column]', 'period');
-  url.searchParams.append('sort[][direction]', 'desc');
+  url.searchParams.set('sort[0][column]', 'period');
+  url.searchParams.set('sort[0][direction]', 'desc');
   url.searchParams.set('offset', '0');
   url.searchParams.set('length', String(length));
 
@@ -56,7 +59,17 @@ export async function fetchEiaWeeklyStocks(opts: {
     headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
   });
   if (!res.ok) {
-    throw new Error(`EIA v2: HTTP ${res.status} on ${url.pathname}`);
+    // Capture the EIA error body so 4xx triage doesn't require a code change.
+    // Strip the api_key from the path before surfacing — never echo secrets
+    // back into the cron's JSON response.
+    let detail = '';
+    try {
+      const body = await res.text();
+      detail = body ? ` — ${body.slice(0, 400)}` : '';
+    } catch {
+      // ignore
+    }
+    throw new Error(`EIA v2: HTTP ${res.status} on ${url.pathname}${detail}`);
   }
 
   const body = (await res.json()) as EiaV2Response;
