@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import WelcomeGreeting from '@/components/WelcomeGreeting';
 import NotificationBell from '@/components/NotificationBell';
+import CalibrationBadge from '@/components/CalibrationBadge';
 
 interface TopNavProps {
   chatOpen?: boolean;
@@ -119,6 +120,12 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
         />
         Live
       </span>
+
+      {/* Persistent Calibration trust badge — PR-CAL-BADGE.
+          Lives in the left zone after Live so it occupies negative
+          space between the brand-info group and the right tab cluster
+          without disturbing the chat-panel-width alignment below. */}
+      <CalibrationBadge />
 
       {/* Right-side tab cluster — width matches the AI Chat panel
           column so GLOBE's left edge sits directly above the panel's
