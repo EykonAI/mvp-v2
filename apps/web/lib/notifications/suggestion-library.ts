@@ -6,12 +6,19 @@ import type { DataBucket } from './tools';
 // builder consumes a Suggestion via its `prefill` prop and lands on
 // the right mode tab with the config already filled in.
 //
+// PR 1 honesty pass (2026-05-23): the library was pruned from 55 to
+// 28 entries. Suggestions whose copy promised capabilities the
+// evaluator cannot yet fulfil (count-over-window aggregation, AIS
+// gap detection, anomaly_flags / precursor_library / weather
+// buckets, per-rule geofence, cross-feed entity linking) were
+// removed. Surviving entries were relabeled where the copy
+// over-promised on what the evaluator can actually do. PR 9
+// (suggestion library v2) refills the library once PRs 2-8 add the
+// missing primitives.
+//
 // IMPORTANT: every config below MUST round-trip cleanly through the
 // rule builder + API. Tool ids must exist in SINGLE_EVENT_TOOLS;
-// bucket names must be in DATA_BUCKETS. Brief examples that don't
-// have a SQL evaluator (precursor library, supervisor convergences,
-// agent reports) are encoded as outcome_ai or cross_data_ai so the
-// AI cron handles them via Claude.
+// bucket names must be in DATA_BUCKETS.
 
 export type SuggestionRuleType =
   | 'single_event'
@@ -73,7 +80,7 @@ const ANALYST: Suggestion[] = [
   },
   {
     id: 'analyst-refinery-status',
-    title: 'Refinery in a sanctioned country comes online or offline',
+    title: 'Refinery ingestion event in a sanctioned country',
     config: {
       rule_type: 'single_event',
       tool: 'refineries',
@@ -82,7 +89,7 @@ const ANALYST: Suggestion[] = [
   },
   {
     id: 'analyst-power-outage-500mw',
-    title: 'Power plant >500 MW goes dark in a pinned country',
+    title: 'Power-plant ingestion event ≥500 MW (country filter optional)',
     config: {
       rule_type: 'single_event',
       tool: 'power_plants',
@@ -90,112 +97,25 @@ const ANALYST: Suggestion[] = [
     },
   },
   {
-    id: 'analyst-multi-air-ais-gap',
-    title: 'Aircraft activity uptick AND AIS coverage drop in the same theatre within 6 h',
-    config: {
-      rule_type: 'multi_event',
-      predicates: [
-        { tool: 'aircraft_positions', filters: { country: '', min_count: 30 } },
-        { tool: 'vessel_positions', filters: { min_gap_hours: 6, vessel_class: '' } },
-      ],
-      window_hours: 6,
-    },
-  },
-  {
-    id: 'analyst-multi-conflict-cluster',
-    title: '≥2 conflict events of "battle" type within 6 h in the same admin-1 region',
-    config: {
-      rule_type: 'multi_event',
-      predicates: [
-        { tool: 'conflict_events', filters: { min_fatalities: 0, country: '', event_type: 'battle' } },
-        { tool: 'conflict_events', filters: { min_fatalities: 0, country: '', event_type: 'battle' } },
-      ],
-      window_hours: 6,
-    },
-  },
-  {
     id: 'analyst-outcome-hormuz',
-    title: 'Anything that could elevate the Hormuz posture score by ≥0.1 in the next 24 h',
+    title: 'Hormuz tension: qualitative reads from conflict + maritime feeds',
     config: {
       rule_type: 'outcome_ai',
       outcome_statement:
-        'Anything that could elevate the Hormuz posture score by ≥0.1 in the next 24 hours.',
-    },
-  },
-  {
-    id: 'analyst-cross-precursor',
-    title: 'Multi-domain pattern matching the precursor library for an inter-state opening',
-    config: {
-      rule_type: 'cross_data_ai',
-      outcome_statement:
-        'Multi-domain pattern matching the precursor library for an inter-state conflict opening — fires on ≥0.75 cosine against any labelled historical episode.',
-      buckets: ['Conflict', 'Maritime', 'Air'],
-    },
-  },
-  {
-    id: 'analyst-cross-anomaly-of-anomalies',
-    title: 'Anomaly-of-anomalies: ≥3 anomaly flags within 24 h in the same theatre',
-    config: {
-      rule_type: 'cross_data_ai',
-      outcome_statement:
-        'Anomaly-of-anomalies: ≥3 anomaly flags within 24 hours in the same theatre, regardless of feed.',
-      buckets: ['Conflict', 'Maritime', 'Air', 'EnergyRefineries'],
+        'Material elevation in the Hormuz tension picture, judged qualitatively from recent conflict and maritime events.',
+      buckets: ['Conflict', 'Maritime'],
     },
   },
 ];
 
 const JOURNALIST: Suggestion[] = [
   {
-    id: 'journ-first-conflict-cold-region',
-    title: 'First confirmed conflict event in a country with none for 6+ months',
-    config: {
-      rule_type: 'outcome_ai',
-      outcome_statement:
-        'First confirmed conflict event in a country that has had none in the previous 6+ months.',
-      buckets: ['Conflict'],
-    },
-  },
-  {
     id: 'journ-refinery-sanctioned',
-    title: 'New refinery commissioning in a sanctioned country',
+    title: 'Refinery ingestion event ≥10,000 bpd in a sanctioned country',
     config: {
       rule_type: 'single_event',
       tool: 'refineries',
       filters: { country: '', min_capacity_bpd: 10000 },
-    },
-  },
-  {
-    id: 'journ-vessels-going-dark',
-    title: 'A previously-tracked sub-fleet of vessels suddenly going dark (≥3, ≥12 h gap)',
-    config: {
-      rule_type: 'single_event',
-      tool: 'vessel_positions',
-      filters: { min_gap_hours: 12, vessel_class: '' },
-    },
-  },
-  {
-    id: 'journ-multi-conflict-storm',
-    title: '≥3 conflict events in a single country within 24 h (story-breaking threshold)',
-    config: {
-      rule_type: 'multi_event',
-      predicates: [
-        { tool: 'conflict_events', filters: { min_fatalities: 1, country: '', event_type: '' } },
-        { tool: 'conflict_events', filters: { min_fatalities: 1, country: '', event_type: '' } },
-        { tool: 'conflict_events', filters: { min_fatalities: 1, country: '', event_type: '' } },
-      ],
-      window_hours: 24,
-    },
-  },
-  {
-    id: 'journ-multi-aviation-airspace',
-    title: 'Aviation infrastructure incident AND airspace anomaly in the same admin-1 region',
-    config: {
-      rule_type: 'multi_event',
-      predicates: [
-        { tool: 'aircraft_positions', filters: { country: '', min_count: 5 } },
-        { tool: 'conflict_events', filters: { min_fatalities: 0, country: '', event_type: '' } },
-      ],
-      window_hours: 12,
     },
   },
   {
@@ -207,32 +127,12 @@ const JOURNALIST: Suggestion[] = [
         'Convergence-of-anomalies that suggests a story-worthy escalation (qualitative — model judgement).',
     },
   },
-  {
-    id: 'journ-cross-cyber-kinetic',
-    title: 'Combinations suggesting a coordinated cyber + kinetic operation in the same theatre',
-    config: {
-      rule_type: 'cross_data_ai',
-      outcome_statement:
-        'Combinations of feeds that suggest a coordinated cyber + kinetic operation in the same theatre.',
-      buckets: ['Conflict', 'Air', 'Maritime'],
-    },
-  },
-  {
-    id: 'journ-cross-corroboration',
-    title: 'Same event reported by ≥2 independent feeds within 1 h',
-    config: {
-      rule_type: 'cross_data_ai',
-      outcome_statement:
-        'Multi-source corroboration — same event reported by ≥2 independent feeds within 1 hour, useful for fast verification.',
-      buckets: ['Conflict', 'Maritime', 'Air'],
-    },
-  },
 ];
 
 const DAY_TRADER: Suggestion[] = [
   {
     id: 'trader-refinery-100kbpd',
-    title: 'Refinery outage >100,000 bpd anywhere — fires on detection',
+    title: 'Refinery ingestion event ≥100,000 bpd capacity (any country)',
     config: {
       rule_type: 'single_event',
       tool: 'refineries',
@@ -241,96 +141,32 @@ const DAY_TRADER: Suggestion[] = [
     cooldown_minutes: 60,
   },
   {
-    id: 'trader-tanker-rerouting',
-    title: 'Major tanker re-routing detected (e.g. Suez avoidance)',
-    config: {
-      rule_type: 'single_event',
-      tool: 'vessel_positions',
-      filters: { min_gap_hours: 6, vessel_class: 'tanker' },
-    },
-    cooldown_minutes: 60,
-  },
-  {
-    id: 'trader-mine-halt',
-    title: 'Mine halt at any top-10 lithium / cobalt / copper site',
-    config: {
-      rule_type: 'single_event',
-      tool: 'mines',
-      filters: { commodity: 'Lithium', country: '' },
-    },
-  },
-  {
-    id: 'trader-multi-conflict-tanker',
-    title: 'Conflict near oil infra AND tanker AIS gap in same 200 km radius within 6 h',
-    config: {
-      rule_type: 'multi_event',
-      predicates: [
-        { tool: 'conflict_events', filters: { min_fatalities: 1, country: '', event_type: '' } },
-        { tool: 'vessel_positions', filters: { min_gap_hours: 6, vessel_class: 'tanker' } },
-      ],
-      window_hours: 6,
-    },
-    cooldown_minutes: 120,
-  },
-  {
-    id: 'trader-multi-power-heatwave',
-    title: 'Power plant trip AND heatwave in same grid region within 12 h',
-    config: {
-      rule_type: 'multi_event',
-      predicates: [
-        { tool: 'power_plants', filters: { country: '', min_capacity_mw: 500 } },
-        { tool: 'conflict_events', filters: { min_fatalities: 0, country: '', event_type: '' } },
-      ],
-      window_hours: 12,
-    },
-  },
-  {
     id: 'trader-outcome-wti',
-    title: 'Anything that could move WTI / Brent by ≥$2/bbl in the next 24 h',
+    title: 'Conditions that could materially move oil prices (qualitative, model-judged)',
     config: {
       rule_type: 'outcome_ai',
       outcome_statement:
-        'Anything that could move WTI or Brent by at least $2/bbl in the next 24 hours.',
+        'Conditions in conflict, maritime, refinery, and pipeline feeds that could materially affect oil-price direction (qualitative — model has no price feed).',
       buckets: ['Conflict', 'Maritime', 'EnergyRefineries', 'EnergyPipelines'],
     },
     cooldown_minutes: 120,
-  },
-  {
-    id: 'trader-cross-oil-spike',
-    title: 'Cross-asset convergence matching historical oil-spike precursors',
-    config: {
-      rule_type: 'cross_data_ai',
-      outcome_statement:
-        'Cross-asset convergence matching historical oil-spike precursors (conflict + maritime + refinery within a single 48-hour window).',
-      buckets: ['Conflict', 'Maritime', 'EnergyRefineries'],
-    },
-    cooldown_minutes: 240,
   },
 ];
 
 const COMMODITIES: Suggestion[] = [
   {
-    id: 'comm-mine-watchlist',
-    title: 'Mine offline at any site producing a watchlist mineral (lithium, cobalt, REE…)',
-    config: {
-      rule_type: 'single_event',
-      tool: 'mines',
-      filters: { commodity: 'Lithium', country: '' },
-    },
-  },
-  {
     id: 'comm-chokepoint-closure',
-    title: 'Major chokepoint closure scenario triggered (Hormuz, Malacca, Suez, Bab-el-Mandeb)',
+    title: 'Chokepoint disruption signals (Hormuz, Malacca, Suez, Bab-el-Mandeb) — qualitative',
     config: {
       rule_type: 'cross_data_ai',
       outcome_statement:
-        'Major chokepoint closure scenario triggered at any of Hormuz, Malacca, Suez, or Bab-el-Mandeb.',
-      buckets: ['Maritime', 'Conflict', 'Weather'],
+        'Maritime + conflict signals indicating disruption risk at any of Hormuz, Malacca, Suez, or Bab-el-Mandeb (qualitative — no weather data feed yet).',
+      buckets: ['Maritime', 'Conflict'],
     },
   },
   {
     id: 'comm-refinery-turnaround',
-    title: 'Refinery turnaround announcement in a top-3 producing country',
+    title: 'Refinery ingestion event ≥50,000 bpd in a top-3 producing country',
     config: {
       rule_type: 'single_event',
       tool: 'refineries',
@@ -338,35 +174,23 @@ const COMMODITIES: Suggestion[] = [
     },
   },
   {
-    id: 'comm-multi-mine-transport',
-    title: 'Mine outage AND transport-corridor disruption affecting same supply chain (7 d)',
-    config: {
-      rule_type: 'multi_event',
-      predicates: [
-        { tool: 'mines', filters: { commodity: '', country: '' } },
-        { tool: 'vessel_positions', filters: { min_gap_hours: 24, vessel_class: '' } },
-      ],
-      window_hours: 168,
-    },
-  },
-  {
     id: 'comm-outcome-eu-semiconductors',
-    title: 'Conditions threatening EU semiconductor mineral supply (Ga, Ge, In, REEs)',
+    title: 'Threats to EU critical-mineral supply (qualitative; conflict + maritime feeds)',
     config: {
       rule_type: 'outcome_ai',
       outcome_statement:
-        'Conditions threatening EU semiconductor mineral supply (gallium, germanium, indium, rare earths).',
-      buckets: ['Mining', 'Conflict', 'Maritime'],
+        'Conditions in conflict and maritime feeds that could threaten EU critical-mineral supply chains (qualitative — mining feed is frozen).',
+      buckets: ['Conflict', 'Maritime'],
     },
   },
   {
     id: 'comm-cross-supply-chain',
-    title: 'Convergence of mining + maritime + conflict signals affecting a critical-mineral chain',
+    title: 'Maritime + conflict convergence affecting critical-mineral chains',
     config: {
       rule_type: 'cross_data_ai',
       outcome_statement:
-        'Convergence of mining + maritime + conflict signals affecting a critical-mineral supply chain.',
-      buckets: ['Mining', 'Maritime', 'Conflict'],
+        'Convergence of maritime and conflict signals affecting critical-mineral supply chains (mining feed currently frozen).',
+      buckets: ['Maritime', 'Conflict'],
     },
   },
 ];
@@ -374,7 +198,7 @@ const COMMODITIES: Suggestion[] = [
 const NGO: Suggestion[] = [
   {
     id: 'ngo-conflict-50f-watchlist',
-    title: 'Conflict event with ≥50 fatalities in a watchlist region',
+    title: 'Conflict event ≥50 fatalities (country filter optional)',
     config: {
       rule_type: 'single_event',
       tool: 'conflict_events',
@@ -383,7 +207,7 @@ const NGO: Suggestion[] = [
   },
   {
     id: 'ngo-power-crisis-zone',
-    title: 'Power plant offline in an active humanitarian-crisis zone for >2 h',
+    title: 'Power-plant ingestion event ≥100 MW in a crisis country',
     config: {
       rule_type: 'single_event',
       tool: 'power_plants',
@@ -391,46 +215,23 @@ const NGO: Suggestion[] = [
     },
   },
   {
-    id: 'ngo-weather-conflict-zone',
-    title: 'Major weather event over an active conflict zone',
-    config: {
-      rule_type: 'cross_data_ai',
-      outcome_statement:
-        'A major weather event (storm, flood, drought) over an active conflict zone.',
-      buckets: ['Weather', 'Conflict'],
-    },
-  },
-  {
-    id: 'ngo-multi-high-fatality-cluster',
-    title: 'Multiple high-fatality events (≥3 with ≥10 fatalities each) in same country, 7 d',
-    config: {
-      rule_type: 'multi_event',
-      predicates: [
-        { tool: 'conflict_events', filters: { min_fatalities: 10, country: '', event_type: '' } },
-        { tool: 'conflict_events', filters: { min_fatalities: 10, country: '', event_type: '' } },
-        { tool: 'conflict_events', filters: { min_fatalities: 10, country: '', event_type: '' } },
-      ],
-      window_hours: 168,
-    },
-  },
-  {
     id: 'ngo-outcome-displacement',
-    title: 'Conditions that could displace ≥10,000 people in a watchlist region',
+    title: 'Conditions that could trigger mass displacement (qualitative)',
     config: {
       rule_type: 'outcome_ai',
       outcome_statement:
-        'Conditions that could displace at least 10,000 people in a watchlist region.',
-      buckets: ['Conflict', 'Weather', 'EnergyPower'],
+        'Conditions in conflict and power feeds that could displace tens of thousands of people in a watchlist region (qualitative — no weather data feed yet).',
+      buckets: ['Conflict', 'EnergyPower'],
     },
   },
   {
     id: 'ngo-cross-aid-corridor',
-    title: 'Aid-corridor risk score deteriorating ≥0.2 across maritime + conflict + weather',
+    title: 'Aid-corridor risk signals (maritime + conflict feeds)',
     config: {
       rule_type: 'cross_data_ai',
       outcome_statement:
-        'Aid-corridor risk score deteriorating by 0.2 or more across maritime, conflict, and weather feeds.',
-      buckets: ['Maritime', 'Conflict', 'Weather'],
+        'Multi-feed risk signals affecting humanitarian aid corridors across maritime and conflict feeds (qualitative — no weather data feed yet).',
+      buckets: ['Maritime', 'Conflict'],
     },
   },
 ];
@@ -438,7 +239,7 @@ const NGO: Suggestion[] = [
 const CITIZEN: Suggestion[] = [
   {
     id: 'cit-conflict-residence',
-    title: 'Conflict event in my country of residence',
+    title: 'Any conflict event (country filter optional)',
     config: {
       rule_type: 'single_event',
       tool: 'conflict_events',
@@ -446,17 +247,8 @@ const CITIZEN: Suggestion[] = [
     },
   },
   {
-    id: 'cit-major-weather',
-    title: 'Major weather event in my region (storm, heatwave, flood)',
-    config: {
-      rule_type: 'outcome_ai',
-      outcome_statement: 'Major weather event in my region — storm, heatwave, or flood warning.',
-      buckets: ['Weather'],
-    },
-  },
-  {
     id: 'cit-air-disruption',
-    title: 'Significant air-traffic disruption in my country',
+    title: 'Aircraft activity uptick (≥15 distinct aircraft in window; registration country)',
     config: {
       rule_type: 'single_event',
       tool: 'aircraft_positions',
@@ -465,23 +257,11 @@ const CITIZEN: Suggestion[] = [
   },
   {
     id: 'cit-power-grid',
-    title: 'Power-grid event affecting >100,000 customers in my region',
+    title: 'Power-plant ingestion event ≥200 MW (country filter optional)',
     config: {
       rule_type: 'single_event',
       tool: 'power_plants',
       filters: { country: '', min_capacity_mw: 200 },
-    },
-  },
-  {
-    id: 'cit-multi-incident-cluster',
-    title: 'Multiple incidents within 50 km of my home in 48 h',
-    config: {
-      rule_type: 'multi_event',
-      predicates: [
-        { tool: 'conflict_events', filters: { min_fatalities: 0, country: '', event_type: '' } },
-        { tool: 'conflict_events', filters: { min_fatalities: 0, country: '', event_type: '' } },
-      ],
-      window_hours: 48,
     },
   },
   {
@@ -495,29 +275,20 @@ const CITIZEN: Suggestion[] = [
   },
   {
     id: 'cit-cross-watchlist',
-    title: 'Watchlist alerts personalised to the regions and topics I track',
+    title: 'Multi-feed alerts across conflict + power feeds (qualitative)',
     config: {
       rule_type: 'cross_data_ai',
       outcome_statement:
-        'Watchlist alerts personalised to the regions and topics I track in the AI Chat history.',
-      buckets: ['Conflict', 'Weather', 'EnergyPower'],
+        'Multi-feed alerts across conflict and power feeds, qualitatively assessed (no per-user topic personalisation yet).',
+      buckets: ['Conflict', 'EnergyPower'],
     },
   },
 ];
 
 const CORPORATE: Suggestion[] = [
   {
-    id: 'corp-sanctions-update',
-    title: 'Sanctions-list update affecting my registered sector or counterparty list',
-    config: {
-      rule_type: 'outcome_ai',
-      outcome_statement:
-        'Sanctions-list update affecting my registered sector or counterparty list.',
-    },
-  },
-  {
     id: 'corp-conflict-near-facility',
-    title: 'Conflict event within X km of any registered facility',
+    title: 'Conflict event (country filter optional)',
     config: {
       rule_type: 'single_event',
       tool: 'conflict_events',
@@ -525,18 +296,8 @@ const CORPORATE: Suggestion[] = [
     },
   },
   {
-    id: 'corp-vessel-sanctioned-port',
-    title: 'Vessel of interest entering a sanctions-denied port',
-    config: {
-      rule_type: 'cross_data_ai',
-      outcome_statement:
-        'A vessel on my watchlist entering a sanctions-denied port.',
-      buckets: ['Maritime', 'MaritimeInfra'],
-    },
-  },
-  {
     id: 'corp-critical-infra-outage',
-    title: 'Critical infrastructure outage in a registered city of operation',
+    title: 'Power-plant + conflict events co-occurring (country filter optional)',
     config: {
       rule_type: 'multi_event',
       predicates: [
@@ -557,22 +318,12 @@ const CORPORATE: Suggestion[] = [
   },
   {
     id: 'corp-cross-operations-footprint',
-    title: 'Convergence affecting my operations footprint — geo-fenced + sector-tagged signal',
+    title: 'Convergence across conflict + maritime + energy feeds (qualitative)',
     config: {
       rule_type: 'cross_data_ai',
       outcome_statement:
-        'Convergence affecting my operations footprint — geo-fenced and sector-tagged composite signal.',
+        'Convergence of conflict, maritime, power, and refinery signals (qualitative; per-rule geofence and sector matching not yet implemented).',
       buckets: ['Conflict', 'Maritime', 'EnergyPower', 'EnergyRefineries'],
-    },
-  },
-  {
-    id: 'corp-cross-counterparty',
-    title: 'Counterparty exposure: a watchlist counterparty in a multi-feed event',
-    config: {
-      rule_type: 'cross_data_ai',
-      outcome_statement:
-        'A watchlist counterparty implicated in a multi-feed event spanning vessels, sanctions, and agent reports.',
-      buckets: ['Maritime', 'Conflict'],
     },
   },
 ];
@@ -595,61 +346,31 @@ export const PERSONA_SUGGESTIONS: Record<PersonaId, Suggestion[]> = {
 export const CROSS_DATA_SUGGESTIONS: Suggestion[] = [
   {
     id: 'xd-conflict-refinery-maritime',
-    title: 'Convergence of conflict + refinery + maritime signals in same theatre within 24 h',
+    title: 'Co-occurring signals across conflict + refinery + maritime feeds (qualitative)',
     config: {
       rule_type: 'cross_data_ai',
       outcome_statement:
-        'Convergence of conflict, refinery, and maritime signals in the same theatre within a 24-hour window.',
+        'Co-occurring signals in conflict, refinery, and maritime feeds across recent events (qualitative; per-theatre geofence not yet enforced).',
       buckets: ['Conflict', 'EnergyRefineries', 'Maritime'],
     },
   },
   {
-    id: 'xd-precursor-cosine',
-    title: 'Precursor-library cosine ≥0.75 against any historical episode',
-    config: {
-      rule_type: 'cross_data_ai',
-      outcome_statement:
-        'Precursor-library cosine ≥0.75 against any labelled historical episode (multi-domain by construction).',
-      buckets: ['Conflict', 'Maritime', 'Air', 'EnergyRefineries'],
-    },
-  },
-  {
-    id: 'xd-anomaly-of-anomalies',
-    title: 'Anomaly-of-anomalies: ≥3 anomaly flags in 24 h in same region across distinct feeds',
-    config: {
-      rule_type: 'cross_data_ai',
-      outcome_statement:
-        'Anomaly-of-anomalies: at least 3 anomaly flags within 24 hours in the same region across distinct feeds.',
-      buckets: ['Conflict', 'Maritime', 'Air', 'EnergyPower'],
-    },
-  },
-  {
-    id: 'xd-corroboration',
-    title: 'Cross-feed corroboration: same event reported by ≥2 independent feeds within 1 h',
-    config: {
-      rule_type: 'cross_data_ai',
-      outcome_statement:
-        'Cross-feed corroboration: the same event reported by at least 2 independent feeds within 1 hour.',
-      buckets: ['Conflict', 'Maritime', 'Air'],
-    },
-  },
-  {
     id: 'xd-chokepoint-risk',
-    title: 'Composite chokepoint risk: maritime + conflict + weather convergence',
+    title: 'Chokepoint risk: maritime + conflict convergence (qualitative)',
     config: {
       rule_type: 'cross_data_ai',
       outcome_statement:
-        'Composite chokepoint risk: maritime, conflict, and weather convergence at any of the 26 chokepoints / regional seas.',
-      buckets: ['Maritime', 'Conflict', 'Weather'],
+        'Maritime and conflict convergence at any major chokepoint or regional sea (qualitative — no weather data feed yet).',
+      buckets: ['Maritime', 'Conflict'],
     },
   },
   {
     id: 'xd-playbook',
-    title: 'Multi-domain pattern matching a known geopolitical playbook',
+    title: 'Multi-domain pattern signals across conflict + maritime + air + refinery (qualitative)',
     config: {
       rule_type: 'cross_data_ai',
       outcome_statement:
-        'Multi-domain pattern matching a known geopolitical playbook (model-evaluated).',
+        'Multi-domain pattern signals across conflict, maritime, air, and refinery feeds (qualitative — no playbook library queried).',
       buckets: ['Conflict', 'Maritime', 'Air', 'EnergyRefineries'],
     },
   },
