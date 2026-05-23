@@ -71,6 +71,10 @@ export function RuleBuilder({ persona, onCreated, onCancel, prefill }: RuleBuild
   // AI rules state
   const [outcomeStatement, setOutcomeStatement] = useState(initial.outcomeStatement);
   const [aiBuckets, setAiBuckets] = useState<DataBucket[]>(initial.aiBuckets);
+  // PR 9: optional per-rule region narrowing carried through from
+  // a suggestion's `country` field. No UI input yet — a follow-up
+  // PR adds the "Geographic scope" section per brief §6.6.
+  const [aiCountry, setAiCountry] = useState<string>(initial.aiCountry);
 
   // Shared state
   const [name, setName] = useState(initial.name);
@@ -132,7 +136,11 @@ export function RuleBuilder({ persona, onCreated, onCancel, prefill }: RuleBuild
               predicates: predicates.map(p => ({ tool: p.tool, filters: p.filters })),
               window_hours: windowHours,
             }
-          : { outcome_statement: outcomeStatement.trim(), buckets: aiBuckets };
+          : {
+              outcome_statement: outcomeStatement.trim(),
+              buckets: aiBuckets,
+              ...(aiCountry.trim() ? { country: aiCountry.trim() } : {}),
+            };
       const r = await fetch('/api/notifications/rules', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -669,6 +677,8 @@ interface DerivedPrefill {
   windowHours: number;
   outcomeStatement: string;
   aiBuckets: DataBucket[];
+  /** PR 9: pre-baked region narrowing from the suggestion. No UI yet. */
+  aiCountry: string;
   name: string;
   cooldown: number;
 }
@@ -694,6 +704,7 @@ function derivePrefill(suggestion: Suggestion | undefined): DerivedPrefill {
     windowHours: MULTI_EVENT_DEFAULT_WINDOW_HOURS,
     outcomeStatement: '',
     aiBuckets: [],
+    aiCountry: '',
     name: '',
     cooldown: DEFAULT_COOLDOWN_MINUTES,
   };
@@ -730,6 +741,7 @@ function derivePrefill(suggestion: Suggestion | undefined): DerivedPrefill {
         mode: 'outcome_ai',
         outcomeStatement: cfg.outcome_statement,
         aiBuckets: cfg.buckets ?? [],
+        aiCountry: cfg.country ?? '',
         name,
         cooldown,
       };
@@ -739,6 +751,7 @@ function derivePrefill(suggestion: Suggestion | undefined): DerivedPrefill {
         mode: 'cross_data_ai',
         outcomeStatement: cfg.outcome_statement,
         aiBuckets: cfg.buckets,
+        aiCountry: cfg.country ?? '',
         name,
         cooldown,
       };
