@@ -1,6 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  AGGREGATE_DISTINCT_ROW_CAP,
+  getBucketTable,
   getSingleEventTool,
+  isAggregateMetricSupported,
+  isAggregateThresholdKindSupported,
+  type AggregateConfig,
+  type AggregateThresholdKindSupported,
+  type BucketTableSpec,
   type SingleEventConfig,
   type SingleEventToolId,
   type FilterValue,
@@ -23,7 +30,7 @@ export interface RuleRow {
   id: string;
   user_id: string;
   name: string;
-  rule_type: 'single_event' | 'multi_event' | 'outcome_ai' | 'cross_data_ai';
+  rule_type: 'single_event' | 'multi_event' | 'outcome_ai' | 'cross_data_ai' | 'aggregate';
   config: SingleEventConfig | Record<string, unknown>;
   channel_ids: string[];
   active: boolean;
@@ -189,6 +196,258 @@ export function buildMultiEventFirePayload(
     ruleType: rule.rule_type,
     summary,
     detailLines,
+    rationale: null,
+    firedAtIso,
+  };
+}
+
+// ─── Aggregate evaluator (PR 5) ──────────────────────────────────
+//
+// New rule type that answers "count of X over the last N hours
+// compared to Y exceeds Z" — the canonical example being "+20%
+// change in distinct aircraft over Morocco hour-over-hour". Lives
+// in the cheap (15-min) cron: pure SQL, no Anthropic spend, same
+// cooldown + rate-limit gates as the other cheap rule types.
+//
+// Scope in PR 5:
+//   metric: count_total | count_distinct  (sum / avg deferred)
+//   threshold_kind: absolute_above | absolute_below |
+//                   pct_change_vs_prev_window  (sigma deferred)
+//
+// Filter object honours `country` only (via the bucket's
+// countryColumn). Other filter keys are accepted by the API for
+// forward compatibility but ignored here; a future PR will wire
+// event_type / vessel_class / etc. per-bucket.
+
+export interface AggregateResult {
+  /** True when the threshold check fired. The caller wraps in dispatch. */
+  fired: boolean;
+  /** Metric value for the current window. */
+  current: number;
+  /** Metric value for the prior window — only set when threshold_kind
+   *  requires it (pct_change_vs_prev_window). */
+  previous?: number;
+  /** Echoed from rule.config for logging. */
+  thresholdKind: AggregateThresholdKindSupported;
+  /** Echoed from rule.config for logging. */
+  thresholdValue: number;
+  /** One-line headline for the email subject / summary. */
+  summary: string;
+  /** ~3-6 short bullet lines for the email body. */
+  detailLines: string[];
+}
+
+export async function evaluateAggregateRule(
+  supabase: SupabaseClient,
+  rule: RuleRow,
+): Promise<AggregateResult | null> {
+  const cfg = rule.config as unknown as AggregateConfig;
+  if (!cfg) return null;
+  // Belt-and-suspenders — the API validator gates these at create
+  // time, but a rule could exist from an older row or a manual
+  // SQL insert. Refuse to fire rather than dispatch garbage.
+  if (!isAggregateMetricSupported(cfg.metric)) return null;
+  if (!isAggregateThresholdKindSupported(cfg.threshold_kind)) return null;
+  const meta = getBucketTable(cfg.bucket);
+  if (!meta) return null;
+
+  const windowMs = Number(cfg.window_hours) * 60 * 60_000;
+  if (!Number.isFinite(windowMs) || windowMs <= 0) return null;
+  const now = Date.now();
+  const currentStartIso = new Date(now - windowMs).toISOString();
+  const priorStartIso = new Date(now - 2 * windowMs).toISOString();
+
+  // Step 1 — current-window metric.
+  const current = await computeAggregateMetric(supabase, cfg, meta, currentStartIso, undefined);
+
+  // Step 2 — prior-window metric, only for pct_change.
+  let previous: number | undefined;
+  if (cfg.threshold_kind === 'pct_change_vs_prev_window') {
+    previous = await computeAggregateMetric(supabase, cfg, meta, priorStartIso, currentStartIso);
+  }
+
+  // Step 3 — threshold check.
+  const fired = checkAggregateThreshold(cfg, current, previous);
+  if (!fired) return null;
+
+  return {
+    fired: true,
+    current,
+    previous,
+    thresholdKind: cfg.threshold_kind,
+    thresholdValue: Number(cfg.threshold_value),
+    summary: buildAggregateSummary(cfg, current, previous),
+    detailLines: buildAggregateDetails(cfg, current, previous),
+  };
+}
+
+async function computeAggregateMetric(
+  supabase: SupabaseClient,
+  cfg: AggregateConfig,
+  meta: BucketTableSpec,
+  fromIso: string,
+  beforeIso: string | undefined,
+): Promise<number> {
+  if (cfg.metric === 'count_total') {
+    return countTotalRows(supabase, cfg, meta, fromIso, beforeIso);
+  }
+  // metric === 'count_distinct' (gated by the supported check above)
+  return countDistinctRows(supabase, cfg, meta, fromIso, beforeIso);
+}
+
+async function countTotalRows(
+  supabase: SupabaseClient,
+  cfg: AggregateConfig,
+  meta: BucketTableSpec,
+  fromIso: string,
+  beforeIso: string | undefined,
+): Promise<number> {
+  let q = supabase
+    .from(meta.table)
+    .select('*', { count: 'exact', head: true })
+    .gt(meta.recencyColumn, fromIso);
+  if (beforeIso) q = q.lte(meta.recencyColumn, beforeIso);
+  q = applyAggregateFilters(q, cfg, meta);
+  const { count } = await q;
+  return count ?? 0;
+}
+
+async function countDistinctRows(
+  supabase: SupabaseClient,
+  cfg: AggregateConfig,
+  meta: BucketTableSpec,
+  fromIso: string,
+  beforeIso: string | undefined,
+): Promise<number> {
+  const col = (cfg.distinct_on ?? meta.defaultDistinctColumn ?? '').trim();
+  if (!col) return 0;
+  // Supabase JS has no COUNT(DISTINCT) — fetch up to the row cap and
+  // dedup client-side. Above the cap the result is bounded but
+  // monotone in the true distinct count, so absolute_above /
+  // pct_change still detect the right direction.
+  let q = supabase
+    .from(meta.table)
+    .select(col)
+    .gt(meta.recencyColumn, fromIso);
+  if (beforeIso) q = q.lte(meta.recencyColumn, beforeIso);
+  q = applyAggregateFilters(q, cfg, meta);
+  const { data } = await q.limit(AGGREGATE_DISTINCT_ROW_CAP);
+  // Supabase JS infers the select-result type from the column-string
+  // literal; with a runtime-string col the inference returns an opaque
+  // shape. Cast through unknown to get a plain record we can index.
+  const rows = ((data ?? []) as unknown) as Array<Record<string, unknown>>;
+  const set = new Set<string>();
+  for (const r of rows) {
+    const val = r[col];
+    if (val !== null && val !== undefined) set.add(String(val));
+  }
+  return set.size;
+}
+
+/**
+ * Apply the aggregate rule's filter object to a Supabase query
+ * builder. PR 5 honours only `country` (via meta.countryColumn).
+ * Other keys are reserved for forward compat and ignored.
+ */
+function applyAggregateFilters<T>(
+  q: T,
+  cfg: AggregateConfig,
+  meta: BucketTableSpec,
+): T {
+  const country = typeof cfg.filter?.country === 'string' ? cfg.filter.country.trim() : '';
+  if (country && meta.countryColumn) {
+    // ILIKE handles both ISO-2 and short-name values, matching PR 2.
+    return (q as { ilike: (col: string, pat: string) => T }).ilike(
+      meta.countryColumn,
+      `%${country}%`,
+    );
+  }
+  return q;
+}
+
+function checkAggregateThreshold(
+  cfg: AggregateConfig,
+  current: number,
+  previous: number | undefined,
+): boolean {
+  const tv = Number(cfg.threshold_value);
+  if (!Number.isFinite(tv)) return false;
+  switch (cfg.threshold_kind) {
+    case 'absolute_above':
+      return current > tv;
+    case 'absolute_below':
+      return current < tv;
+    case 'pct_change_vs_prev_window': {
+      if (previous === undefined || previous <= 0) return false;
+      const delta = Math.abs(current - previous) / previous;
+      return delta >= tv;
+    }
+    default:
+      // sigma_above_baseline — gated earlier; defensive fall-through.
+      return false;
+  }
+}
+
+function buildAggregateSummary(
+  cfg: AggregateConfig,
+  current: number,
+  previous: number | undefined,
+): string {
+  const country = cfg.filter?.country?.trim();
+  const scope = country ? ` (${country})` : '';
+  const metricLabel = cfg.metric === 'count_distinct'
+    ? `distinct ${cfg.distinct_on ?? 'rows'}`
+    : 'rows';
+  switch (cfg.threshold_kind) {
+    case 'absolute_above':
+      return `${cfg.bucket}${scope}: ${current} ${metricLabel} > threshold ${cfg.threshold_value} in the last ${cfg.window_hours}h.`;
+    case 'absolute_below':
+      return `${cfg.bucket}${scope}: ${current} ${metricLabel} < threshold ${cfg.threshold_value} in the last ${cfg.window_hours}h.`;
+    case 'pct_change_vs_prev_window': {
+      const prior = previous ?? 0;
+      const direction = current >= prior ? '↑' : '↓';
+      const pct = prior > 0
+        ? `${(Math.abs(current - prior) / prior * 100).toFixed(0)}%`
+        : 'n/a';
+      return `${cfg.bucket}${scope}: ${current} ${metricLabel} now vs ${prior} prior · ${direction} ${pct} change over ${cfg.window_hours}h.`;
+    }
+    default:
+      return `${cfg.bucket}${scope}: aggregate fire (${cfg.threshold_kind}).`;
+  }
+}
+
+function buildAggregateDetails(
+  cfg: AggregateConfig,
+  current: number,
+  previous: number | undefined,
+): string[] {
+  const lines: string[] = [
+    `Bucket: ${cfg.bucket}`,
+    `Metric: ${cfg.metric}${cfg.metric === 'count_distinct' && cfg.distinct_on ? ` on ${cfg.distinct_on}` : ''}`,
+    `Window: last ${cfg.window_hours}h`,
+    `Threshold: ${cfg.threshold_kind} ${cfg.threshold_value}`,
+    `Current count: ${current}`,
+  ];
+  if (previous !== undefined) lines.push(`Previous-window count: ${previous}`);
+  if (cfg.filter?.country) lines.push(`Country filter: ${cfg.filter.country}`);
+  return lines;
+}
+
+/**
+ * Build a FirePayload for an aggregate fire. Mirrors the shape of
+ * buildFirePayload / buildMultiEventFirePayload so the dispatch
+ * layer treats all three rule types the same.
+ */
+export function buildAggregateFirePayload(
+  rule: RuleRow,
+  result: AggregateResult,
+  firedAtIso: string,
+): FirePayload {
+  return {
+    ruleName: rule.name,
+    ruleType: rule.rule_type,
+    summary: result.summary,
+    detailLines: result.detailLines,
     rationale: null,
     firedAtIso,
   };

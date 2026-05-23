@@ -13,7 +13,7 @@ import { APP_URL } from '@/lib/url';
 
 export type NotificationFiredProps = {
   ruleName: string;
-  ruleType: 'single_event' | 'multi_event' | 'outcome_ai' | 'cross_data_ai';
+  ruleType: 'single_event' | 'multi_event' | 'outcome_ai' | 'cross_data_ai' | 'aggregate';
   summary: string;
   detailLines?: string[];
   rationale?: string | null;

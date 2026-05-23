@@ -9,6 +9,11 @@ import {
 import {
   coerceFilters,
   coercePredicate,
+  isAggregatableBucket,
+  isAggregateMetricDeferred,
+  isAggregateMetricSupported,
+  isAggregateThresholdKindDeferred,
+  isAggregateThresholdKindSupported,
   isValidDataBucket,
   isValidSingleEventTool,
   suggestAiRuleName,
@@ -17,6 +22,9 @@ import {
   type DataBucket,
   type MultiEventConfig,
   type SingleEventToolId,
+  AGGREGATE_COLUMN_NAME_MAX_CHARS,
+  AGGREGATE_WINDOW_HOURS_MAX,
+  AGGREGATE_WINDOW_HOURS_MIN,
   AI_K_EVENTS_DEFAULT,
   AI_K_EVENTS_MAX,
   CROSS_DATA_AI_MIN_BUCKETS,
@@ -49,6 +57,7 @@ const ALLOWED_RULE_TYPES = new Set([
   'multi_event',
   'outcome_ai',
   'cross_data_ai',
+  'aggregate',
 ]);
 
 export async function GET(_req: NextRequest) {
@@ -91,6 +100,15 @@ interface CreateBody {
     buckets?: unknown;
     /** Optional per-rule country narrowing (PR 2 — AI rules only). */
     country?: string;
+    // aggregate (PR 5)
+    bucket?: unknown;
+    filter?: Record<string, unknown>;
+    metric?: unknown;
+    distinct_on?: unknown;
+    metric_field?: unknown;
+    threshold_kind?: unknown;
+    threshold_value?: unknown;
+    baseline_window_hours?: unknown;
   };
 }
 
@@ -177,8 +195,7 @@ export async function POST(req: NextRequest) {
       savedConfig = { outcome_statement: outcome, buckets, ...countryField };
     }
     derivedName = suggestAiRuleName(body.rule_type, outcome);
-  } else {
-    // multi_event
+  } else if (body.rule_type === 'multi_event') {
     const rawPreds = Array.isArray(body.config?.predicates) ? body.config!.predicates! : [];
     if (rawPreds.length < MULTI_EVENT_MIN_PREDICATES) {
       return NextResponse.json(
@@ -207,6 +224,105 @@ export async function POST(req: NextRequest) {
     );
     savedConfig = { predicates, window_hours: windowHours };
     derivedName = suggestMultiEventRuleName(savedConfig as unknown as MultiEventConfig);
+  } else {
+    // aggregate (PR 5)
+    const bucket = body.config?.bucket;
+    if (!isAggregatableBucket(bucket)) {
+      return NextResponse.json({ error: 'invalid_bucket' }, { status: 400 });
+    }
+    // Metric — sum/avg are reserved but not yet implemented; reject
+    // with a discriminated error so the client knows it's not a bug.
+    const metric = body.config?.metric;
+    if (isAggregateMetricDeferred(metric)) {
+      return NextResponse.json(
+        { error: 'metric_not_yet_supported', metric, supported: ['count_total', 'count_distinct'] },
+        { status: 400 },
+      );
+    }
+    if (!isAggregateMetricSupported(metric)) {
+      return NextResponse.json({ error: 'invalid_metric' }, { status: 400 });
+    }
+    // distinct_on is required when metric='count_distinct'.
+    let distinctOn: string | undefined;
+    if (metric === 'count_distinct') {
+      const raw = typeof body.config?.distinct_on === 'string'
+        ? body.config.distinct_on.trim()
+        : '';
+      if (!raw) {
+        return NextResponse.json({ error: 'distinct_on_required' }, { status: 400 });
+      }
+      if (raw.length > AGGREGATE_COLUMN_NAME_MAX_CHARS) {
+        return NextResponse.json(
+          { error: 'distinct_on_too_long', max: AGGREGATE_COLUMN_NAME_MAX_CHARS },
+          { status: 400 },
+        );
+      }
+      distinctOn = raw;
+    }
+    // Threshold kind — sigma deferred (needs the baselines cache).
+    const thresholdKind = body.config?.threshold_kind;
+    if (isAggregateThresholdKindDeferred(thresholdKind)) {
+      return NextResponse.json(
+        {
+          error: 'threshold_kind_not_yet_supported',
+          threshold_kind: thresholdKind,
+          supported: ['absolute_above', 'absolute_below', 'pct_change_vs_prev_window'],
+        },
+        { status: 400 },
+      );
+    }
+    if (!isAggregateThresholdKindSupported(thresholdKind)) {
+      return NextResponse.json({ error: 'invalid_threshold_kind' }, { status: 400 });
+    }
+    // Threshold value must be a positive finite number.
+    const thresholdValue = Number(body.config?.threshold_value);
+    if (!Number.isFinite(thresholdValue) || thresholdValue <= 0) {
+      return NextResponse.json({ error: 'invalid_threshold_value' }, { status: 400 });
+    }
+    // Window bounds.
+    const rawWindow = Number(body.config?.window_hours);
+    if (!Number.isFinite(rawWindow)) {
+      return NextResponse.json({ error: 'invalid_window_hours' }, { status: 400 });
+    }
+    const windowHours = Math.min(
+      AGGREGATE_WINDOW_HOURS_MAX,
+      Math.max(AGGREGATE_WINDOW_HOURS_MIN, Math.floor(rawWindow)),
+    );
+    // Filter — only `country` is honored by the PR 5 evaluator; other
+    // keys are accepted and persisted for forward compatibility.
+    const filterIn = (body.config?.filter ?? {}) as Record<string, unknown>;
+    const filterCountryRaw = typeof filterIn.country === 'string'
+      ? filterIn.country.trim()
+      : '';
+    if (filterCountryRaw.length > RULE_COUNTRY_FILTER_MAX_CHARS) {
+      return NextResponse.json(
+        { error: 'country_filter_too_long', max: RULE_COUNTRY_FILTER_MAX_CHARS },
+        { status: 400 },
+      );
+    }
+    const filterOut: Record<string, unknown> = {};
+    if (filterCountryRaw) filterOut.country = filterCountryRaw;
+    // Forward-compat pass-through (string fields only — defensive).
+    for (const key of ['event_type', 'vessel_class', 'commodity'] as const) {
+      const v = filterIn[key];
+      if (typeof v === 'string' && v.trim()) filterOut[key] = v.trim();
+    }
+    for (const key of ['min_fatalities', 'min_capacity_mw', 'min_capacity_bpd'] as const) {
+      const v = Number(filterIn[key]);
+      if (Number.isFinite(v) && v >= 0) filterOut[key] = v;
+    }
+    savedConfig = {
+      bucket,
+      metric,
+      ...(distinctOn ? { distinct_on: distinctOn } : {}),
+      window_hours: windowHours,
+      threshold_kind: thresholdKind,
+      threshold_value: thresholdValue,
+      ...(Object.keys(filterOut).length ? { filter: filterOut } : {}),
+    };
+    derivedName = `Aggregate · ${bucket}${
+      filterCountryRaw ? ` (${filterCountryRaw})` : ''
+    } · ${metric}${distinctOn ? ` ${distinctOn}` : ''} · ${windowHours}h`;
   }
 
   // Cooldown floor matches the DB CHECK constraint. We re-check here

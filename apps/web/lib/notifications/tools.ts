@@ -222,6 +222,140 @@ export interface CrossDataAiConfig {
 /** Max length of the optional country filter (ISO-2 or short name). */
 export const RULE_COUNTRY_FILTER_MAX_CHARS = 32;
 
+// ─── Bucket → table metadata (PR 5) ──────────────────────────────
+// Source-of-truth for "which table backs each bucket" — used by the
+// aggregate evaluator (cheap cron) and by evaluator-ai's
+// BUCKET_SPECS (which layers a per-bucket format function on top).
+// Weather is intentionally absent — it has no persistent table.
+
+export interface BucketTableSpec {
+  bucket: DataBucket;
+  table: string;
+  /** ORDER BY column for recency-based filtering. */
+  recencyColumn: string;
+  /** Column to apply rule.config.country / filter.country against via ILIKE. */
+  countryColumn?: string;
+  /** Default column for metric='count_distinct' when distinct_on is not set. */
+  defaultDistinctColumn?: string;
+}
+
+export const BUCKET_TABLES: ReadonlyArray<BucketTableSpec> = [
+  { bucket: 'Conflict',          table: 'conflict_events',   recencyColumn: 'ingested_at', countryColumn: 'country',     defaultDistinctColumn: 'event_id' },
+  { bucket: 'Air',               table: 'aircraft_positions',recencyColumn: 'ingested_at', countryColumn: 'country',     defaultDistinctColumn: 'icao24' },
+  { bucket: 'Maritime',          table: 'vessel_positions',  recencyColumn: 'ingested_at',                                defaultDistinctColumn: 'mmsi' },
+  { bucket: 'EnergyPower',       table: 'power_plants',      recencyColumn: 'ingested_at', countryColumn: 'country' },
+  { bucket: 'EnergyRefineries',  table: 'refineries',        recencyColumn: 'ingested_at', countryColumn: 'country' },
+  { bucket: 'EnergyPipelines',   table: 'gas_pipelines',     recencyColumn: 'ingested_at', countryColumn: 'country' },
+  { bucket: 'Mining',            table: 'mines',             recencyColumn: 'ingested_at', countryColumn: 'country' },
+  { bucket: 'AviationInfra',     table: 'airports',          recencyColumn: 'ingested_at', countryColumn: 'iso_country' },
+  { bucket: 'MaritimeInfra',     table: 'ports',             recencyColumn: 'ingested_at', countryColumn: 'country' },
+  { bucket: 'AnomalyFlags',      table: 'anomaly_flags',     recencyColumn: 'created_at' },
+  { bucket: 'ConvergenceEvents', table: 'convergence_events',recencyColumn: 'created_at',  countryColumn: 'location' },
+  // Weather has no persistent table — intentionally excluded so the
+  // aggregate evaluator rejects 'Weather' as a bucket choice.
+];
+
+const BUCKET_TABLE_BY_BUCKET: ReadonlyMap<DataBucket, BucketTableSpec> = new Map(
+  BUCKET_TABLES.map(b => [b.bucket, b]),
+);
+
+export function getBucketTable(bucket: DataBucket): BucketTableSpec | undefined {
+  return BUCKET_TABLE_BY_BUCKET.get(bucket);
+}
+
+export function isAggregatableBucket(bucket: unknown): bucket is DataBucket {
+  return typeof bucket === 'string' && BUCKET_TABLE_BY_BUCKET.has(bucket as DataBucket);
+}
+
+// ─── Aggregate rule type (PR 5) ──────────────────────────────────
+// Brief §5.1. Subset implemented in PR 5; sum/avg + sigma_above_baseline
+// are rejected by the API validator with a not_yet_supported error and
+// will be wired in a future PR on top of migration 041's CHECK extension.
+
+export const AGGREGATE_METRICS_SUPPORTED = ['count_total', 'count_distinct'] as const;
+export type AggregateMetricSupported = (typeof AGGREGATE_METRICS_SUPPORTED)[number];
+export const AGGREGATE_METRICS_DEFERRED = ['sum', 'avg'] as const;
+export type AggregateMetricDeferred = (typeof AGGREGATE_METRICS_DEFERRED)[number];
+export type AggregateMetric = AggregateMetricSupported | AggregateMetricDeferred;
+
+export const AGGREGATE_THRESHOLD_KINDS_SUPPORTED = [
+  'absolute_above',
+  'absolute_below',
+  'pct_change_vs_prev_window',
+] as const;
+export type AggregateThresholdKindSupported = (typeof AGGREGATE_THRESHOLD_KINDS_SUPPORTED)[number];
+export const AGGREGATE_THRESHOLD_KINDS_DEFERRED = ['sigma_above_baseline'] as const;
+export type AggregateThresholdKindDeferred = (typeof AGGREGATE_THRESHOLD_KINDS_DEFERRED)[number];
+export type AggregateThresholdKind =
+  | AggregateThresholdKindSupported
+  | AggregateThresholdKindDeferred;
+
+/**
+ * Free-form filter object on aggregate rules. PR 5 honours only
+ * `country` (matching PR 2's country filter behaviour). Other keys
+ * are accepted for forward compatibility but unused.
+ */
+export interface AggregateFilter {
+  country?: string;
+  /** Forward-compat. Ignored by the PR 5 evaluator. */
+  event_type?: string;
+  vessel_class?: string;
+  commodity?: string;
+  min_fatalities?: number;
+  min_capacity_mw?: number;
+  min_capacity_bpd?: number;
+}
+
+export interface AggregateConfig {
+  bucket: DataBucket;
+  filter?: AggregateFilter;
+  metric: AggregateMetric;
+  /** Required when metric='count_distinct'. */
+  distinct_on?: string;
+  /** Required when metric='sum' or 'avg' (deferred). */
+  metric_field?: string;
+  /** Evaluation window in hours. 1 ≤ N ≤ AGGREGATE_WINDOW_HOURS_MAX. */
+  window_hours: number;
+  threshold_kind: AggregateThresholdKind;
+  /** Interpretation depends on threshold_kind. Always > 0. */
+  threshold_value: number;
+  /** Defaults to window_hours when omitted. Reserved for sigma_above_baseline. */
+  baseline_window_hours?: number;
+}
+
+export const AGGREGATE_WINDOW_HOURS_MIN = 1;
+export const AGGREGATE_WINDOW_HOURS_MAX = 720; // 30 days; bounds the cron query.
+/** Max rows fetched per pass when metric='count_distinct'. Sanity cap. */
+export const AGGREGATE_DISTINCT_ROW_CAP = 5000;
+/** Max length of distinct_on / metric_field strings (column identifiers). */
+export const AGGREGATE_COLUMN_NAME_MAX_CHARS = 48;
+
+export function isAggregateMetricSupported(v: unknown): v is AggregateMetricSupported {
+  return typeof v === 'string' && (AGGREGATE_METRICS_SUPPORTED as readonly string[]).includes(v);
+}
+
+export function isAggregateMetricDeferred(v: unknown): v is AggregateMetricDeferred {
+  return typeof v === 'string' && (AGGREGATE_METRICS_DEFERRED as readonly string[]).includes(v);
+}
+
+export function isAggregateThresholdKindSupported(
+  v: unknown,
+): v is AggregateThresholdKindSupported {
+  return (
+    typeof v === 'string' &&
+    (AGGREGATE_THRESHOLD_KINDS_SUPPORTED as readonly string[]).includes(v)
+  );
+}
+
+export function isAggregateThresholdKindDeferred(
+  v: unknown,
+): v is AggregateThresholdKindDeferred {
+  return (
+    typeof v === 'string' &&
+    (AGGREGATE_THRESHOLD_KINDS_DEFERRED as readonly string[]).includes(v)
+  );
+}
+
 // Brief §10 caps. K=50 events / 8,000 input tokens per evaluation.
 export const AI_K_EVENTS_DEFAULT = 50;
 export const AI_K_EVENTS_MAX = 50;
