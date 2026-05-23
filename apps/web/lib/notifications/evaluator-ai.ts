@@ -51,14 +51,18 @@ const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
     columns: 'event_type, country, fatalities, event_date, ingested_at',
     recencyColumn: 'ingested_at',
     format: r =>
-      `[Conflict] ${r.event_type ?? '?'} in ${r.country ?? '?'} · ${r.fatalities ?? 0} fatalities · ${r.event_date ?? '?'}`,
+      `[Conflict @${r.ingested_at ?? '?'}] ${r.event_type ?? '?'} in ${r.country ?? '?'} · ${r.fatalities ?? 0} fatalities · ${r.event_date ?? '?'}`,
   },
   {
     bucket: 'Air',
     table: 'aircraft_positions',
     columns: 'callsign, country, ingested_at',
     recencyColumn: 'ingested_at',
-    format: r => `[Air] ${r.callsign ?? '?'} over ${r.country ?? '?'}`,
+    // country here is the aircraft's registration country (ISO from
+    // the ADS-B feed), NOT the overflight country. The (reg:…)
+    // qualifier in the format string signals this to Claude so it
+    // does not reason about airspace from this field alone.
+    format: r => `[Air @${r.ingested_at ?? '?'}] ${r.callsign ?? '?'} (reg:${r.country ?? '?'})`,
   },
   {
     bucket: 'Maritime',
@@ -66,7 +70,7 @@ const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
     columns: 'name, mmsi, flag, destination, ingested_at',
     recencyColumn: 'ingested_at',
     format: r =>
-      `[Maritime] ${r.name ?? r.mmsi ?? '?'} · flag ${r.flag ?? '?'} → ${r.destination ?? '?'}`,
+      `[Maritime @${r.ingested_at ?? '?'}] ${r.name ?? r.mmsi ?? '?'} · flag ${r.flag ?? '?'} → ${r.destination ?? '?'}`,
   },
   {
     bucket: 'EnergyPower',
@@ -74,7 +78,7 @@ const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
     columns: 'plant_name, country, capacity_mw, fuel_type, status, ingested_at',
     recencyColumn: 'ingested_at',
     format: r =>
-      `[EnergyPower] ${r.plant_name ?? '?'} · ${r.capacity_mw ?? '?'} MW ${r.fuel_type ?? ''} · ${r.country ?? '?'} · ${r.status ?? ''}`,
+      `[EnergyPower @${r.ingested_at ?? '?'}] ${r.plant_name ?? '?'} · ${r.capacity_mw ?? '?'} MW ${r.fuel_type ?? ''} · ${r.country ?? '?'} · ${r.status ?? ''}`,
   },
   {
     bucket: 'EnergyRefineries',
@@ -82,14 +86,14 @@ const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
     columns: 'refinery_name, country, capacity_bpd, ingested_at',
     recencyColumn: 'ingested_at',
     format: r =>
-      `[EnergyRefineries] ${r.refinery_name ?? '?'} · ${r.capacity_bpd ?? '?'} bpd · ${r.country ?? '?'}`,
+      `[EnergyRefineries @${r.ingested_at ?? '?'}] ${r.refinery_name ?? '?'} · ${r.capacity_bpd ?? '?'} bpd · ${r.country ?? '?'}`,
   },
   {
     bucket: 'EnergyPipelines',
     table: 'gas_pipelines',
     columns: 'name, country, status, ingested_at',
     recencyColumn: 'ingested_at',
-    format: r => `[EnergyPipelines] ${r.name ?? '?'} · ${r.country ?? '?'} · ${r.status ?? ''}`,
+    format: r => `[EnergyPipelines @${r.ingested_at ?? '?'}] ${r.name ?? '?'} · ${r.country ?? '?'} · ${r.status ?? ''}`,
   },
   {
     bucket: 'Mining',
@@ -97,14 +101,14 @@ const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
     columns: 'site_name, country, commod1, dev_stat, ingested_at',
     recencyColumn: 'ingested_at',
     format: r =>
-      `[Mining] ${r.site_name ?? '?'} · ${r.commod1 ?? '?'} · ${r.country ?? '?'} · ${r.dev_stat ?? ''}`,
+      `[Mining @${r.ingested_at ?? '?'}] ${r.site_name ?? '?'} · ${r.commod1 ?? '?'} · ${r.country ?? '?'} · ${r.dev_stat ?? ''}`,
   },
   {
     bucket: 'AviationInfra',
     table: 'airports',
     columns: 'name, iso_country, type, ingested_at',
     recencyColumn: 'ingested_at',
-    format: r => `[AviationInfra] ${r.name ?? '?'} · ${r.iso_country ?? '?'} · ${r.type ?? ''}`,
+    format: r => `[AviationInfra @${r.ingested_at ?? '?'}] ${r.name ?? '?'} · ${r.iso_country ?? '?'} · ${r.type ?? ''}`,
   },
   {
     bucket: 'MaritimeInfra',
@@ -112,7 +116,7 @@ const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
     columns: 'port_name, country, harbor_size, ingested_at',
     recencyColumn: 'ingested_at',
     format: r =>
-      `[MaritimeInfra] ${r.port_name ?? '?'} · ${r.country ?? '?'} · ${r.harbor_size ?? ''}`,
+      `[MaritimeInfra @${r.ingested_at ?? '?'}] ${r.port_name ?? '?'} · ${r.country ?? '?'} · ${r.harbor_size ?? ''}`,
   },
   // Weather bucket has no persistent table — it's an Open-Meteo
   // pull-on-demand. AI rules that lean on Weather get a "no recent
@@ -138,8 +142,10 @@ You will receive:
      - "A coordinated cyber + kinetic operation in the same theatre."
   2. An events list pulled from up to 10 data buckets (Air, Maritime, Conflict,
      EnergyPower, EnergyPipelines, EnergyRefineries, Mining, AviationInfra,
-     MaritimeInfra, Weather), most-recent first. Older events have been
-     truncated to fit a token budget.
+     MaritimeInfra, Weather). Each line is prefixed with [Bucket @ingested_at]
+     — the timestamp is the row's ingestion time and lets you reason about
+     ordering and recency across buckets. Older events have been truncated to
+     fit a token budget.
   3. The rule type — outcome_ai (single-domain or open) or cross_data_ai (≥2
      buckets, expects multi-domain convergence).
 
@@ -158,7 +164,10 @@ Output: call the report_decision tool with:
     Hormuz tanker AIS gap in the same window"). Avoid hedging language.
 
 Bucket inventory and approximate semantics:
-  Air                — ADS-B aircraft pings (movements / patrol density).
+  Air                — ADS-B aircraft pings. NOTE: the (reg:XX) field is
+                       the aircraft's registration country from the ADS-B
+                       feed, not the overflight country. Do not infer
+                       airspace location from this field alone.
   Maritime           — AIS vessel positions (movements / dark-vessel gaps).
   Conflict           — ACLED / GDELT conflict events.
   EnergyPower        — Global Energy Monitor power-plant registry.
@@ -254,10 +263,11 @@ export async function gatherEvents(
     }
   }
   // Cheap interleave — most-recent across buckets matters more than
-  // per-bucket grouping for the model. Sort by ingested_at descending
-  // would be ideal, but the formatted lines have already lost the
-  // timestamp; return as-is and let the model treat the list
-  // unordered.
+  // per-bucket grouping for the model. The formatted lines now carry
+  // their ingested_at timestamp inline (see BUCKET_SPECS), so the
+  // model can read recency directly. A future PR could pre-sort by
+  // timestamp; for now, return per-bucket recency-first ordering and
+  // let the model reorder mentally.
   return allLines.slice(0, totalCap);
 }
 
