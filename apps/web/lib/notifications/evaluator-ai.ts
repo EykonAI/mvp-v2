@@ -4,6 +4,7 @@ import {
   DATA_BUCKETS,
   AI_K_EVENTS_DEFAULT,
   AI_K_EVENTS_MAX,
+  getBucketTable,
   type DataBucket,
   type OutcomeAiConfig,
   type CrossDataAiConfig,
@@ -217,7 +218,11 @@ Bucket inventory and approximate semantics:
   Air                — ADS-B aircraft pings. NOTE: the (reg:XX) field is
                        the aircraft's registration country from the ADS-B
                        feed, not the overflight country. Do not infer
-                       airspace location from this field alone.
+                       airspace location from this field alone. When a
+                       region filter is in effect (see the per-tick
+                       Country / region filter line), the events list has
+                       ALREADY been narrowed via lat/lon geofence — every
+                       row is in the requested region by overflight.
   Maritime           — AIS vessel positions (movements / dark-vessel gaps).
   Conflict           — ACLED / GDELT conflict events.
   EnergyPower        — Global Energy Monitor power-plant registry.
@@ -332,6 +337,24 @@ export async function gatherEvents(
   for (const bucket of buckets) {
     const spec = BUCKET_BY_NAME.get(bucket);
     if (!spec) continue;
+    // PR 6: buckets with geoRegionRpc (Maritime, Air) resolve country
+    // via ST_Intersects on lat/lon — not via the ILIKE-on-country
+    // fallback. This gives operational country for vessels (which
+    // have no country column at all) and overflight country for
+    // aircraft (vs the registration country in the column). When the
+    // rule has no country filter, we drop through to the regular
+    // recency query below.
+    const tableMeta = getBucketTable(bucket);
+    if (country && tableMeta?.geoRegionRpc) {
+      const { data } = await supabase.rpc(tableMeta.geoRegionRpc, {
+        p_region_slug: country,
+        p_limit: perBucketCap,
+      });
+      const rows = ((data ?? []) as unknown) as Array<Record<string, unknown>>;
+      for (const row of rows) allLines.push(spec.format(row));
+      continue;
+    }
+
     let q = supabase
       .from(spec.table)
       .select(spec.columns)
@@ -392,7 +415,7 @@ export async function decideWithClaude(
   // does not mis-attribute thin event lists to no-news. PR 6 will
   // close the Maritime/Weather gap via lat/lon geofence.
   const countryBlock = country
-    ? `Country filter: ${country} (Conflict, Air, EnergyPower, EnergyPipelines, EnergyRefineries, Mining, AviationInfra, MaritimeInfra are narrowed; Maritime and Weather are NOT — no per-row country column available there yet).\n\n`
+    ? `Country / region filter: ${country}. Air and Maritime are now narrowed via lat/lon geofence against the geo_regions table (PR 6) — country here means operational/overflight country, not registration. Conflict, EnergyPower, EnergyPipelines, EnergyRefineries, Mining, AviationInfra, MaritimeInfra are narrowed via ILIKE on their country column. ConvergenceEvents is narrowed via ILIKE on the location field. AnomalyFlags and Weather are NOT narrowed (no per-row geo signal yet).\n\n`
     : '';
 
   const userText = `Rule type: ${rule.rule_type}

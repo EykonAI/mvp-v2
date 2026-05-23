@@ -237,12 +237,26 @@ export interface BucketTableSpec {
   countryColumn?: string;
   /** Default column for metric='count_distinct' when distinct_on is not set. */
   defaultDistinctColumn?: string;
+  /**
+   * When set, country filter resolves via geo_regions (PR 6 — migration
+   * 042) using ST_Intersects on this bucket's geom column rather than
+   * the ILIKE-on-countryColumn fallback. The string is the Supabase
+   * RPC function name (recent_aircraft_in_region /
+   * recent_vessels_in_region). countryColumn is ignored when this is
+   * present.
+   *
+   * Maritime: vessel.flag is flag-of-registration, not operational
+   *           country — the RPC gives operational country via lat/lon.
+   * Air:      country column is registration country, not overflight
+   *           country — the RPC gives overflight country.
+   */
+  geoRegionRpc?: string;
 }
 
 export const BUCKET_TABLES: ReadonlyArray<BucketTableSpec> = [
   { bucket: 'Conflict',          table: 'conflict_events',   recencyColumn: 'ingested_at', countryColumn: 'country',     defaultDistinctColumn: 'event_id' },
-  { bucket: 'Air',               table: 'aircraft_positions',recencyColumn: 'ingested_at', countryColumn: 'country',     defaultDistinctColumn: 'icao24' },
-  { bucket: 'Maritime',          table: 'vessel_positions',  recencyColumn: 'ingested_at',                                defaultDistinctColumn: 'mmsi' },
+  { bucket: 'Air',               table: 'aircraft_positions',recencyColumn: 'ingested_at', countryColumn: 'country',     defaultDistinctColumn: 'icao24', geoRegionRpc: 'recent_aircraft_in_region' },
+  { bucket: 'Maritime',          table: 'vessel_positions',  recencyColumn: 'ingested_at',                                defaultDistinctColumn: 'mmsi',   geoRegionRpc: 'recent_vessels_in_region' },
   { bucket: 'EnergyPower',       table: 'power_plants',      recencyColumn: 'ingested_at', countryColumn: 'country' },
   { bucket: 'EnergyRefineries',  table: 'refineries',        recencyColumn: 'ingested_at', countryColumn: 'country' },
   { bucket: 'EnergyPipelines',   table: 'gas_pipelines',     recencyColumn: 'ingested_at', countryColumn: 'country' },
