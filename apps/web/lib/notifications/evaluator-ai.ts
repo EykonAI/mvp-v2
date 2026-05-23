@@ -12,6 +12,7 @@ import {
 import type { FirePayload } from './dispatch';
 import type { RuleRow } from './evaluator-cheap';
 import { findPrecursorMatches, formatPrecursorBlockForPrompt } from './precursor-matches';
+import { fetchWeatherForRegion } from './weather';
 
 // AI evaluator for outcome_ai and cross_data_ai rule types. Runs
 // on the hourly cron at /api/cron/evaluate-rules-ai. Brief §3.7:
@@ -237,7 +238,15 @@ Bucket inventory and approximate semantics:
   Mining             — USGS MRDS mineral-deposit registry.
   AviationInfra      — OurAirports registry.
   MaritimeInfra      — World Port Index registry.
-  Weather            — current conditions (Open-Meteo, on-demand only).
+  Weather            — current conditions (Open-Meteo), sampled at the
+                       centroid of the rule's region filter. Only one
+                       line per tick (the current snapshot), so use
+                       Weather as background context — not as a
+                       per-event signal. Format:
+                       [Weather @<iso>] <slug>: <temp>°C, <descr>,
+                       wind <kph> km/h, RH <pct>%.
+                       Omitted when the rule has no region filter or
+                       the Open-Meteo fetch failed.
   AnomalyFlags       — eYKON's per-domain anomaly stream (raw flags
                        from the detectors). Use to corroborate other
                        buckets, not as a primary trigger.
@@ -341,6 +350,16 @@ export async function gatherEvents(
   const allLines: string[] = [];
 
   for (const bucket of buckets) {
+    // PR 8: Weather has no persistent table — it's an Open-Meteo
+    // fetch keyed on the rule's region filter, cached 1h. When the
+    // rule has no country/region filter, we omit the bucket entirely
+    // (it would be a global weather sample with no anchoring signal).
+    if (bucket === 'Weather') {
+      if (!country) continue;
+      const line = await fetchWeatherForRegion(country);
+      if (line) allLines.push(line);
+      continue;
+    }
     const spec = BUCKET_BY_NAME.get(bucket);
     if (!spec) continue;
     // PR 6: buckets with geoRegionRpc (Maritime, Air) resolve country
@@ -423,7 +442,7 @@ export async function decideWithClaude(
   const eventsBlock = events.length > 0 ? events.join('\n') : '(no recent events in scope)';
   const country = resolveCountryFilter(rule);
   const countryBlock = country
-    ? `Country / region filter: ${country}. Air and Maritime are now narrowed via lat/lon geofence against the geo_regions table (PR 6) — country here means operational/overflight country, not registration. Conflict, EnergyPower, EnergyPipelines, EnergyRefineries, Mining, AviationInfra, MaritimeInfra are narrowed via ILIKE on their country column. ConvergenceEvents is narrowed via ILIKE on the location field. AnomalyFlags and Weather are NOT narrowed (no per-row geo signal yet).\n\n`
+    ? `Country / region filter: ${country}. Air and Maritime are narrowed via lat/lon geofence against the geo_regions table (operational/overflight country, not registration). Conflict, EnergyPower, EnergyPipelines, EnergyRefineries, Mining, AviationInfra, MaritimeInfra are narrowed via ILIKE on their country column. ConvergenceEvents is narrowed via ILIKE on the location field. Weather is sampled from Open-Meteo at the region's centroid. AnomalyFlags is NOT narrowed (no per-row geo signal yet).\n\n`
     : '';
 
   // PR 7: surface top-3 historical precursor analogs when the outcome
