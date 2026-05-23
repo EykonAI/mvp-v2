@@ -194,12 +194,25 @@ export interface OutcomeAiConfig {
   outcome_statement: string;
   k_events: number;       // capped at AI_K_EVENTS_MAX in the evaluator
   buckets?: DataBucket[]; // optional scope; empty = all
+  /**
+   * Optional per-rule country narrowing (PR 2). When set, gatherEvents
+   * applies an ILIKE filter on each bucket's country column before
+   * Claude sees the rows. Buckets without a country column (Maritime
+   * — flag ≠ operational country; Weather — no table) are left
+   * unfiltered; PR 6 (geofence lookup) will close that gap.
+   */
+  country?: string;
 }
 
 export interface CrossDataAiConfig {
   outcome_statement: string;
   buckets: DataBucket[];  // ≥2 required
+  /** See OutcomeAiConfig.country. */
+  country?: string;
 }
+
+/** Max length of the optional country filter (ISO-2 or short name). */
+export const RULE_COUNTRY_FILTER_MAX_CHARS = 32;
 
 // Brief §10 caps. K=50 events / 8,000 input tokens per evaluation.
 export const AI_K_EVENTS_DEFAULT = 50;

@@ -27,6 +27,7 @@ import {
   MULTI_EVENT_MAX_WINDOW_HOURS,
   OUTCOME_STATEMENT_MAX_CHARS,
   OUTCOME_STATEMENT_MIN_CHARS,
+  RULE_COUNTRY_FILTER_MAX_CHARS,
 } from '@/lib/notifications/tools';
 import { isValidPersona } from '@/lib/intelligence-analyst/personas';
 
@@ -88,6 +89,8 @@ interface CreateBody {
     outcome_statement?: string;
     k_events?: number;
     buckets?: unknown;
+    /** Optional per-rule country narrowing (PR 2 — AI rules only). */
+    country?: string;
   };
 }
 
@@ -151,14 +154,27 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
+    // Optional per-rule country narrowing (PR 2). Accept any string up
+    // to RULE_COUNTRY_FILTER_MAX_CHARS; the evaluator does an ILIKE so
+    // both ISO-2 and short-name values work. Empty after trim → drop
+    // the field entirely so existing rules round-trip unchanged.
+    const countryRaw = typeof body.config?.country === 'string' ? body.config.country.trim() : '';
+    if (countryRaw.length > RULE_COUNTRY_FILTER_MAX_CHARS) {
+      return NextResponse.json(
+        { error: 'country_filter_too_long', max: RULE_COUNTRY_FILTER_MAX_CHARS },
+        { status: 400 },
+      );
+    }
+    const countryField = countryRaw.length > 0 ? { country: countryRaw } : {};
+
     if (body.rule_type === 'outcome_ai') {
       const k = Number(body.config?.k_events);
       const k_events = Number.isFinite(k) && k > 0
         ? Math.min(AI_K_EVENTS_MAX, Math.floor(k))
         : AI_K_EVENTS_DEFAULT;
-      savedConfig = { outcome_statement: outcome, k_events, buckets };
+      savedConfig = { outcome_statement: outcome, k_events, buckets, ...countryField };
     } else {
-      savedConfig = { outcome_statement: outcome, buckets };
+      savedConfig = { outcome_statement: outcome, buckets, ...countryField };
     }
     derivedName = suggestAiRuleName(body.rule_type, outcome);
   } else {
