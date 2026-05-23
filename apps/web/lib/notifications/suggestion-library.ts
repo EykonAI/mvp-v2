@@ -6,19 +6,29 @@ import type { DataBucket } from './tools';
 // builder consumes a Suggestion via its `prefill` prop and lands on
 // the right mode tab with the config already filled in.
 //
-// PR 1 honesty pass (2026-05-23): the library was pruned from 55 to
-// 28 entries. Suggestions whose copy promised capabilities the
-// evaluator cannot yet fulfil (count-over-window aggregation, AIS
-// gap detection, anomaly_flags / precursor_library / weather
-// buckets, per-rule geofence, cross-feed entity linking) were
-// removed. Surviving entries were relabeled where the copy
-// over-promised on what the evaluator can actually do. PR 9
-// (suggestion library v2) refills the library once PRs 2-8 add the
-// missing primitives.
+// PR 9 — suggestion library v2 (2026-05-23). The library was pruned
+// from 55 → 28 in PR 1's honesty pass; PR 9 refills it to ~56 on
+// top of the new primitives shipped in PRs 2-8:
+//   • per-rule country narrowing (PR 2) — every AI rule can scope
+//   • AnomalyFlags + ConvergenceEvents buckets (PR 3)
+//   • real AIS-gap detection (PR 4)
+//   • geofence lookup — Air/Maritime by overflight (PR 6)
+//   • precursor cosine surfaced via theatre keywords (PR 7)
+//   • Weather sampled on-demand at the region centroid (PR 8)
+//
+// Aggregate-rule suggestions (rule_type='aggregate', PR 5) are
+// intentionally NOT in the library yet — the rule builder has no
+// Aggregate tab, so a one-click suggestion would dead-end. A
+// follow-up UI PR adds the tab and the aggregate suggestions.
+// Aggregate rules remain creatable via the POST /api/notifications/
+// rules endpoint directly.
 //
 // IMPORTANT: every config below MUST round-trip cleanly through the
 // rule builder + API. Tool ids must exist in SINGLE_EVENT_TOOLS;
-// bucket names must be in DATA_BUCKETS.
+// bucket names must be in DATA_BUCKETS. Outcome statements that
+// mention a known theatre slug or label (red-sea, hormuz, black-sea,
+// taiwan-strait, suez, malacca, bosphorus, bab-el-mandeb, panama)
+// trigger the precursor-cosine block in the AI evaluator's prompt.
 
 export type SuggestionRuleType =
   | 'single_event'
@@ -42,12 +52,19 @@ export interface OutcomeAiSuggestionConfig {
   rule_type: 'outcome_ai';
   outcome_statement: string;
   buckets?: DataBucket[];
+  /** Optional per-rule country narrowing (PR 2). When set on an AI
+   *  suggestion, the evaluator scopes Conflict / Air / Maritime /
+   *  Energy* / Mining / *Infra to the slug — Air + Maritime resolve
+   *  via lat/lon geofence (PR 6). */
+  country?: string;
 }
 
 export interface CrossDataAiSuggestionConfig {
   rule_type: 'cross_data_ai';
   outcome_statement: string;
   buckets: DataBucket[];
+  /** See OutcomeAiSuggestionConfig.country. */
+  country?: string;
 }
 
 export type SuggestionConfig =
@@ -98,12 +115,55 @@ const ANALYST: Suggestion[] = [
   },
   {
     id: 'analyst-outcome-hormuz',
-    title: 'Hormuz tension: qualitative reads from conflict + maritime feeds',
+    title: 'Hormuz tension — qualitative reads with historical precursor anchor',
     config: {
       rule_type: 'outcome_ai',
       outcome_statement:
-        'Material elevation in the Hormuz tension picture, judged qualitatively from recent conflict and maritime events.',
-      buckets: ['Conflict', 'Maritime'],
+        'Material elevation in the Hormuz tension picture, judged qualitatively from recent conflict, maritime, and air events. Use historical precursor matches as soft analogs.',
+      buckets: ['Conflict', 'Maritime', 'Air'],
+      country: 'hormuz',
+    },
+  },
+  {
+    id: 'analyst-cross-anomaly-density',
+    title: 'Anomaly density spike across distinct feeds in a watched theatre',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'Anomaly density spike: a cluster of recent anomaly_flags rows across distinct domains in the same theatre, corroborated by raw events.',
+      buckets: ['AnomalyFlags', 'Conflict', 'Maritime', 'Air'],
+    },
+  },
+  {
+    id: 'analyst-cross-black-sea-precursor',
+    title: 'Black Sea posture shift — multi-domain pattern with precursor lookup',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'Multi-domain pattern across conflict, maritime, and air in the Black Sea theatre that meaningfully rhymes with a labelled historical episode (cosine match surfaces in the prompt).',
+      buckets: ['Conflict', 'Maritime', 'Air', 'ConvergenceEvents'],
+      country: 'black-sea',
+    },
+  },
+  {
+    id: 'analyst-multi-conflict-energy-hormuz',
+    title: 'Conflict + refinery co-occurrence in Hormuz (6h)',
+    config: {
+      rule_type: 'multi_event',
+      predicates: [
+        { tool: 'conflict_events', filters: { min_fatalities: 1, country: '', event_type: '' } },
+        { tool: 'refineries', filters: { country: '', min_capacity_bpd: 50000 } },
+      ],
+      window_hours: 6,
+    },
+  },
+  {
+    id: 'analyst-single-vessel-dark-hormuz',
+    title: 'Vessel going dark in the Strait of Hormuz (≥12 h gap)',
+    config: {
+      rule_type: 'single_event',
+      tool: 'vessel_positions',
+      filters: { min_gap_hours: 12, vessel_class: '' },
     },
   },
 ];
@@ -127,6 +187,66 @@ const JOURNALIST: Suggestion[] = [
         'Convergence-of-anomalies that suggests a story-worthy escalation (qualitative — model judgement).',
     },
   },
+  {
+    id: 'journ-single-vessel-dark-redsea',
+    title: 'Vessel going dark in the Red Sea (≥6 h gap)',
+    config: {
+      rule_type: 'single_event',
+      tool: 'vessel_positions',
+      filters: { min_gap_hours: 6, vessel_class: '' },
+    },
+  },
+  {
+    id: 'journ-cross-anomaly-corroboration',
+    title: 'Cross-feed anomaly corroboration via ConvergenceEvents synthesis',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'Anomaly_flags + ConvergenceEvents convergence: when multiple recent anomalies cluster into a low-p-value convergence event with a non-trivial synthesis.',
+      buckets: ['AnomalyFlags', 'ConvergenceEvents', 'Conflict'],
+    },
+  },
+  {
+    id: 'journ-cross-weather-conflict-zone',
+    title: 'Weather extreme over an active conflict zone',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'Weather extreme (storm, flood, extreme temperature) over a country with active conflict in the same period — humanitarian / logistics angle.',
+      buckets: ['Weather', 'Conflict'],
+    },
+  },
+  {
+    id: 'journ-outcome-bosphorus-tension',
+    title: 'Bosphorus tension shift — multi-domain pattern (precursor-anchored)',
+    config: {
+      rule_type: 'outcome_ai',
+      outcome_statement:
+        'Material posture shift in or around the Bosphorus / Black Sea, surfaced with historical precursor analogs in the prompt.',
+      buckets: ['Conflict', 'Maritime', 'Air'],
+      country: 'bosphorus',
+    },
+  },
+  {
+    id: 'journ-cross-aviation-airspace',
+    title: 'Aviation activity surge + conflict co-occurrence in a country',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'Aviation activity surge co-occurring with conflict signals in the same country — coverage angle for airspace-restriction stories.',
+      buckets: ['Air', 'Conflict', 'AviationInfra'],
+    },
+  },
+  {
+    id: 'journ-cross-corroboration-anomaly',
+    title: 'Multi-source corroboration in the same theatre (AnomalyFlags-driven)',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'Same-window anomalies across ≥2 distinct domains in the same theatre, surfaced as a single AnomalyFlags cluster.',
+      buckets: ['AnomalyFlags', 'Conflict', 'Maritime'],
+    },
+  },
 ];
 
 const DAY_TRADER: Suggestion[] = [
@@ -142,7 +262,7 @@ const DAY_TRADER: Suggestion[] = [
   },
   {
     id: 'trader-outcome-wti',
-    title: 'Conditions that could materially move oil prices (qualitative, model-judged)',
+    title: 'Conditions that could materially move oil prices (qualitative)',
     config: {
       rule_type: 'outcome_ai',
       outcome_statement:
@@ -151,17 +271,77 @@ const DAY_TRADER: Suggestion[] = [
     },
     cooldown_minutes: 120,
   },
+  {
+    id: 'trader-outcome-hormuz-oil-spike',
+    title: 'Oil-spike risk anchored on Hormuz (precursor-aware)',
+    config: {
+      rule_type: 'outcome_ai',
+      outcome_statement:
+        'Conditions around the Strait of Hormuz that could materially affect oil-price direction. Use historical precursor matches as soft analogs.',
+      buckets: ['Conflict', 'Maritime', 'EnergyRefineries'],
+      country: 'hormuz',
+    },
+    cooldown_minutes: 120,
+  },
+  {
+    id: 'trader-multi-tanker-conflict-hormuz',
+    title: 'Tanker going dark + conflict event in Hormuz (6h)',
+    config: {
+      rule_type: 'multi_event',
+      predicates: [
+        { tool: 'vessel_positions', filters: { min_gap_hours: 6, vessel_class: 'tanker' } },
+        { tool: 'conflict_events', filters: { min_fatalities: 1, country: '', event_type: '' } },
+      ],
+      window_hours: 6,
+    },
+    cooldown_minutes: 120,
+  },
+  {
+    id: 'trader-cross-suez-supply-chain',
+    title: 'Suez supply-chain disruption signals (Maritime + Conflict + Weather)',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'Disruption signals around the Suez Canal across maritime, conflict, and weather feeds.',
+      buckets: ['Maritime', 'Conflict', 'Weather'],
+      country: 'suez',
+    },
+    cooldown_minutes: 120,
+  },
+  {
+    id: 'trader-outcome-redsea-disruption',
+    title: 'Red Sea shipping disruption — qualitative read with precursor anchor',
+    config: {
+      rule_type: 'outcome_ai',
+      outcome_statement:
+        'Red Sea shipping disruption signals across maritime, conflict, and weather feeds — qualitative read, precursor analogs surface in the prompt.',
+      buckets: ['Maritime', 'Conflict', 'Weather'],
+      country: 'red-sea',
+    },
+    cooldown_minutes: 120,
+  },
+  {
+    id: 'trader-cross-anomaly-energy',
+    title: 'Energy-sector anomaly cluster (AnomalyFlags + refineries + pipelines)',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'Recent anomaly_flags in energy domains converging with refinery / pipeline events — early warning for trading-relevant disruptions.',
+      buckets: ['AnomalyFlags', 'EnergyRefineries', 'EnergyPipelines'],
+    },
+    cooldown_minutes: 180,
+  },
 ];
 
 const COMMODITIES: Suggestion[] = [
   {
     id: 'comm-chokepoint-closure',
-    title: 'Chokepoint disruption signals (Hormuz, Malacca, Suez, Bab-el-Mandeb) — qualitative',
+    title: 'Chokepoint disruption signals (Hormuz, Malacca, Suez, Bab-el-Mandeb)',
     config: {
       rule_type: 'cross_data_ai',
       outcome_statement:
-        'Maritime + conflict signals indicating disruption risk at any of Hormuz, Malacca, Suez, or Bab-el-Mandeb (qualitative — no weather data feed yet).',
-      buckets: ['Maritime', 'Conflict'],
+        'Maritime + conflict + weather signals indicating disruption risk at any of Hormuz, Malacca, Suez, or Bab-el-Mandeb.',
+      buckets: ['Maritime', 'Conflict', 'Weather'],
     },
   },
   {
@@ -175,7 +355,7 @@ const COMMODITIES: Suggestion[] = [
   },
   {
     id: 'comm-outcome-eu-semiconductors',
-    title: 'Threats to EU critical-mineral supply (qualitative; conflict + maritime feeds)',
+    title: 'Threats to EU critical-mineral supply (qualitative)',
     config: {
       rule_type: 'outcome_ai',
       outcome_statement:
@@ -191,6 +371,27 @@ const COMMODITIES: Suggestion[] = [
       outcome_statement:
         'Convergence of maritime and conflict signals affecting critical-mineral supply chains (mining feed currently frozen).',
       buckets: ['Maritime', 'Conflict'],
+    },
+  },
+  {
+    id: 'comm-outcome-malacca-disruption',
+    title: 'Strait of Malacca disruption — precursor-anchored',
+    config: {
+      rule_type: 'outcome_ai',
+      outcome_statement:
+        'Disruption risk in the Strait of Malacca across maritime, conflict, and weather feeds — precursor analogs surface in the prompt.',
+      buckets: ['Maritime', 'Conflict', 'Weather'],
+      country: 'malacca',
+    },
+  },
+  {
+    id: 'comm-cross-weather-mineral-chain',
+    title: 'Weather + maritime risk over a critical-mineral corridor',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'Weather extreme + maritime disruption signals over a critical-mineral shipping corridor (region filter narrows to a chokepoint).',
+      buckets: ['Weather', 'Maritime', 'Conflict'],
     },
   },
 ];
@@ -220,18 +421,38 @@ const NGO: Suggestion[] = [
     config: {
       rule_type: 'outcome_ai',
       outcome_statement:
-        'Conditions in conflict and power feeds that could displace tens of thousands of people in a watchlist region (qualitative — no weather data feed yet).',
-      buckets: ['Conflict', 'EnergyPower'],
+        'Conditions in conflict, power, and weather feeds that could displace tens of thousands of people in a watchlist region.',
+      buckets: ['Conflict', 'EnergyPower', 'Weather'],
     },
   },
   {
     id: 'ngo-cross-aid-corridor',
-    title: 'Aid-corridor risk signals (maritime + conflict feeds)',
+    title: 'Aid-corridor risk signals (maritime + conflict + weather)',
     config: {
       rule_type: 'cross_data_ai',
       outcome_statement:
-        'Multi-feed risk signals affecting humanitarian aid corridors across maritime and conflict feeds (qualitative — no weather data feed yet).',
-      buckets: ['Maritime', 'Conflict'],
+        'Multi-feed risk signals affecting humanitarian aid corridors across maritime, conflict, and weather feeds.',
+      buckets: ['Maritime', 'Conflict', 'Weather'],
+    },
+  },
+  {
+    id: 'ngo-cross-weather-conflict-zone',
+    title: 'Weather extreme over an active conflict zone',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'Weather extreme (storm, flood, drought, extreme temperature) over a country with active conflict — direct humanitarian impact.',
+      buckets: ['Weather', 'Conflict'],
+    },
+  },
+  {
+    id: 'ngo-cross-anomaly-density-crisis',
+    title: 'Anomaly density rising in a humanitarian-watchlist country',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'Recent anomaly_flags clustering in a humanitarian-watchlist country, corroborated by raw conflict and power events.',
+      buckets: ['AnomalyFlags', 'Conflict', 'EnergyPower'],
     },
   },
 ];
@@ -248,7 +469,7 @@ const CITIZEN: Suggestion[] = [
   },
   {
     id: 'cit-air-disruption',
-    title: 'Aircraft activity uptick (≥15 distinct aircraft in window; registration country)',
+    title: 'Aircraft activity uptick (≥15 distinct aircraft in window)',
     config: {
       rule_type: 'single_event',
       tool: 'aircraft_positions',
@@ -275,12 +496,32 @@ const CITIZEN: Suggestion[] = [
   },
   {
     id: 'cit-cross-watchlist',
-    title: 'Multi-feed alerts across conflict + power feeds (qualitative)',
+    title: 'Multi-feed alerts across conflict + power + weather',
     config: {
       rule_type: 'cross_data_ai',
       outcome_statement:
-        'Multi-feed alerts across conflict and power feeds, qualitatively assessed (no per-user topic personalisation yet).',
-      buckets: ['Conflict', 'EnergyPower'],
+        'Multi-feed alerts across conflict, power, and weather feeds, qualitatively assessed.',
+      buckets: ['Conflict', 'EnergyPower', 'Weather'],
+    },
+  },
+  {
+    id: 'cit-cross-weather-region',
+    title: 'Weather extreme in my region',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'Weather extreme (storm, heatwave, flood) in my region — set the country filter on rule create.',
+      buckets: ['Weather', 'Conflict'],
+    },
+  },
+  {
+    id: 'cit-cross-anomaly-region',
+    title: 'Anomaly cluster in my region (AnomalyFlags + ConvergenceEvents)',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'Multiple anomaly_flags or a low-p-value convergence event clustering in my region — surfaces unusual conditions across feeds.',
+      buckets: ['AnomalyFlags', 'ConvergenceEvents', 'Conflict'],
     },
   },
 ];
@@ -318,12 +559,42 @@ const CORPORATE: Suggestion[] = [
   },
   {
     id: 'corp-cross-operations-footprint',
-    title: 'Convergence across conflict + maritime + energy feeds (qualitative)',
+    title: 'Convergence across conflict + maritime + energy feeds',
     config: {
       rule_type: 'cross_data_ai',
       outcome_statement:
-        'Convergence of conflict, maritime, power, and refinery signals (qualitative; per-rule geofence and sector matching not yet implemented).',
+        'Convergence of conflict, maritime, power, and refinery signals affecting an operations footprint.',
       buckets: ['Conflict', 'Maritime', 'EnergyPower', 'EnergyRefineries'],
+    },
+  },
+  {
+    id: 'corp-cross-counterparty-convergence',
+    title: 'Counterparty exposure via ConvergenceEvents synthesis',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'A recent convergence_events row whose synthesis names entities or sectors overlapping my counterparty list (set country on create to narrow).',
+      buckets: ['ConvergenceEvents', 'Maritime', 'Conflict'],
+    },
+  },
+  {
+    id: 'corp-cross-weather-ops',
+    title: 'Weather risk affecting an operations region (power + weather)',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'Weather extreme combined with power-grid stress in an operations region — set the country filter on rule create.',
+      buckets: ['Weather', 'EnergyPower', 'Conflict'],
+    },
+  },
+  {
+    id: 'corp-cross-bcp-anomaly',
+    title: 'BCP trigger watch via AnomalyFlags clustering',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'AnomalyFlags clustering across distinct domains that, in combination, would activate one of my BCP triggers.',
+      buckets: ['AnomalyFlags', 'Conflict', 'Maritime', 'EnergyPower'],
     },
   },
 ];
@@ -346,32 +617,73 @@ export const PERSONA_SUGGESTIONS: Record<PersonaId, Suggestion[]> = {
 export const CROSS_DATA_SUGGESTIONS: Suggestion[] = [
   {
     id: 'xd-conflict-refinery-maritime',
-    title: 'Co-occurring signals across conflict + refinery + maritime feeds (qualitative)',
+    title: 'Co-occurring signals across conflict + refinery + maritime feeds',
     config: {
       rule_type: 'cross_data_ai',
       outcome_statement:
-        'Co-occurring signals in conflict, refinery, and maritime feeds across recent events (qualitative; per-theatre geofence not yet enforced).',
+        'Co-occurring signals in conflict, refinery, and maritime feeds across recent events.',
       buckets: ['Conflict', 'EnergyRefineries', 'Maritime'],
     },
   },
   {
     id: 'xd-chokepoint-risk',
-    title: 'Chokepoint risk: maritime + conflict convergence (qualitative)',
+    title: 'Chokepoint risk — maritime + conflict + weather convergence',
     config: {
       rule_type: 'cross_data_ai',
       outcome_statement:
-        'Maritime and conflict convergence at any major chokepoint or regional sea (qualitative — no weather data feed yet).',
-      buckets: ['Maritime', 'Conflict'],
+        'Maritime + conflict + weather convergence at any major chokepoint or regional sea — set the country filter on rule create.',
+      buckets: ['Maritime', 'Conflict', 'Weather'],
     },
   },
   {
     id: 'xd-playbook',
-    title: 'Multi-domain pattern signals across conflict + maritime + air + refinery (qualitative)',
+    title: 'Multi-domain pattern signals (qualitative, model-judged)',
     config: {
       rule_type: 'cross_data_ai',
       outcome_statement:
         'Multi-domain pattern signals across conflict, maritime, air, and refinery feeds (qualitative — no playbook library queried).',
       buckets: ['Conflict', 'Maritime', 'Air', 'EnergyRefineries'],
+    },
+  },
+  {
+    id: 'xd-anomaly-of-anomalies',
+    title: 'Anomaly-of-anomalies — AnomalyFlags clustering across feeds',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'A cluster of recent anomaly_flags rows spanning ≥2 distinct domains in a recent window, corroborated by raw events.',
+      buckets: ['AnomalyFlags', 'Conflict', 'Maritime', 'Air'],
+    },
+  },
+  {
+    id: 'xd-convergence-corroboration',
+    title: 'Convergence-events corroboration with raw feeds',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'A recent convergence_events row with a low joint p-value, whose synthesis is corroborated by raw conflict and maritime events.',
+      buckets: ['ConvergenceEvents', 'Conflict', 'Maritime'],
+    },
+  },
+  {
+    id: 'xd-weather-ops-disruption',
+    title: 'Weather extreme + ops disruption (Weather + EnergyPower + Maritime)',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'Weather extreme combined with power-grid or maritime disruption signals — set the country filter on rule create.',
+      buckets: ['Weather', 'EnergyPower', 'Maritime'],
+    },
+  },
+  {
+    id: 'xd-precursor-hormuz',
+    title: 'Hormuz pattern shift — multi-domain with historical precursor anchor',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'Multi-domain posture shift around the Strait of Hormuz that meaningfully rhymes with a labelled historical episode (precursor analogs surface in the prompt).',
+      buckets: ['Conflict', 'Maritime', 'Air', 'EnergyRefineries'],
+      country: 'hormuz',
     },
   },
 ];
