@@ -3,11 +3,14 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { createServerSupabase } from '@/lib/supabase-server';
 import {
+  buildAggregateFirePayload,
   buildFirePayload,
   buildMultiEventFirePayload,
+  evaluateAggregateRule,
   findMultiEventMatch,
   findSingleEventMatch,
   isCooldownActive,
+  type AggregateResult,
   type MatchedEvent,
   type MultiEventMatchResult,
   type RuleRow,
@@ -53,7 +56,7 @@ export async function POST(req: NextRequest) {
       'id, user_id, name, rule_type, config, channel_ids, active, cooldown_minutes, last_fired_at, created_at',
     )
     .eq('active', true)
-    .in('rule_type', ['single_event', 'multi_event'])
+    .in('rule_type', ['single_event', 'multi_event', 'aggregate'])
     .order('last_fired_at', { ascending: true, nullsFirst: true })
     .limit(MAX_RULES_PER_TICK);
 
@@ -108,6 +111,7 @@ async function processRule(
   let firePayloadInput:
     | { kind: 'single'; match: MatchedEvent }
     | { kind: 'multi'; result: MultiEventMatchResult }
+    | { kind: 'aggregate'; result: AggregateResult }
     | null = null;
   if (rule.rule_type === 'single_event') {
     const match = await findSingleEventMatch(admin, rule);
@@ -115,6 +119,11 @@ async function processRule(
   } else if (rule.rule_type === 'multi_event') {
     const result = await findMultiEventMatch(admin, rule);
     if (result) firePayloadInput = { kind: 'multi', result };
+  } else if (rule.rule_type === 'aggregate') {
+    // PR 5: count-over-window vs baseline. Pure-SQL evaluation
+    // alongside single_event / multi_event — same gates above.
+    const result = await evaluateAggregateRule(admin, rule);
+    if (result) firePayloadInput = { kind: 'aggregate', result };
   }
   if (!firePayloadInput) {
     return { state: 'no_match', ruleId: rule.id };
@@ -138,7 +147,9 @@ async function processRule(
   const payload =
     firePayloadInput.kind === 'single'
       ? buildFirePayload(rule, firePayloadInput.match, firedAtIso)
-      : buildMultiEventFirePayload(rule, firePayloadInput.result, firedAtIso);
+      : firePayloadInput.kind === 'multi'
+      ? buildMultiEventFirePayload(rule, firePayloadInput.result, firedAtIso)
+      : buildAggregateFirePayload(rule, firePayloadInput.result, firedAtIso);
 
   const userTier = await getUserTier(admin, rule.user_id);
   const userEmail = await getUserEmail(admin, rule.user_id);
@@ -164,9 +175,20 @@ async function processRule(
   const matchExtras =
     firePayloadInput.kind === 'single'
       ? { match_row: firePayloadInput.match.row }
-      : {
+      : firePayloadInput.kind === 'multi'
+      ? {
           match_rows: firePayloadInput.result.matches.map(m => m.row),
           matched_at: firePayloadInput.result.matchedAtIso,
+        }
+      : {
+          // Aggregate payload — log the counts so the detail-drawer
+          // can render a chart later without re-running the query.
+          aggregate: {
+            current: firePayloadInput.result.current,
+            previous: firePayloadInput.result.previous ?? null,
+            threshold_kind: firePayloadInput.result.thresholdKind,
+            threshold_value: firePayloadInput.result.thresholdValue,
+          },
         };
   const { data: logRow, error: logErr } = await admin
     .from('user_notification_log')
