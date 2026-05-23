@@ -11,6 +11,7 @@ import {
 } from './tools';
 import type { FirePayload } from './dispatch';
 import type { RuleRow } from './evaluator-cheap';
+import { findPrecursorMatches, formatPrecursorBlockForPrompt } from './precursor-matches';
 
 // AI evaluator for outcome_ai and cross_data_ai rule types. Runs
 // on the hourly cron at /api/cron/evaluate-rules-ai. Brief §3.7:
@@ -207,6 +208,11 @@ Your decision rules:
   • Bias toward NOT firing when evidence is thin. False fires erode user trust.
   • Respect persona context: "day-trader" wants sub-24-h material moves;
     "NGO" wants humanitarian risk, not market signals.
+  • When a "Top historical precursor matches" block is present, treat
+    each entry as a soft analog. A high cosine (≥0.75) means the
+    current posture rhymes with a labelled episode — useful for
+    confidence, but the live events must STILL support the outcome on
+    their own merits. Do not fire on precursor similarity alone.
 
 Output: call the report_decision tool with:
   • fire: boolean
@@ -401,27 +407,35 @@ export function truncateToTokenBudget(lines: string[], tokenBudget: number): str
  * Call Claude for the decision. Marks the system prompt with
  * cache_control: ephemeral so the prefix is shared across all rules
  * evaluated in the same tick.
+ *
+ * supabase is required (PR 7) — the function queries precursor_library
+ * with the service-role client passed by the cron route. When the
+ * outcome statement does not name a known theatre, findPrecursorMatches
+ * returns [] and the prompt simply omits the block.
  */
 export async function decideWithClaude(
   rule: RuleRow,
   events: string[],
+  supabase: SupabaseClient,
 ): Promise<AiDecision> {
   const cfg = rule.config as unknown as OutcomeAiConfig | CrossDataAiConfig;
   const outcomeStatement = (cfg?.outcome_statement ?? '').trim();
   const eventsBlock = events.length > 0 ? events.join('\n') : '(no recent events in scope)';
   const country = resolveCountryFilter(rule);
-  // When a country narrowing is in effect we tell Claude both the
-  // country and which buckets stayed global (Maritime, Weather) so it
-  // does not mis-attribute thin event lists to no-news. PR 6 will
-  // close the Maritime/Weather gap via lat/lon geofence.
   const countryBlock = country
     ? `Country / region filter: ${country}. Air and Maritime are now narrowed via lat/lon geofence against the geo_regions table (PR 6) — country here means operational/overflight country, not registration. Conflict, EnergyPower, EnergyPipelines, EnergyRefineries, Mining, AviationInfra, MaritimeInfra are narrowed via ILIKE on their country column. ConvergenceEvents is narrowed via ILIKE on the location field. AnomalyFlags and Weather are NOT narrowed (no per-row geo signal yet).\n\n`
     : '';
 
+  // PR 7: surface top-3 historical precursor analogs when the outcome
+  // statement names a known theatre. The block is empty otherwise —
+  // theatre detection is intentionally conservative.
+  const precursorMatches = await findPrecursorMatches(supabase, outcomeStatement, 3);
+  const precursorBlock = formatPrecursorBlockForPrompt(precursorMatches);
+
   const userText = `Rule type: ${rule.rule_type}
 Outcome statement: ${outcomeStatement}
 
-${countryBlock}Events (most-recent first):
+${countryBlock}${precursorBlock}Events (most-recent first):
 ${eventsBlock}
 
 Decide via the report_decision tool.`;

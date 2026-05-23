@@ -154,7 +154,7 @@ async function processAiRule(
   const events = await gatherEvents(admin, rule, buckets, k);
   const trimmed = truncateToTokenBudget(events, AI_INPUT_TOKEN_BUDGET);
 
-  const decision = await decideWithClaude(rule, trimmed);
+  const decision = await decideWithClaude(rule, trimmed, admin);
   if (!decision.fire) {
     return { state: 'no_match', ruleId: rule.id, usage: decision.usage };
   }
