@@ -317,41 +317,118 @@ async function queryMines(
   };
 }
 
+/**
+ * AIS-gap detector (PR 4). Detects vessels going dark — vessels that
+ * pinged in the "prior window" but have NOT pinged in the "recent
+ * window" of duration min_gap_hours. Implemented as a two-step set
+ * difference because Supabase v2 does not expose window functions
+ * via the JS client.
+ *
+ *   prior window   = [now − min_gap_hours − 24h, now − min_gap_hours]
+ *   recent window  = (now − min_gap_hours, now]
+ *   gone dark      = mmsis(prior) − mmsis(recent)
+ *
+ * Returns the prior-window ping of the most-recently-active gone-dark
+ * vessel, plus a count of how many vessels in total went dark in the
+ * pass. `fromIso` is not used for this detector — the windows are
+ * computed from `now` and the gap threshold.
+ */
 async function queryVesselPositions(
   supabase: SupabaseClient,
-  fromIso: string,
+  _fromIso: string,
   filters: Record<string, FilterValue>,
 ): Promise<MatchedEvent | null> {
-  // "Going dark" semantics in the v1 evaluator: a vessel whose most
-  // recent ping is older than min_gap_hours and whose latest ping
-  // landed inside the evaluation window. The vessel_positions table
-  // has one row per ping — the AIS gap is implied by the absence of
-  // newer rows, which a pure SELECT can't observe directly. For PR 6
-  // we approximate by reporting the most recent ping in the window
-  // that matches the (optional) vessel_class. PR 7 replaces this
-  // heuristic with a window-function-based "max(ingested_at) by mmsi
-  // is older than X" query when the multi-event evaluator lands.
-  const minGap = num(filters.min_gap_hours);
-  let q = supabase
-    .from('vessel_positions')
-    .select('id, mmsi, name, vessel_type, flag, destination, ingested_at')
-    .gt('ingested_at', fromIso);
-  // vessel_type is an integer code in the schema; we filter by name
-  // contains as a soft match for now.
-  const vesselClass = str(filters.vessel_class);
-  if (vesselClass) q = q.ilike('name', `%${vesselClass}%`);
+  // Clamp the gap: a gap of 0 means "no gap", which collapses the
+  // detector. Default 12h matches the tool's filter default.
+  const rawGap = num(filters.min_gap_hours);
+  const minGap = rawGap > 0 ? rawGap : 12;
 
-  const { data } = await q.order('ingested_at', { ascending: false }).limit(1);
-  const row = data?.[0];
-  if (!row) return null;
+  const now = Date.now();
+  const gapCutoffMs = now - minGap * 3_600_000;
+  const priorCutoffMs = gapCutoffMs - 24 * 3_600_000;
+  const gapCutoffIso = new Date(gapCutoffMs).toISOString();
+  const priorCutoffIso = new Date(priorCutoffMs).toISOString();
+
+  // vessel_type is an integer code in the schema; the legacy `name`
+  // ILIKE is preserved for vessel-class filtering (PR 6's actual fix
+  // would normalise this against an entity registry).
+  const vesselClass = str(filters.vessel_class);
+
+  // Step 1 — vessels that pinged in the prior window. Keep the
+  // most-recent ping per mmsi so the eventual summary has a real
+  // last-seen timestamp + identifying metadata.
+  let priorQ = supabase
+    .from('vessel_positions')
+    .select('mmsi, name, vessel_type, flag, destination, ingested_at')
+    .gt('ingested_at', priorCutoffIso)
+    .lte('ingested_at', gapCutoffIso)
+    .order('ingested_at', { ascending: false })
+    .limit(500);
+  if (vesselClass) priorQ = priorQ.ilike('name', `%${vesselClass}%`);
+  const { data: priorRows } = await priorQ;
+  if (!priorRows || priorRows.length === 0) return null;
+
+  type PriorRow = (typeof priorRows)[number];
+  const priorByMmsi = new Map<string, PriorRow>();
+  for (const r of priorRows) {
+    const mmsi = String((r as Record<string, unknown>).mmsi ?? '');
+    if (!mmsi) continue;
+    // First insertion wins → most-recent ping per mmsi (rows are
+    // already ordered desc by ingested_at).
+    if (!priorByMmsi.has(mmsi)) priorByMmsi.set(mmsi, r);
+  }
+  if (priorByMmsi.size === 0) return null;
+  const priorMmsis = Array.from(priorByMmsi.keys());
+
+  // Step 2 — of those, which pinged AGAIN in the recent window? Pass
+  // the prior set as an .in() filter so we only fetch the relevant
+  // mmsis. Cap at 2000 to bound the query — if more vessels are
+  // active than that the gap detector is operating outside its
+  // sensible regime anyway.
+  const { data: recentRows } = await supabase
+    .from('vessel_positions')
+    .select('mmsi')
+    .gt('ingested_at', gapCutoffIso)
+    .in('mmsi', priorMmsis)
+    .limit(2000);
+  const stillActive = new Set<string>();
+  for (const r of recentRows ?? []) {
+    const mmsi = String((r as Record<string, unknown>).mmsi ?? '');
+    if (mmsi) stillActive.add(mmsi);
+  }
+
+  // Step 3 — set difference.
+  const goneDark: PriorRow[] = [];
+  for (const [mmsi, row] of priorByMmsi) {
+    if (!stillActive.has(mmsi)) goneDark.push(row);
+  }
+  if (goneDark.length === 0) return null;
+
+  // Pick the gone-dark vessel with the most-recent prior-window ping
+  // — most informative for the email body. Already roughly sorted
+  // because of priorRows ordering, but be explicit.
+  goneDark.sort((a, b) =>
+    String((b as Record<string, unknown>).ingested_at ?? '').localeCompare(
+      String((a as Record<string, unknown>).ingested_at ?? ''),
+    ),
+  );
+  const head = goneDark[0] as Record<string, unknown>;
+  const headLabel = head.name ?? head.mmsi ?? 'unknown';
+  const lastSeen = typeof head.ingested_at === 'string' ? head.ingested_at : 'unknown';
+  const otherCount = goneDark.length - 1;
   return {
-    row,
-    summary: `Vessel signal: ${row.name ?? row.mmsi ?? 'unknown'}${minGap ? ` (gap threshold ${minGap}h)` : ''}.`,
+    row: head,
+    summary: `Vessel going dark: ${headLabel} (no AIS pings for ≥${minGap}h; last seen ${lastSeen}).${
+      otherCount > 0 ? ` ${otherCount} other vessel${otherCount === 1 ? '' : 's'} also gone dark in this window.` : ''
+    }`,
     detailLines: [
-      `Vessel: ${row.name ?? 'n/a'}`,
-      `MMSI: ${row.mmsi ?? 'n/a'}`,
-      `Flag: ${row.flag ?? 'n/a'}`,
-      `Destination: ${row.destination ?? 'n/a'}`,
+      `Vessel: ${head.name ?? 'n/a'}`,
+      `MMSI: ${head.mmsi ?? 'n/a'}`,
+      `Flag: ${head.flag ?? 'n/a'}`,
+      `Last destination: ${head.destination ?? 'n/a'}`,
+      `Last ping: ${lastSeen}`,
+      `Gap threshold: ≥${minGap}h`,
+      `Gone-dark count this pass: ${goneDark.length}`,
     ],
   };
 }

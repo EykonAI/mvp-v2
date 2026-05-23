@@ -99,7 +99,8 @@ export const SINGLE_EVENT_TOOLS = [
   {
     id: 'vessel_positions',
     label: 'Vessel AIS gap (going dark)',
-    description: 'Vessel in the watchlist with no AIS pings for the listed gap.',
+    description:
+      'Vessel that was previously pinging but has stopped reporting AIS for at least the listed gap.',
     table: 'vessel_positions',
     filters: [
       {
