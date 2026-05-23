@@ -40,6 +40,15 @@ interface BucketSpec {
   columns: string;
   /** ORDER BY column (most-recent first). */
   recencyColumn: string;
+  /**
+   * Optional column to apply rule.config.country against via ILIKE.
+   * Buckets without one (Maritime — flag ≠ operational country;
+   * Weather — no table) leave this undefined and skip the country
+   * filter. PR 6 (geofence lookup) will resolve those via lat/lon.
+   * For Air the column IS the aircraft's registration country, not
+   * its overflight country — see the format-string comment.
+   */
+  countryColumn?: string;
   /** One-line label format used in the events block. */
   format: (row: Record<string, unknown>) => string;
 }
@@ -50,6 +59,7 @@ const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
     table: 'conflict_events',
     columns: 'event_type, country, fatalities, event_date, ingested_at',
     recencyColumn: 'ingested_at',
+    countryColumn: 'country',
     format: r =>
       `[Conflict @${r.ingested_at ?? '?'}] ${r.event_type ?? '?'} in ${r.country ?? '?'} · ${r.fatalities ?? 0} fatalities · ${r.event_date ?? '?'}`,
   },
@@ -62,6 +72,7 @@ const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
     // the ADS-B feed), NOT the overflight country. The (reg:…)
     // qualifier in the format string signals this to Claude so it
     // does not reason about airspace from this field alone.
+    countryColumn: 'country',
     format: r => `[Air @${r.ingested_at ?? '?'}] ${r.callsign ?? '?'} (reg:${r.country ?? '?'})`,
   },
   {
@@ -69,6 +80,9 @@ const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
     table: 'vessel_positions',
     columns: 'name, mmsi, flag, destination, ingested_at',
     recencyColumn: 'ingested_at',
+    // No countryColumn: vessel.flag is the flag-state of registration,
+    // not the vessel's current operational country. PR 6 (geofence
+    // lookup against lat/lon) will land per-vessel country resolution.
     format: r =>
       `[Maritime @${r.ingested_at ?? '?'}] ${r.name ?? r.mmsi ?? '?'} · flag ${r.flag ?? '?'} → ${r.destination ?? '?'}`,
   },
@@ -77,6 +91,7 @@ const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
     table: 'power_plants',
     columns: 'plant_name, country, capacity_mw, fuel_type, status, ingested_at',
     recencyColumn: 'ingested_at',
+    countryColumn: 'country',
     format: r =>
       `[EnergyPower @${r.ingested_at ?? '?'}] ${r.plant_name ?? '?'} · ${r.capacity_mw ?? '?'} MW ${r.fuel_type ?? ''} · ${r.country ?? '?'} · ${r.status ?? ''}`,
   },
@@ -85,6 +100,7 @@ const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
     table: 'refineries',
     columns: 'refinery_name, country, capacity_bpd, ingested_at',
     recencyColumn: 'ingested_at',
+    countryColumn: 'country',
     format: r =>
       `[EnergyRefineries @${r.ingested_at ?? '?'}] ${r.refinery_name ?? '?'} · ${r.capacity_bpd ?? '?'} bpd · ${r.country ?? '?'}`,
   },
@@ -93,6 +109,7 @@ const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
     table: 'gas_pipelines',
     columns: 'name, country, status, ingested_at',
     recencyColumn: 'ingested_at',
+    countryColumn: 'country',
     format: r => `[EnergyPipelines @${r.ingested_at ?? '?'}] ${r.name ?? '?'} · ${r.country ?? '?'} · ${r.status ?? ''}`,
   },
   {
@@ -100,6 +117,7 @@ const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
     table: 'mines',
     columns: 'site_name, country, commod1, dev_stat, ingested_at',
     recencyColumn: 'ingested_at',
+    countryColumn: 'country',
     format: r =>
       `[Mining @${r.ingested_at ?? '?'}] ${r.site_name ?? '?'} · ${r.commod1 ?? '?'} · ${r.country ?? '?'} · ${r.dev_stat ?? ''}`,
   },
@@ -108,6 +126,7 @@ const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
     table: 'airports',
     columns: 'name, iso_country, type, ingested_at',
     recencyColumn: 'ingested_at',
+    countryColumn: 'iso_country',
     format: r => `[AviationInfra @${r.ingested_at ?? '?'}] ${r.name ?? '?'} · ${r.iso_country ?? '?'} · ${r.type ?? ''}`,
   },
   {
@@ -115,6 +134,7 @@ const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
     table: 'ports',
     columns: 'port_name, country, harbor_size, ingested_at',
     recencyColumn: 'ingested_at',
+    countryColumn: 'country',
     format: r =>
       `[MaritimeInfra @${r.ingested_at ?? '?'}] ${r.port_name ?? '?'} · ${r.country ?? '?'} · ${r.harbor_size ?? ''}`,
   },
@@ -235,10 +255,28 @@ export function resolveBuckets(rule: RuleRow): DataBucket[] {
 }
 
 /**
+ * Read the optional per-rule country filter from rule.config. Returns
+ * the trimmed string when present, or null when absent / empty. The
+ * field is shared by OutcomeAiConfig and CrossDataAiConfig (PR 2).
+ */
+export function resolveCountryFilter(rule: RuleRow): string | null {
+  const cfg = rule.config as Record<string, unknown> | null | undefined;
+  const raw = cfg?.country;
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
  * Pull the most-recent events from each bucket the rule covers,
  * up to a per-bucket cap so a single high-volume bucket can't
  * crowd out everything else. Returns event lines pre-formatted for
  * the user message.
+ *
+ * When rule.config.country is set, each bucket whose spec declares a
+ * countryColumn applies an ILIKE filter before ordering. Buckets
+ * without a countryColumn (Maritime, Weather) are NOT filtered —
+ * see the BucketSpec comment for why.
  */
 export async function gatherEvents(
   supabase: SupabaseClient,
@@ -248,16 +286,24 @@ export async function gatherEvents(
 ): Promise<string[]> {
   if (buckets.length === 0 || totalCap <= 0) return [];
   const perBucketCap = Math.max(1, Math.floor(totalCap / buckets.length));
+  const country = resolveCountryFilter(rule);
   const allLines: string[] = [];
 
   for (const bucket of buckets) {
     const spec = BUCKET_BY_NAME.get(bucket);
     if (!spec) continue;
-    const { data } = await supabase
+    let q = supabase
       .from(spec.table)
       .select(spec.columns)
       .order(spec.recencyColumn, { ascending: false })
       .limit(perBucketCap);
+    if (country && spec.countryColumn) {
+      // ILIKE handles both ISO-2 ("SA") and short-name ("Saudi
+      // Arabia") values without forcing the rule author to commit to
+      // one convention up-front.
+      q = q.ilike(spec.countryColumn, `%${country}%`);
+    }
+    const { data } = await q;
     for (const row of data ?? []) {
       allLines.push(spec.format(row as unknown as Record<string, unknown>));
     }
@@ -300,11 +346,19 @@ export async function decideWithClaude(
   const cfg = rule.config as unknown as OutcomeAiConfig | CrossDataAiConfig;
   const outcomeStatement = (cfg?.outcome_statement ?? '').trim();
   const eventsBlock = events.length > 0 ? events.join('\n') : '(no recent events in scope)';
+  const country = resolveCountryFilter(rule);
+  // When a country narrowing is in effect we tell Claude both the
+  // country and which buckets stayed global (Maritime, Weather) so it
+  // does not mis-attribute thin event lists to no-news. PR 6 will
+  // close the Maritime/Weather gap via lat/lon geofence.
+  const countryBlock = country
+    ? `Country filter: ${country} (Conflict, Air, EnergyPower, EnergyPipelines, EnergyRefineries, Mining, AviationInfra, MaritimeInfra are narrowed; Maritime and Weather are NOT — no per-row country column available there yet).\n\n`
+    : '';
 
   const userText = `Rule type: ${rule.rule_type}
 Outcome statement: ${outcomeStatement}
 
-Events (most-recent first):
+${countryBlock}Events (most-recent first):
 ${eventsBlock}
 
 Decide via the report_decision tool.`;
