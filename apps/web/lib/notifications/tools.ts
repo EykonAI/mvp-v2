@@ -181,6 +181,13 @@ export const DATA_BUCKETS = [
   'AviationInfra',
   'MaritimeInfra',
   'Weather',
+  // PR 3: in-house signal-detection tables that pre-date the
+  // Notification Center. anomaly_flags is written by the per-domain
+  // detectors; convergence_events is written by the
+  // /api/cron/compute-convergences cron that clusters recent
+  // anomalies into joint p-value windows.
+  'AnomalyFlags',
+  'ConvergenceEvents',
 ] as const;
 export type DataBucket = (typeof DATA_BUCKETS)[number];
 

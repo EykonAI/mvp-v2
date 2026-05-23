@@ -138,6 +138,36 @@ const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
     format: r =>
       `[MaritimeInfra @${r.ingested_at ?? '?'}] ${r.port_name ?? '?'} · ${r.country ?? '?'} · ${r.harbor_size ?? ''}`,
   },
+  // ─── In-house signal-detection tables (PR 3) ─────────────────
+  // Two tables that pre-date the Notification Center but were not
+  // previously exposed to the AI evaluator. anomaly_flags = the
+  // raw per-domain anomaly stream; convergence_events = clustered
+  // anomalies with a joint p-value and a Claude-written synthesis.
+  // Both use `created_at` as the recency column (no ingested_at).
+  {
+    bucket: 'AnomalyFlags',
+    table: 'anomaly_flags',
+    columns: 'domain, flag_type, severity, source, created_at',
+    recencyColumn: 'created_at',
+    // No clean country column — region may live inside the JSONB
+    // payload but is not normalised. PR 6 (geofence) is the right
+    // place to revisit this.
+    format: r =>
+      `[AnomalyFlags @${r.created_at ?? '?'}] ${r.domain ?? '?'}/${r.flag_type ?? '?'} · severity ${r.severity ?? '?'} · source ${r.source ?? '?'}`,
+  },
+  {
+    bucket: 'ConvergenceEvents',
+    table: 'convergence_events',
+    columns: 'location, joint_p_value, synthesis, created_at',
+    recencyColumn: 'created_at',
+    // location is free-form text written by the compute-convergences
+    // cron — usually a country, region, or chokepoint name. ILIKE
+    // works as a best-effort country narrowing until PR 6 lands a
+    // proper geofence resolver against bounding_box.
+    countryColumn: 'location',
+    format: r =>
+      `[ConvergenceEvents @${r.created_at ?? '?'}] ${r.location ?? '?'} · p=${r.joint_p_value ?? '?'} · ${typeof r.synthesis === 'string' ? r.synthesis.slice(0, 120) : ''}`,
+  },
   // Weather bucket has no persistent table — it's an Open-Meteo
   // pull-on-demand. AI rules that lean on Weather get a "no recent
   // weather rows" footnote in the events block.
@@ -160,12 +190,12 @@ You will receive:
      - "Anything that could move WTI by ≥$2/bbl in the next 24 hours."
      - "Conditions that could displace ≥10,000 people in a watchlist region."
      - "A coordinated cyber + kinetic operation in the same theatre."
-  2. An events list pulled from up to 10 data buckets (Air, Maritime, Conflict,
+  2. An events list pulled from up to 12 data buckets (Air, Maritime, Conflict,
      EnergyPower, EnergyPipelines, EnergyRefineries, Mining, AviationInfra,
-     MaritimeInfra, Weather). Each line is prefixed with [Bucket @ingested_at]
-     — the timestamp is the row's ingestion time and lets you reason about
-     ordering and recency across buckets. Older events have been truncated to
-     fit a token budget.
+     MaritimeInfra, Weather, AnomalyFlags, ConvergenceEvents). Each line is
+     prefixed with [Bucket @timestamp] — the timestamp is the row's ingestion
+     or creation time and lets you reason about ordering and recency across
+     buckets. Older events have been truncated to fit a token budget.
   3. The rule type — outcome_ai (single-domain or open) or cross_data_ai (≥2
      buckets, expects multi-domain convergence).
 
@@ -196,7 +226,17 @@ Bucket inventory and approximate semantics:
   Mining             — USGS MRDS mineral-deposit registry.
   AviationInfra      — OurAirports registry.
   MaritimeInfra      — World Port Index registry.
-  Weather            — current conditions (Open-Meteo, on-demand only).`;
+  Weather            — current conditions (Open-Meteo, on-demand only).
+  AnomalyFlags       — eYKON's per-domain anomaly stream (raw flags
+                       from the detectors). Use to corroborate other
+                       buckets, not as a primary trigger.
+  ConvergenceEvents  — clustered anomalies with a joint p-value and a
+                       short synthesis. A LOW p-value (e.g. < 0.01)
+                       indicates statistically meaningful convergence
+                       across distinct domains. The synthesis is a
+                       Claude-written one-liner from a prior pass —
+                       you may use it as a hint but corroborate
+                       against the raw event evidence.`;
 
 // ─── Tool definition for structured output ───────────────────────
 
