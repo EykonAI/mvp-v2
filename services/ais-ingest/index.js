@@ -25,6 +25,41 @@ const BATCH_SIZE    = 500;             // rows per upsert call
 const RECONNECT_MIN = 1_000;
 const RECONNECT_MAX = 60_000;
 
+// ─── Subscription bounding boxes ──────────────────────────────
+// AISStream's free-tier rate limit (~155 msg/s globally) means a
+// single global box is sampled and biased toward Europe-dense
+// receivers — the Persian Gulf and other strategic chokepoints get
+// starved (zero Hormuz vessels observed across 24h with a global
+// subscription). Switching to explicit regions tells AISStream how
+// to allocate the rate budget instead of letting it pick.
+//
+// Format: [[bottom_left_lat, bottom_left_lon], [top_right_lat, top_right_lon]]
+//
+// Four broad regions cover all major shipping lanes; the six
+// chokepoint boxes guarantee dense coverage for source='ais'
+// Calibration Ledger predictions. Polar oceans and open-ocean
+// stretches outside the named regions lose coverage — acceptable
+// trade-off for a geopolitical-intelligence product, and easy to
+// extend later if a new region matters.
+const BOUNDING_BOXES = [
+  // Broad regions (replace the previous single global box)
+  [[30, -15],     [70, 45]],         // Europe + Mediterranean
+  [[-10, -90],    [60, -30]],        // Americas Atlantic
+  [[-40, 10],     [40, 60]],         // Africa + Indian Ocean rim
+  [[-15, 90],     [50, 180]],        // Asia-Pacific
+
+  // PR-CAL chokepoints — guaranteed priority for the Calibration
+  // Ledger AIS-anchored predictions. Wider than the geo_regions
+  // polygons so vessels approaching/departing are captured before
+  // they enter the strait proper.
+  [[24, 54],      [28, 58]],         // Strait of Hormuz
+  [[11, 42],      [14, 45]],         // Bab-el-Mandeb
+  [[27, 31],      [33, 34]],         // Suez Canal
+  [[40.5, 28.5],  [41.5, 29.5]],     // Bosphorus
+  [[1, 97],       [7, 105]],         // Strait of Malacca
+  [[8, -81],      [10, -79]],        // Panama Canal
+];
+
 if (!AIS_KEY)      { console.error('AISSTREAM_API_KEY missing');      process.exit(1); }
 if (!SUPABASE_URL) { console.error('NEXT_PUBLIC_SUPABASE_URL missing'); process.exit(1); }
 if (!SUPABASE_KEY) { console.error('SUPABASE_SERVICE_ROLE_KEY missing'); process.exit(1); }
@@ -67,11 +102,11 @@ function connect() {
   ws = new WebSocket(STREAM_URL);
 
   ws.on('open', () => {
-    console.log('  open — subscribing global bbox');
+    console.log(`  open — subscribing ${BOUNDING_BOXES.length} bboxes (4 regional + 6 chokepoints)`);
     reconnectDelay = RECONNECT_MIN;
     ws.send(JSON.stringify({
       APIKey: AIS_KEY,
-      BoundingBoxes: [[[-90, -180], [90, 180]]],
+      BoundingBoxes: BOUNDING_BOXES,
       FilterMessageTypes: ['PositionReport', 'ShipStaticData'],
     }));
   });
