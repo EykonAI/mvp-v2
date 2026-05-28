@@ -39,7 +39,11 @@ export async function issueChokepointWeekly(opts: {
   slug?: string;
   now?: Date;
 } = {}): Promise<IssueChokepointWeeklyResult> {
-  const slug = opts.slug ?? 'hormuz';
+  // Default subject is Malacca — the chokepoint with usable AISStream
+  // free-tier coverage (see lib/chokepoints/snapshot.ts coverage note).
+  // Hormuz, the original PR-CAL-HORMUZ subject, has zero free-tier
+  // coverage and returns to default once a paid AIS source is wired.
+  const slug = opts.slug ?? 'malacca';
   const now = opts.now ?? new Date();
   const supabase = createServerSupabase();
 
