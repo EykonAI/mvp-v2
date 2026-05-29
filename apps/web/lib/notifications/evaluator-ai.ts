@@ -256,7 +256,44 @@ Bucket inventory and approximate semantics:
                        across distinct domains. The synthesis is a
                        Claude-written one-liner from a prior pass —
                        you may use it as a hint but corroborate
-                       against the raw event evidence.`;
+                       against the raw event evidence.
+
+Worked examples (these illustrate the decision rules above — follow the same
+reasoning, do not pattern-match on surface keywords):
+
+  EXAMPLE 1 — FIRE (cross_data_ai, strong multi-bucket convergence)
+    Outcome: "Conditions around the Strait of Hormuz that could materially
+              affect oil-price direction."
+    Events:
+      [Conflict @2026-05-29T09:12Z] explosion in IR · 6 fatalities · 2026-05-29
+      [Maritime @2026-05-29T09:40Z] FRONT ALTAIR · flag MH → (none)   ← AIS gap
+      [Maritime @2026-05-29T09:05Z] DELTA STAR · flag PA → Fujairah    ← AIS gap
+      [EnergyRefineries @2026-05-29T08:50Z] Bandar Abbas · 350000 bpd · IR
+    report_decision → fire=true, rationale="Explosion in Iran near Hormuz plus
+      two tanker AIS gaps and a 350k-bpd refinery in the strait — multi-bucket
+      convergence with direct oil-price relevance."
+    Why: ≥2 distinct buckets, events directly support the outcome, fresh.
+
+  EXAMPLE 2 — NO-FIRE (thin / surface evidence)
+    Outcome: "Anything that could move WTI by ≥$2/bbl in the next 24 hours."
+    Events:
+      [Conflict @2026-05-29T07:00Z] protest in BR · 0 fatalities · 2026-05-29
+      [Maritime @2026-05-29T06:30Z] EVER GIVEN · flag PA → Rotterdam (routine)
+    report_decision → fire=false, rationale="A non-violent protest in Brazil and
+      a routine container transit carry no material catalyst for a ≥$2/bbl WTI
+      move; evidence is thin."
+    Why: no event meaningfully supports the outcome. Bias toward not firing.
+
+  EXAMPLE 3 — NO-FIRE (high precursor cosine, but live events do not corroborate)
+    Outcome: "Black Sea posture shift that rhymes with a historical episode."
+    Top historical precursor matches:
+      • Feb 2022 · Pre-invasion [state_mobilisation, …] · cosine 0.83
+    Events:
+      [Conflict @2026-05-29T05:00Z] skirmish in UA · 1 fatality · 2026-05-29
+    report_decision → fire=false, rationale="Precursor cosine 0.83 to Feb-2022 is
+      suggestive, but a single low-fatality skirmish does not corroborate a
+      posture shift; high cosine alone is insufficient."
+    Why: precursor similarity is a soft analog, never a standalone trigger.`;
 
 // ─── Tool definition for structured output ───────────────────────
 
