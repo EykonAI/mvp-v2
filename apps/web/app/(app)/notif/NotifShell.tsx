@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import TopNav from '@/components/TopNav';
 import ChatPanel from '@/components/ChatPanel';
 import { RulesList, type RulesListHandle } from '@/components/notif/RulesList';
@@ -36,6 +36,13 @@ interface NotifShellProps {
   // and surfaced progressively in the UI. The prop is accepted now so
   // child components can branch without another plumbing pass.
   viewerTier?: Tier;
+  /**
+   * Honesty-pass v2: ids of suggestions whose required feeds are
+   * empty/stale, computed server-side in page.tsx via getFeedHealth().
+   * NotifShell skips any card whose id is in this set — the library
+   * self-heals as feeds come back online without a code change.
+   */
+  hiddenSuggestionIds?: string[];
 }
 
 /**
@@ -53,9 +60,19 @@ interface NotifShellProps {
  * rule rows, and recent-fire rows are placeholders pointing at the
  * subsequent PRs.
  */
-export function NotifShell({ recentFilter, viewerTier: _viewerTier }: NotifShellProps) {
+export function NotifShell({
+  recentFilter,
+  viewerTier: _viewerTier,
+  hiddenSuggestionIds,
+}: NotifShellProps) {
   const [chatOpen, setChatOpen] = useState(false);
   const [persona, setPersona] = useState<PersonaId>(DEFAULT_PERSONA);
+  // Honesty-pass v2: skip cards whose required feeds are empty/stale.
+  // The Set is rebuilt only when the server-passed array changes.
+  const hiddenSet = useMemo(
+    () => new Set(hiddenSuggestionIds ?? []),
+    [hiddenSuggestionIds],
+  );
   const [advancedEnabled, setAdvancedEnabled] = useState(false);
 
   // Hydrate persona on mount. Order: storage migration → URL param
@@ -129,6 +146,7 @@ export function NotifShell({ recentFilter, viewerTier: _viewerTier }: NotifShell
             onPersonaChange={onPersonaChange}
             recentFilter={recentFilter}
             advancedEnabled={advancedEnabled}
+            hiddenSet={hiddenSet}
           />
         </main>
         <aside
@@ -152,11 +170,13 @@ function NotifContentInner({
   onPersonaChange,
   recentFilter,
   advancedEnabled,
+  hiddenSet,
 }: {
   persona: PersonaId;
   onPersonaChange: (p: PersonaId) => void;
   recentFilter: boolean;
   advancedEnabled: boolean;
+  hiddenSet: Set<string>;
 }) {
   // RulesList exposes openBuilderWith() so the suggestion cards
   // above can pre-fill the same builder instance — no duplicate
@@ -170,8 +190,8 @@ function NotifContentInner({
     <div style={{ padding: '32px 40px 56px', maxWidth: 1200, margin: '0 auto' }}>
       <Header persona={persona} onPersonaChange={onPersonaChange} advancedEnabled={advancedEnabled} />
       {recentFilter && <RecentFiresSection />}
-      <SuggestionLibrarySection persona={persona} onPick={onPickSuggestion} />
-      <CrossDataSuggestionsSection onPick={onPickSuggestion} />
+      <SuggestionLibrarySection persona={persona} onPick={onPickSuggestion} hiddenIds={hiddenSet} />
+      <CrossDataSuggestionsSection onPick={onPickSuggestion} hiddenIds={hiddenSet} />
       <RulesListSection persona={persona} rulesRef={rulesRef} />
     </div>
   );
@@ -329,11 +349,14 @@ function RecentFiresSection() {
 function SuggestionLibrarySection({
   persona,
   onPick,
+  hiddenIds,
 }: {
   persona: PersonaId;
   onPick: (s: Suggestion) => void;
+  hiddenIds: Set<string>;
 }) {
-  const list = PERSONA_SUGGESTIONS[persona] ?? [];
+  // Honesty-pass v2: drop cards whose required feeds are empty/stale.
+  const list = (PERSONA_SUGGESTIONS[persona] ?? []).filter(s => !hiddenIds.has(s.id));
   return (
     <section>
       <SectionHeading
@@ -346,7 +369,14 @@ function SuggestionLibrarySection({
   );
 }
 
-function CrossDataSuggestionsSection({ onPick }: { onPick: (s: Suggestion) => void }) {
+function CrossDataSuggestionsSection({
+  onPick,
+  hiddenIds,
+}: {
+  onPick: (s: Suggestion) => void;
+  hiddenIds: Set<string>;
+}) {
+  const list = CROSS_DATA_SUGGESTIONS.filter(s => !hiddenIds.has(s.id));
   return (
     <section>
       <SectionHeading
@@ -354,7 +384,7 @@ function CrossDataSuggestionsSection({ onPick }: { onPick: (s: Suggestion) => vo
         title="Cross-data AI suggestions"
         hint="multi-bucket · universal"
       />
-      <SuggestionGrid suggestions={CROSS_DATA_SUGGESTIONS} onPick={onPick} />
+      <SuggestionGrid suggestions={list} onPick={onPick} />
     </section>
   );
 }
