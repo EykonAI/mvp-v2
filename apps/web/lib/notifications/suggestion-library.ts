@@ -73,6 +73,24 @@ export type SuggestionConfig =
   | OutcomeAiSuggestionConfig
   | CrossDataAiSuggestionConfig;
 
+/**
+ * Feed-availability gating for the self-healing library (PR honesty
+ * v2). The /notif page probes BUCKET_TABLES once per render via
+ * getFeedHealth() and hides any suggestion whose `requires` cannot
+ * be satisfied. Suggestions reappear automatically the moment their
+ * feed comes back online — no library edit required.
+ *
+ *   warm: bucket must have ANY rows (count > 0)
+ *   hot:  bucket must have rows AND last-ingest within 24h
+ *
+ * Both lists are AND-combined: every bucket listed must pass. Omit
+ * `requires` entirely when the suggestion is feed-agnostic.
+ */
+export interface SuggestionRequires {
+  warm?: DataBucket[];
+  hot?: DataBucket[];
+}
+
 export interface Suggestion {
   /** Stable across edits — used for telemetry / dedupe in the future. */
   id: string;
@@ -81,6 +99,8 @@ export interface Suggestion {
   config: SuggestionConfig;
   /** Optional override; falls back to DEFAULT_COOLDOWN_MINUTES. */
   cooldown_minutes?: number;
+  /** Feed-availability gating — see SuggestionRequires. */
+  requires?: SuggestionRequires;
 }
 
 // ─── Persona libraries (§4) ──────────────────────────────────────
@@ -133,6 +153,7 @@ const ANALYST: Suggestion[] = [
         'Anomaly density spike: a cluster of recent anomaly_flags rows across distinct domains in the same theatre, corroborated by raw events.',
       buckets: ['AnomalyFlags', 'Conflict', 'Maritime', 'Air'],
     },
+    requires: { warm: ['AnomalyFlags'] },
   },
   {
     id: 'analyst-cross-black-sea-precursor',
@@ -156,6 +177,7 @@ const ANALYST: Suggestion[] = [
       ],
       window_hours: 6,
     },
+    requires: { hot: ['EnergyRefineries'] },
   },
   {
     id: 'analyst-single-vessel-dark-hormuz',
@@ -205,6 +227,7 @@ const JOURNALIST: Suggestion[] = [
         'Anomaly_flags + ConvergenceEvents convergence: when multiple recent anomalies cluster into a low-p-value convergence event with a non-trivial synthesis.',
       buckets: ['AnomalyFlags', 'ConvergenceEvents', 'Conflict'],
     },
+    requires: { warm: ['AnomalyFlags', 'ConvergenceEvents'] },
   },
   {
     id: 'journ-cross-weather-conflict-zone',
@@ -236,6 +259,7 @@ const JOURNALIST: Suggestion[] = [
         'Aviation activity surge co-occurring with conflict signals in the same country — coverage angle for airspace-restriction stories.',
       buckets: ['Air', 'Conflict', 'AviationInfra'],
     },
+    requires: { warm: ['Air'] },
   },
   {
     id: 'journ-cross-corroboration-anomaly',
@@ -246,6 +270,7 @@ const JOURNALIST: Suggestion[] = [
         'Same-window anomalies across ≥2 distinct domains in the same theatre, surfaced as a single AnomalyFlags cluster.',
       buckets: ['AnomalyFlags', 'Conflict', 'Maritime'],
     },
+    requires: { warm: ['AnomalyFlags'] },
   },
 ];
 
@@ -330,6 +355,7 @@ const DAY_TRADER: Suggestion[] = [
       buckets: ['AnomalyFlags', 'EnergyRefineries', 'EnergyPipelines'],
     },
     cooldown_minutes: 180,
+    requires: { warm: ['AnomalyFlags'] },
   },
 ];
 
@@ -454,6 +480,7 @@ const NGO: Suggestion[] = [
         'Recent anomaly_flags clustering in a humanitarian-watchlist country, corroborated by raw conflict and power events.',
       buckets: ['AnomalyFlags', 'Conflict', 'EnergyPower'],
     },
+    requires: { warm: ['AnomalyFlags'] },
   },
 ];
 
@@ -475,6 +502,7 @@ const CITIZEN: Suggestion[] = [
       tool: 'aircraft_positions',
       filters: { country: '', min_count: 15 },
     },
+    requires: { warm: ['Air'] },
   },
   {
     id: 'cit-power-grid',
@@ -523,6 +551,7 @@ const CITIZEN: Suggestion[] = [
         'Multiple anomaly_flags or a low-p-value convergence event clustering in my region — surfaces unusual conditions across feeds.',
       buckets: ['AnomalyFlags', 'ConvergenceEvents', 'Conflict'],
     },
+    requires: { warm: ['AnomalyFlags'] },
   },
 ];
 
@@ -547,6 +576,7 @@ const CORPORATE: Suggestion[] = [
       ],
       window_hours: 24,
     },
+    requires: { hot: ['EnergyPower'] },
   },
   {
     id: 'corp-outcome-bcp',
@@ -576,6 +606,7 @@ const CORPORATE: Suggestion[] = [
         'A recent convergence_events row whose synthesis names entities or sectors overlapping my counterparty list (set country on create to narrow).',
       buckets: ['ConvergenceEvents', 'Maritime', 'Conflict'],
     },
+    requires: { warm: ['ConvergenceEvents'] },
   },
   {
     id: 'corp-cross-weather-ops',
@@ -596,6 +627,7 @@ const CORPORATE: Suggestion[] = [
         'AnomalyFlags clustering across distinct domains that, in combination, would activate one of my BCP triggers.',
       buckets: ['AnomalyFlags', 'Conflict', 'Maritime', 'EnergyPower'],
     },
+    requires: { warm: ['AnomalyFlags'] },
   },
 ];
 
@@ -654,6 +686,7 @@ export const CROSS_DATA_SUGGESTIONS: Suggestion[] = [
         'A cluster of recent anomaly_flags rows spanning ≥2 distinct domains in a recent window, corroborated by raw events.',
       buckets: ['AnomalyFlags', 'Conflict', 'Maritime', 'Air'],
     },
+    requires: { warm: ['AnomalyFlags'] },
   },
   {
     id: 'xd-convergence-corroboration',
@@ -664,6 +697,7 @@ export const CROSS_DATA_SUGGESTIONS: Suggestion[] = [
         'A recent convergence_events row with a low joint p-value, whose synthesis is corroborated by raw conflict and maritime events.',
       buckets: ['ConvergenceEvents', 'Conflict', 'Maritime'],
     },
+    requires: { warm: ['ConvergenceEvents'] },
   },
   {
     id: 'xd-weather-ops-disruption',
@@ -703,4 +737,68 @@ export function suggestionBucketCount(suggestion: Suggestion): number {
     return cfg.predicates.length;
   }
   return 1;
+}
+
+// ─── Feed-aware filtering (honesty-pass v2) ─────────────────────
+// /notif renders only the suggestions whose `requires` are satisfied
+// by the live feed-health probe. The helpers below are pure — no DB
+// access — so they can run on either the server (Next.js Server
+// Component) or the client (after a /api/notifications/feeds-health
+// fetch). The probe lives in lib/notifications/feed-health.ts.
+
+/**
+ * Minimal shape of the feed-health probe consumed by the filter — we
+ * only need per-bucket freshness, not the full FeedStatus payload.
+ * This lets the filter run without a runtime dep on feed-health.ts
+ * (which pulls in a Supabase client). The probe still produces the
+ * richer FeedStatus; this is just the slice we read.
+ */
+export interface SuggestionFeedView {
+  freshness: 'live' | 'stale' | 'empty';
+}
+
+export type SuggestionFeedHealth = Partial<Record<DataBucket, SuggestionFeedView>>;
+
+/**
+ * True when every requires.warm bucket has rows (freshness !==
+ * 'empty') and every requires.hot bucket is 'live'. Suggestions with
+ * no `requires` field always pass.
+ */
+export function suggestionFeedRequirementsMet(
+  suggestion: Suggestion,
+  feedHealth: SuggestionFeedHealth,
+): boolean {
+  const req = suggestion.requires;
+  if (!req) return true;
+  for (const b of req.warm ?? []) {
+    const st = feedHealth[b];
+    if (!st || st.freshness === 'empty') return false;
+  }
+  for (const b of req.hot ?? []) {
+    const st = feedHealth[b];
+    if (!st || st.freshness !== 'live') return false;
+  }
+  return true;
+}
+
+/**
+ * Compute the set of suggestion ids whose feed requirements are NOT
+ * met. The /notif page passes this set to NotifShell, which skips any
+ * card whose id is in it. Order of operations:
+ *   1. /notif page (Server Component) calls getFeedHealth(supabase)
+ *   2. computeHiddenSuggestionIds(feedHealth) → string[]
+ *   3. <NotifShell hiddenSuggestionIds={…} />
+ */
+export function computeHiddenSuggestionIds(
+  feedHealth: SuggestionFeedHealth,
+): string[] {
+  const hidden: string[] = [];
+  const all: Suggestion[] = [
+    ...Object.values(PERSONA_SUGGESTIONS).flat(),
+    ...CROSS_DATA_SUGGESTIONS,
+  ];
+  for (const s of all) {
+    if (!suggestionFeedRequirementsMet(s, feedHealth)) hidden.push(s.id);
+  }
+  return hidden;
 }
