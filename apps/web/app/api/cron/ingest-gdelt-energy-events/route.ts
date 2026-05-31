@@ -56,7 +56,10 @@ const COL = {
 const INFRA_THEME_MAP: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['pipeline', ['WB_2299_PIPELINES', 'PIPELINE_INCIDENT', 'ENV_NATURALGAS', 'ENV_GAS']],
   ['refinery', ['WB_2298_REFINERIES', 'ENV_OIL', 'ECON_OILPRICE', 'ECON_HEATINGOIL', 'WB_548_PPP_IN_OIL_AND_GAS', 'WB_539_OIL_AND_GAS_POLICY_STRATEGY_AND_INSTITUTIONS']],
-  ['mine', ['WB_895_MINING_SYSTEMS', 'WB_1699_METAL_ORE_MINING', 'WB_1700_NONMETALLIC_MINERAL_MINING_AND_QUARRYING', 'ENV_MINING']],
+  // ENV_MINING removed (v1.5): it trips on the generic "blast / explosives"
+  // lexicon (e.g. a building *storing* explosives) and drove the bulk of the
+  // observed mining false positives. The WB_* themes are facility-specific.
+  ['mine', ['WB_895_MINING_SYSTEMS', 'WB_1699_METAL_ORE_MINING', 'WB_1700_NONMETALLIC_MINERAL_MINING_AND_QUARRYING']],
   ['power_plant', ['WB_508_POWER_SYSTEMS', 'ENV_NUCLEARPOWER', 'WB_509_NUCLEAR_ENERGY', 'MANMADE_DISASTER_NUCLEAR_ACCIDENT', 'ECON_ELECTRICALGENERATION', 'ECON_ELECTRICALDEMAND', 'ECON_ELECTRICALLOADSHEDDING', 'POWER_OUTAGE', 'MANMADE_DISASTER_POWER_OUTAGES', 'WB_525_RENEWABLE_ENERGY', 'WB_528_SOLAR_ENERGY', 'ENV_WINDPOWER']],
   ['other', ['WB_507_ENERGY_AND_EXTRACTIVES', 'FUELPRICES', 'ECON_GASOLINEPRICE']],
 ];
@@ -104,19 +107,53 @@ function pageTitle(extras: string | undefined): string | null {
   return m ? m[1].trim() || null : null;
 }
 
-// First V2Locations entry → { country (FIPS 10-4), lat, lon }.
-function firstLocation(v2locations: string | undefined): {
+// Primary V2Locations entry → { country (FIPS 10-4), lat, lon }.
+// GDELT lists locations in order of *appearance*, not salience, so the
+// first entry is often a tangential mention — a Myanmar bombing whose
+// article also name-checks China lands country=CH. We instead pick the
+// most-frequently-mentioned country across all location entries (ties
+// broken by first appearance), then take the lat/lon of the first entry
+// belonging to that winning country. Falls back to the first entry when
+// there are 0/1 distinct countries.
+function primaryLocation(v2locations: string | undefined): {
   country: string | null;
   latitude: number | null;
   longitude: number | null;
 } {
-  const first = (v2locations || '').split(';')[0];
-  if (!first) return { country: null, latitude: null, longitude: null };
-  const p = first.split('#');
-  const lat = parseFloat(p[5] ?? '');
-  const lon = parseFloat(p[6] ?? '');
+  const entries = (v2locations || '')
+    .split(';')
+    .map((e) => e.split('#'))
+    .filter((p) => p.length >= 7); // need through lon (index 6)
+  if (entries.length === 0) return { country: null, latitude: null, longitude: null };
+
+  // Tally country FIPS codes, remembering first-appearance order so a tie
+  // resolves to the earliest-mentioned country.
+  const counts = new Map<string, number>();
+  const order: string[] = [];
+  for (const p of entries) {
+    const c = (p[2] || '').trim();
+    if (!c) continue;
+    if (!counts.has(c)) order.push(c);
+    counts.set(c, (counts.get(c) ?? 0) + 1);
+  }
+
+  let winner: string | null = null;
+  let best = 0;
+  for (const c of order) {
+    const n = counts.get(c) ?? 0;
+    if (n > best) {
+      best = n;
+      winner = c;
+    }
+  }
+
+  // lat/lon from the first entry of the winning country (keeps the point
+  // consistent with the country); fall back to the first entry overall.
+  const pick = (winner && entries.find((p) => (p[2] || '').trim() === winner)) || entries[0];
+  const lat = parseFloat(pick[5] ?? '');
+  const lon = parseFloat(pick[6] ?? '');
   return {
-    country: (p[2] || '').trim() || null,
+    country: winner ?? ((pick[2] || '').trim() || null),
     latitude: Number.isFinite(lat) ? lat : null,
     longitude: Number.isFinite(lon) ? lon : null,
   };
@@ -188,7 +225,7 @@ function parseGkg(csv: string): InfraEventRow[] {
     const event_type = classifyEvent(themeSet);
     if (!event_type) continue; // no high-confidence incident → drop
 
-    const { country, latitude, longitude } = firstLocation(f[COL.V2LOCATIONS]);
+    const { country, latitude, longitude } = primaryLocation(f[COL.V2LOCATIONS]);
     const toneRaw = parseFloat((f[COL.V2TONE] || '').split(',')[0]);
     const url = (f[COL.DOCUMENT_IDENTIFIER] || '').trim();
 
