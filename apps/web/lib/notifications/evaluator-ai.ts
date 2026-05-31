@@ -171,6 +171,19 @@ const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
     format: r =>
       `[ConvergenceEvents @${r.created_at ?? '?'}] ${r.location ?? '?'} · p=${r.joint_p_value ?? '?'} · ${typeof r.synthesis === 'string' ? r.synthesis.slice(0, 120) : ''}`,
   },
+  // ─── GDELT energy-infra incident stream (PR 2) ───────────────
+  // Precision-first GKG-derived events keyed to the static infra
+  // registries. country is FIPS 10-4 (matches Conflict), so ILIKE
+  // narrowing shares the conflict_events country convention.
+  {
+    bucket: 'InfrastructureEvents',
+    table: 'infrastructure_events',
+    columns: 'event_type, infrastructure_type, country, severity, tone, title, ingested_at',
+    recencyColumn: 'ingested_at',
+    countryColumn: 'country',
+    format: r =>
+      `[InfrastructureEvents @${r.ingested_at ?? '?'}] ${r.event_type ?? '?'} on ${r.infrastructure_type ?? '?'} · ${r.country ?? '?'} · severity ${r.severity ?? '?'} · tone ${r.tone ?? '?'}`,
+  },
   // Weather bucket has no persistent table — it's an Open-Meteo
   // pull-on-demand. AI rules that lean on Weather get a "no recent
   // weather rows" footnote in the events block.
@@ -193,9 +206,10 @@ You will receive:
      - "Anything that could move WTI by ≥$2/bbl in the next 24 hours."
      - "Conditions that could displace ≥10,000 people in a watchlist region."
      - "A coordinated cyber + kinetic operation in the same theatre."
-  2. An events list pulled from up to 12 data buckets (Air, Maritime, Conflict,
+  2. An events list pulled from up to 13 data buckets (Air, Maritime, Conflict,
      EnergyPower, EnergyPipelines, EnergyRefineries, Mining, AviationInfra,
-     MaritimeInfra, Weather, AnomalyFlags, ConvergenceEvents). Each line is
+     MaritimeInfra, Weather, AnomalyFlags, ConvergenceEvents,
+     InfrastructureEvents). Each line is
      prefixed with [Bucket @timestamp] — the timestamp is the row's ingestion
      or creation time and lets you reason about ordering and recency across
      buckets. Older events have been truncated to fit a token budget.
@@ -257,6 +271,17 @@ Bucket inventory and approximate semantics:
                        Claude-written one-liner from a prior pass —
                        you may use it as a hint but corroborate
                        against the raw event evidence.
+  InfrastructureEvents — GDELT-derived incident stream over the static
+                       energy-infra registries. event_type is attack |
+                       accident | shutdown; infrastructure_type is
+                       refinery / pipeline / mine / power_plant / other;
+                       severity is high for attacks and nuclear
+                       accidents, else medium. tone is GDELT V2 average
+                       tone (negative = adverse coverage). Precision-
+                       first, so a row signals a credible incident AT
+                       energy infrastructure — but country is FIPS 10-4
+                       (not ISO-2) and a few mining rows can be noisy,
+                       so corroborate before firing on this alone.
 
 Worked examples (these illustrate the decision rules above — follow the same
 reasoning, do not pattern-match on surface keywords):
@@ -479,7 +504,7 @@ export async function decideWithClaude(
   const eventsBlock = events.length > 0 ? events.join('\n') : '(no recent events in scope)';
   const country = resolveCountryFilter(rule);
   const countryBlock = country
-    ? `Country / region filter: ${country}. Air and Maritime are narrowed via lat/lon geofence against the geo_regions table (operational/overflight country, not registration). Conflict, EnergyPower, EnergyPipelines, EnergyRefineries, Mining, AviationInfra, MaritimeInfra are narrowed via ILIKE on their country column. ConvergenceEvents is narrowed via ILIKE on the location field. Weather is sampled from Open-Meteo at the region's centroid. AnomalyFlags is NOT narrowed (no per-row geo signal yet).\n\n`
+    ? `Country / region filter: ${country}. Air and Maritime are narrowed via lat/lon geofence against the geo_regions table (operational/overflight country, not registration). Conflict, EnergyPower, EnergyPipelines, EnergyRefineries, Mining, AviationInfra, MaritimeInfra, InfrastructureEvents are narrowed via ILIKE on their country column. ConvergenceEvents is narrowed via ILIKE on the location field. Weather is sampled from Open-Meteo at the region's centroid. AnomalyFlags is NOT narrowed (no per-row geo signal yet).\n\n`
     : '';
 
   // PR 7: surface top-3 historical precursor analogs when the outcome
