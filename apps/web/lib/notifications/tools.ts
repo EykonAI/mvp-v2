@@ -189,6 +189,10 @@ export const DATA_BUCKETS = [
   // anomalies into joint p-value windows.
   'AnomalyFlags',
   'ConvergenceEvents',
+  // PR 2: GDELT-derived incident stream over the static energy-infra
+  // registries (refineries / pipelines / mines / power). Written by
+  // /api/cron/ingest-gdelt-energy-events into infrastructure_events.
+  'InfrastructureEvents',
 ] as const;
 export type DataBucket = (typeof DATA_BUCKETS)[number];
 
@@ -265,6 +269,7 @@ export const BUCKET_TABLES: ReadonlyArray<BucketTableSpec> = [
   { bucket: 'MaritimeInfra',     table: 'ports',             recencyColumn: 'ingested_at', countryColumn: 'country' },
   { bucket: 'AnomalyFlags',      table: 'anomaly_flags',     recencyColumn: 'created_at' },
   { bucket: 'ConvergenceEvents', table: 'convergence_events',recencyColumn: 'created_at',  countryColumn: 'location' },
+  { bucket: 'InfrastructureEvents', table: 'infrastructure_events', recencyColumn: 'ingested_at', countryColumn: 'country', defaultDistinctColumn: 'gkg_record_id' },
   // Weather has no persistent table — intentionally excluded so the
   // aggregate evaluator rejects 'Weather' as a bucket choice.
 ];
