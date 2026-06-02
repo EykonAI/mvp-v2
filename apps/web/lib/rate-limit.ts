@@ -72,6 +72,46 @@ export async function checkAttributionIpRate(opts: {
 }
 
 /**
+ * Counts channel_touchpoints for the given ip_hash in the trailing
+ * window — the PAMS sibling of checkAttributionIpRate. The silent
+ * channel-capture route (/api/attribution/channel) writes to
+ * channel_touchpoints, NOT attribution_events, so it needs its own
+ * counter against the right table. Backed by idx_ctp_ip
+ * (ip_hash, created_at DESC) from migration 046.
+ *
+ * Same fail-open contract: a count error returns `exceeded: false` so a
+ * buggy limiter never blocks the (silent) capture path.
+ */
+export async function checkChannelTouchIpRate(opts: {
+  ipHash: string;
+  windowSeconds: number;
+  max: number;
+}): Promise<RateLimitResult> {
+  if (!opts.ipHash) return FAIL_OPEN;
+
+  const cutoff = new Date(Date.now() - opts.windowSeconds * 1000).toISOString();
+  try {
+    const admin = createServerSupabase();
+    const { count, error } = await admin
+      .from('channel_touchpoints')
+      .select('id', { count: 'exact', head: true })
+      .eq('ip_hash', opts.ipHash)
+      .gt('created_at', cutoff);
+
+    if (error) {
+      safeError('[rate-limit] channel touch count failed', error.message);
+      return FAIL_OPEN;
+    }
+
+    const current = count ?? 0;
+    return { exceeded: current >= opts.max, current };
+  } catch (err) {
+    safeError('[rate-limit] channel touch count threw', err);
+    return FAIL_OPEN;
+  }
+}
+
+/**
  * Counts the user's recent share creations across both shareable tables
  * (`user_queries` for analyst artifacts, `user_notification_log` for
  * notification artifacts) in the trailing window. A row counts only when
