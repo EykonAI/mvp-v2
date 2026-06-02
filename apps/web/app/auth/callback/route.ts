@@ -3,6 +3,7 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { captureServer, identifyServer } from '@/lib/analytics/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { EYKON_REF_COOKIE, isValidPublicId } from '@/lib/referral/attribution';
+import { EYKON_CHANNEL_COOKIE, normalizeChannel } from '@/lib/attribution/channels';
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -101,6 +102,12 @@ export async function GET(request: NextRequest) {
     // post-exchange here. No-op when the trigger already populated
     // referred_by, or when the cookie is absent / invalid / unknown.
     await resolveEykonRefForOAuthSignup(user.id, request);
+
+    // PAMS — OAuth signup fallback for the marketing channel. OAuth
+    // signups bypass the signup page's metadata path, so the
+    // handle_new_user trigger never sees eykon_channel. Resolve the
+    // cookie post-exchange here, mirroring the referral fallback above.
+    await resolveEykonChannelForOAuthSignup(user.id, request);
   }
 
   // Preserve ?plan for downstream checkout handoff (Phase 4/5).
@@ -146,4 +153,32 @@ async function resolveEykonRefForOAuthSignup(userId: string, request: NextReques
     .update({ referred_by: referrer.id, referred_by_pending: null })
     .eq('id', userId)
     .is('referred_by', null);
+}
+
+async function resolveEykonChannelForOAuthSignup(userId: string, request: NextRequest) {
+  const channel = normalizeChannel(request.cookies.get(EYKON_CHANNEL_COOKIE)?.value ?? null);
+  if (!channel) return;
+
+  const admin = createServerSupabase();
+
+  const { data: profile } = await admin
+    .from('user_profiles')
+    .select('id, acquisition_channel, acquisition_channel_pending')
+    .eq('id', userId)
+    .maybeSingle();
+
+  // No row, or first-touch already captured/finalised — leave it alone
+  // (first-touch wins). Also no-ops gracefully if migration 046 has not
+  // been applied yet: the select returns an error, profile is null.
+  if (!profile) return;
+  if (profile.acquisition_channel || profile.acquisition_channel_pending) return;
+
+  await admin
+    .from('user_profiles')
+    .update({ acquisition_channel_pending: channel })
+    .eq('id', userId)
+    // Re-assert the no-overwrite guard at update time to close the race
+    // between the SELECT above and this UPDATE.
+    .is('acquisition_channel', null)
+    .is('acquisition_channel_pending', null);
 }
