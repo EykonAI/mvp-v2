@@ -5,6 +5,11 @@ import {
   EYKON_REF_COOKIE_MAX_AGE_SECONDS,
   parseEykonRefFromSearchParams,
 } from '@/lib/referral/attribution';
+import {
+  EYKON_CHANNEL_COOKIE,
+  EYKON_CHANNEL_COOKIE_MAX_AGE_SECONDS,
+  parseChannelFromSearchParams,
+} from '@/lib/attribution/channels';
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -18,7 +23,11 @@ function isAppPath(pathname: string): boolean {
 
 export async function middleware(request: NextRequest) {
   const response = await runAuthFlow(request);
-  return applyAttributionCookie(request, response);
+  // Two independent first-touch captures, both edge-cheap (cookie only,
+  // no DB): ?ref= referral (lib/referral) and utm_source/?ch marketing
+  // channel (PAMS, lib/attribution). They read different params into
+  // different cookies and never clobber each other.
+  return applyChannelCookie(request, applyAttributionCookie(request, response));
 }
 
 async function runAuthFlow(request: NextRequest): Promise<NextResponse> {
@@ -96,6 +105,41 @@ function applyAttributionCookie(request: NextRequest, response: NextResponse): N
   // public_id appears in URLs) so there is no secret to protect.
   response.cookies.set(EYKON_REF_COOKIE, ref, {
     maxAge: EYKON_REF_COOKIE_MAX_AGE_SECONDS,
+    sameSite: 'lax',
+    httpOnly: false,
+    secure: process.env.NODE_ENV === 'production',
+    path: '/',
+  });
+
+  return response;
+}
+
+/**
+ * PAMS first-touch channel capture. The marketing-channel analogue of
+ * applyAttributionCookie: if the URL carries utm_source (or the ?ch=
+ * alias) for a recognised channel and the visitor has no eykon_channel
+ * cookie yet, set it (90 d, sameSite=lax, secure in prod). First-touch
+ * wins — never overwrite, so a later untagged or differently-tagged
+ * visit cannot steal attribution from the original channel.
+ *
+ * Not httpOnly — the signup page reads it client-side to forward into
+ * raw_user_meta_data, where the handle_new_user trigger (migration 047)
+ * parks it on acquisition_channel_pending. The value is a non-secret
+ * marketing tag (it literally appears in the campaign URL), so there is
+ * nothing to protect by hiding it from JS.
+ *
+ * Distinct from ?ref= (referral): different param, different cookie. The
+ * DB-side touch log happens later from <ChannelCapture> →
+ * /api/attribution/channel; middleware does no DB work to keep the edge fast.
+ */
+function applyChannelCookie(request: NextRequest, response: NextResponse): NextResponse {
+  if (request.cookies.has(EYKON_CHANNEL_COOKIE)) return response;
+
+  const channel = parseChannelFromSearchParams(request.nextUrl.searchParams);
+  if (!channel) return response;
+
+  response.cookies.set(EYKON_CHANNEL_COOKIE, channel, {
+    maxAge: EYKON_CHANNEL_COOKIE_MAX_AGE_SECONDS,
     sameSite: 'lax',
     httpOnly: false,
     secure: process.env.NODE_ENV === 'production',

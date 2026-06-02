@@ -8,6 +8,7 @@ import { OAuthButtons } from '@/components/auth/OAuthButtons';
 import { isValidReferralCode } from '@/lib/auth/referral';
 import { getRewardfulReferral } from '@/components/referral/RewardfulScript';
 import { EYKON_REF_COOKIE, isValidPublicId } from '@/lib/referral/attribution';
+import { EYKON_CHANNEL_COOKIE, normalizeChannel } from '@/lib/attribution/channels';
 
 export default function SignUpPage() {
   return (
@@ -25,6 +26,16 @@ function readEykonRefCookie(): string | null {
   if (!match) return null;
   const value = decodeURIComponent(match[1]);
   return isValidPublicId(value) ? value : null;
+}
+
+function readEykonChannelCookie(): string | null {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(
+    new RegExp(`(?:^|;\\s*)${EYKON_CHANNEL_COOKIE}=([^;]+)`),
+  );
+  if (!match) return null;
+  // Re-validate against the canonical list before forwarding.
+  return normalizeChannel(decodeURIComponent(match[1]));
 }
 
 function SignUpForm() {
@@ -73,6 +84,11 @@ function SignUpForm() {
     // public_id and writes referred_by on the new user_profiles row.
     const eykonRef = readEykonRefCookie();
     if (eykonRef) metadata.eykon_ref = eykonRef;
+    // PAMS (migration 047): forward the first-touch marketing channel
+    // from the eykon_channel cookie so handle_new_user parks it on
+    // acquisition_channel_pending, finalised at first paid conversion.
+    const eykonChannel = readEykonChannelCookie();
+    if (eykonChannel) metadata.eykon_channel = eykonChannel;
 
     const { data, error: signUpError } = await supabase.auth.signUp({
       email,

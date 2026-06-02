@@ -1,6 +1,7 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import { PostHogProvider } from '@/components/analytics/PostHogProvider';
+import { ChannelCapture } from '@/components/attribution/ChannelCapture';
 
 export const metadata: Metadata = {
   title: 'eYKON.ai — Geopolitical Intelligence Platform',
@@ -21,6 +22,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="bg-eykon-bg-void text-eykon-ink antialiased">
+        {/* PAMS: records the inbound marketing-channel touch on any tagged
+            landing (utm_source/?ch). No-op on untagged pages. */}
+        <ChannelCapture />
         <PostHogProvider>{children}</PostHogProvider>
       </body>
     </html>
