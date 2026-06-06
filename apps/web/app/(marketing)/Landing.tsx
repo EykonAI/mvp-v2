@@ -586,6 +586,11 @@ export function Landing() {
                 Polygon and Base. Settles in minutes, no chargebacks. Price is quoted in
                 USD-equivalent and locked for 20 minutes at checkout.
               </p>
+              <p>
+                That <span className="pct">30%</span> is the <strong>founding</strong> crypto
+                rate — lock it for life by claiming one of the first 1,000 seats. Once they&apos;re
+                gone, standard crypto pricing is <span className="pct">15%</span> off.
+              </p>
             </div>
           </div>
           <div className="crypto-coins">
@@ -695,6 +700,8 @@ export function Landing() {
           choose your coin (USDC, BTC, ETH, or USDT). Your wallet is quoted in USD-equivalent
           at execution price via our payment processor. Crypto payments are annual-only — no
           monthly subscriptions on-chain — and the 30% discount applies automatically.
+          That 30% is part of the founding offer: claim one of the first 1,000 seats and it&apos;s
+          locked for life. Once those are gone, standard crypto pricing is 15% off.
         </Faq>
         <Faq q="Which cryptocurrencies do you accept?">
           USDC, USDT, BTC, ETH on their native chains, plus USDC and USDT on Polygon and Base
