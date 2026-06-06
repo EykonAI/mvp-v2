@@ -72,7 +72,8 @@ const ENTERPRISE_CTA: Record<Cycle, CtaAction> = {
 const NAV_ANCHORS = ['top', 'platform', 'intelligence', 'pricing', 'faq'] as const;
 
 export function Landing() {
-  const [cycle, setCycle] = useState<Cycle>('monthly');
+  // Pricing grid lands on Annual by default (better anchor than monthly).
+  const [cycle, setCycle] = useState<Cycle>('annual');
   const [modalOpen, setModalOpen] = useState(false);
   const [modalTier, setModalTier] = useState<'pro' | 'enterprise'>('pro');
   const [activeSection, setActiveSection] = useState<string>('top');
