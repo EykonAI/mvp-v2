@@ -23,8 +23,8 @@ const PRO_PRICES: Record<Cycle, PriceText> = {
   'annual-crypto': {
     amt: '$244',
     per: '/ year in crypto',
-    strike: '$832/yr standard',
-    savings: '−71%',
+    strike: '$1,010/yr standard',
+    savings: '−76%',
   },
 };
 
@@ -39,8 +39,8 @@ const ENTERPRISE_PRICES: Record<Cycle, PriceText> = {
   'annual-crypto': {
     amt: '$832',
     per: '/ seat / yr in crypto',
-    strike: '$1,671/seat/yr standard',
-    savings: '−50%',
+    strike: '$2,030/seat/yr standard',
+    savings: '−59%',
   },
 };
 

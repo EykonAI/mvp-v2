@@ -4,7 +4,13 @@
 // Phase 4 (crypto) consumes the CRYPTO_VARIANTS subset (annual-only).
 // Phase 5 (fiat, deferred) will add monthly + annual via Lemon Squeezy.
 
-export const CRYPTO_DISCOUNT = 0.30; // 30% off annual fiat price
+// Crypto discount is decoupled by cohort (decision 2026-06-06):
+//   • Founding members keep the deep −30% offer — it's part of the
+//     "first 1,000 · locked for life" founding deal and is never re-priced.
+//   • Standard (post-founding) crypto buyers get −15%.
+// Both are off the respective annual fiat price for the same tier.
+export const FOUNDING_CRYPTO_DISCOUNT = 0.30; // founding crypto: 30% off founding annual fiat
+export const STANDARD_CRYPTO_DISCOUNT = 0.15; // standard crypto: 15% off standard annual fiat
 export const ENTERPRISE_MIN_SEATS = 3;
 
 export type Tier = 'citizen' | 'pro' | 'desk' | 'enterprise';
@@ -44,11 +50,11 @@ export type CryptoVariant = {
 
 const round = (x: number) => Math.round(x);
 
-// Pricing source of truth:
-// Pro founding monthly = $29/mo   → annual $348  → crypto $244  (= $348 × 0.70 rounded)
-// Pro standard monthly = $99/mo   → annual $1188 → crypto $832
-// Enterprise founding  = $99/seat/mo → annual $1188/seat → crypto $832/seat → total $2496 for 3 seats
-// Enterprise standard  = $199/seat/mo → annual $2388/seat → crypto $1671/seat → total $5013 for 3 seats
+// Pricing source of truth (founding crypto −30%, standard crypto −15%):
+// Pro founding monthly = $29/mo   → annual $348  → crypto $243.60  (= $348 × 0.70)
+// Pro standard monthly = $99/mo   → annual $1188 → crypto $1009.80 (= $1188 × 0.85)
+// Enterprise founding  = $99/seat/mo  → annual $1188/seat → crypto $831.60/seat  → total $2494.80 for 3 seats
+// Enterprise standard  = $199/seat/mo → annual $2388/seat → crypto $2029.80/seat → total $6089.40 for 3 seats
 
 export const CRYPTO_VARIANTS: Record<CryptoVariantId, CryptoVariant> = {
   pro_founding_annual: {
@@ -59,7 +65,7 @@ export const CRYPTO_VARIANTS: Record<CryptoVariantId, CryptoVariant> = {
     seats: 1,
     label: 'Pro · Founding Member · Annual (crypto)',
     fiat_per_seat_annual_usd_cents: 34_800,
-    crypto_total_usd_cents: round(34_800 * (1 - CRYPTO_DISCOUNT)), // 24360 → $243.60
+    crypto_total_usd_cents: round(34_800 * (1 - FOUNDING_CRYPTO_DISCOUNT)), // 24360 → $243.60
     crypto_price_currency: 'usd',
   },
   pro_standard_annual: {
@@ -70,7 +76,7 @@ export const CRYPTO_VARIANTS: Record<CryptoVariantId, CryptoVariant> = {
     seats: 1,
     label: 'Pro · Standard · Annual (crypto)',
     fiat_per_seat_annual_usd_cents: 118_800,
-    crypto_total_usd_cents: round(118_800 * (1 - CRYPTO_DISCOUNT)), // 83160 → $831.60
+    crypto_total_usd_cents: round(118_800 * (1 - STANDARD_CRYPTO_DISCOUNT)), // 100980 → $1009.80
     crypto_price_currency: 'usd',
   },
   enterprise_founding_annual: {
@@ -82,7 +88,7 @@ export const CRYPTO_VARIANTS: Record<CryptoVariantId, CryptoVariant> = {
     label: `Enterprise · Founding · Annual · ${ENTERPRISE_MIN_SEATS} seats (crypto)`,
     fiat_per_seat_annual_usd_cents: 118_800,
     crypto_total_usd_cents: round(
-      118_800 * ENTERPRISE_MIN_SEATS * (1 - CRYPTO_DISCOUNT),
+      118_800 * ENTERPRISE_MIN_SEATS * (1 - FOUNDING_CRYPTO_DISCOUNT),
     ), // 249480 → $2494.80
     crypto_price_currency: 'usd',
   },
@@ -95,8 +101,8 @@ export const CRYPTO_VARIANTS: Record<CryptoVariantId, CryptoVariant> = {
     label: `Enterprise · Standard · Annual · ${ENTERPRISE_MIN_SEATS} seats (crypto)`,
     fiat_per_seat_annual_usd_cents: 238_800,
     crypto_total_usd_cents: round(
-      238_800 * ENTERPRISE_MIN_SEATS * (1 - CRYPTO_DISCOUNT),
-    ), // 501480 → $5014.80
+      238_800 * ENTERPRISE_MIN_SEATS * (1 - STANDARD_CRYPTO_DISCOUNT),
+    ), // 608940 → $6089.40
     crypto_price_currency: 'usd',
   },
 };
