@@ -106,8 +106,12 @@ function SignUpForm() {
     }
 
     if (data.session) {
-      // Email confirmation is disabled → we already have a session.
-      router.push(next);
+      // Email confirmation is disabled → we already have a session. If a paid
+      // plan was selected, hand off to /pricing so the checkout launcher fires
+      // immediately; otherwise drop the user on `next` (the globe by default).
+      // Without this, the plan was lost here and checkout never started unless
+      // email confirmation happened to be on (which carries plan via /auth/callback).
+      router.push(plan ? `/pricing?plan=${encodeURIComponent(plan)}` : next);
       router.refresh();
       return;
     }
