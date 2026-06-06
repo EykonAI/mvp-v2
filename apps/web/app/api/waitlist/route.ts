@@ -5,6 +5,7 @@ import { isValidReferralCode } from '@/lib/auth/referral';
 import { sendWaitlistConfirmation } from '@/lib/email/send';
 import { captureServer } from '@/lib/analytics/server';
 import { safeError } from '@/lib/log';
+import { resolveRequestCountry } from '@/lib/geo/request-country';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,6 +72,9 @@ export async function POST(request: NextRequest) {
     ? crypto.createHash('sha256').update(ip).digest('hex').slice(0, 24)
     : null;
   const userAgent = request.headers.get('user-agent')?.slice(0, 200) ?? null;
+  // ISO-3166 alpha-2, resolved from the edge geo header (never the raw IP).
+  // null when the edge provides no geo header — stored as NULL, shown "—".
+  const country = resolveRequestCountry(request.headers);
 
   const admin = createServerSupabase();
 
@@ -83,6 +87,7 @@ export async function POST(request: NextRequest) {
       referral_code: referralCode,
       ip_hash: ipHash,
       user_agent: userAgent,
+      country,
     })
     .select('id, created_at')
     .single();
