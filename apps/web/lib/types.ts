@@ -150,6 +150,7 @@ export interface SubLayerDef {
   dataKey?: 'aircraft' | 'vessels' | 'conflicts' | 'airports' | 'ports' | 'power-plants' | 'pipelines' | 'refineries' | 'mines';
   predicate?: (item: any) => boolean;
   comingSoon?: string;        // tooltip text for `planned` sub-layers
+  defaultHidden?: boolean;    // `live` layer that starts toggled OFF (still loads + toggleable)
 }
 
 export interface CategoryDef {
