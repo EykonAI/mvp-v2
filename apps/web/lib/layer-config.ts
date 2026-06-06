@@ -72,7 +72,7 @@ export const CATEGORIES: CategoryDef[] = [
       { key: 'infrastructure.refineries', label: 'Refineries', status: 'live',
         dataKey: 'refineries', predicate: () => true },
       { key: 'infrastructure.pipelines', label: 'Pipelines', status: 'live',
-        dataKey: 'pipelines', predicate: () => true },
+        dataKey: 'pipelines', predicate: () => true, defaultHidden: true },
       { key: 'infrastructure.airports', label: 'Airports', status: 'live',
         dataKey: 'airports', predicate: () => true },
       { key: 'infrastructure.ports', label: 'Ports', status: 'live',
@@ -88,15 +88,18 @@ export type DataKey = 'aircraft' | 'vessels' | 'conflicts' | 'airports' | 'ports
 export const DATA_KEYS: DataKey[] = ['aircraft', 'vessels', 'conflicts', 'airports', 'ports', 'power-plants', 'pipelines', 'refineries', 'mines'];
 
 /**
- * Default visibility: all live sub-layers on, all planned sub-layers off.
- * Planned sub-layers can never be turned on by the user since they have no
- * data path — keeping them `false` keeps the filtering logic uniform.
+ * Default visibility: live sub-layers on (except those flagged
+ * `defaultHidden`, which start off to keep the globe uncluttered — e.g.
+ * pipelines), all planned sub-layers off. Planned sub-layers can never be
+ * turned on by the user since they have no data path — keeping them `false`
+ * keeps the filtering logic uniform. `defaultHidden` layers remain fully
+ * toggleable; only their initial state changes.
  */
 export function defaultSublayerVisibility(): Record<string, boolean> {
   const out: Record<string, boolean> = {};
   for (const cat of CATEGORIES) {
     for (const sub of cat.sublayers) {
-      out[sub.key] = sub.status === 'live';
+      out[sub.key] = sub.status === 'live' && !sub.defaultHidden;
     }
   }
   return out;
