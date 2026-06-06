@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation';
 import WelcomeGreeting from '@/components/WelcomeGreeting';
 import NotificationBell from '@/components/NotificationBell';
 import CalibrationBadge from '@/components/CalibrationBadge';
+import LogoutButton from '@/components/LogoutButton';
 
 interface TopNavProps {
   chatOpen?: boolean;
@@ -103,6 +104,7 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
       </span>
 
       <WelcomeGreeting />
+      <LogoutButton />
 
       {/* LIVE pill */}
       <span
