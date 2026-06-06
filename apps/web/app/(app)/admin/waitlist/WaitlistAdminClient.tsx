@@ -11,6 +11,7 @@ export type WaitlistRow = {
   confirmed_email: boolean;
   notified_at: string | null;
   converted_user_id: string | null;
+  unsubscribed_at: string | null;
   created_at: string;
 };
 
@@ -21,6 +22,7 @@ export type WaitlistStats = {
   confirmed: number;
   notified: number;
   converted: number;
+  unsubscribed: number;
   cap: number;
   claimed: number;
   paidFounders: number;
@@ -28,9 +30,10 @@ export type WaitlistStats = {
   spotsLeft: number;
 };
 
-type Status = 'pending' | 'confirmed' | 'notified' | 'converted';
+type Status = 'pending' | 'confirmed' | 'notified' | 'converted' | 'unsubscribed';
 
 function statusOf(row: WaitlistRow): Status {
+  if (row.unsubscribed_at) return 'unsubscribed';
   if (row.converted_user_id) return 'converted';
   if (row.notified_at) return 'notified';
   if (row.confirmed_email) return 'confirmed';
@@ -42,6 +45,7 @@ const STATUS_COLOR: Record<Status, string> = {
   confirmed: 'var(--teal)',
   notified: 'var(--amber)',
   converted: 'var(--green, var(--teal))',
+  unsubscribed: 'var(--red, #e0566a)',
 };
 
 function formatDate(iso: string | null): string {
@@ -129,6 +133,7 @@ export function WaitlistAdminClient({
   const [status, setStatus] = useState<'all' | Status>('all');
   const [country, setCountry] = useState<string>('all');
   const [query, setQuery] = useState('');
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
 
   const countries = useMemo(() => {
     const set = new Set<string>();
@@ -206,6 +211,7 @@ export function WaitlistAdminClient({
         <StatCard label="Confirmed" value={String(stats.confirmed)} sub="double opt-in" />
         <StatCard label="Notified" value={String(stats.notified)} sub="payment link sent" />
         <StatCard label="Converted" value={String(stats.converted)} sub="became founders" />
+        <StatCard label="Unsubscribed" value={String(stats.unsubscribed)} sub="opted out" />
       </div>
 
       {/* Filters */}
@@ -238,6 +244,7 @@ export function WaitlistAdminClient({
             ['confirmed', 'Confirmed'],
             ['notified', 'Notified'],
             ['converted', 'Converted'],
+            ['unsubscribed', 'Unsubscribed'],
           ]}
         />
         <Select
@@ -283,6 +290,25 @@ export function WaitlistAdminClient({
           }}
         >
           ↓ CSV ({filtered.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setBroadcastOpen(true)}
+          style={{
+            fontFamily: 'var(--f-mono)',
+            fontSize: 11,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            color: 'var(--bg-void)',
+            background: 'var(--teal)',
+            border: '1px solid var(--teal)',
+            borderRadius: 4,
+            padding: '9px 14px',
+            cursor: 'pointer',
+            fontWeight: 600,
+          }}
+        >
+          ✉ Email contacts
         </button>
       </div>
 
@@ -339,6 +365,13 @@ export function WaitlistAdminClient({
             </tbody>
           </table>
         </div>
+      )}
+
+      {broadcastOpen && (
+        <BroadcastModal
+          filters={{ tier, status, country, email: query.trim() }}
+          onClose={() => setBroadcastOpen(false)}
+        />
       )}
     </section>
   );
@@ -525,3 +558,332 @@ function Select({
     </label>
   );
 }
+
+type PreviewData = {
+  matching: number;
+  already_sent: number;
+  recipient_count: number;
+  capped: number;
+  dry_run: boolean;
+};
+
+type SendResultData = {
+  sent: number;
+  failed: number;
+  skipped_already_sent: number;
+  capped_not_sent: number;
+  dry_run: boolean;
+};
+
+// Founder-composed transactional broadcast. Enforces the brief's guardrail:
+// compose → preview the REAL recipient count → explicit confirm. Editing the
+// subject/body after a preview clears it, so the count shown can never be
+// stale relative to what gets sent. Nothing fires on open or on a single click.
+function BroadcastModal({
+  filters,
+  onClose,
+}: {
+  filters: { tier: string; status: string; country: string; email: string };
+  onClose: () => void;
+}) {
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [preview, setPreview] = useState<PreviewData | null>(null);
+  const [result, setResult] = useState<SendResultData | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const subjectOk = subject.trim().length >= 3 && subject.trim().length <= 200;
+  const bodyOk = body.trim().length >= 10 && body.trim().length <= 5000;
+  const canCompose = subjectOk && bodyOk;
+
+  async function call(extra: Record<string, unknown>) {
+    const res = await fetch('/api/admin/waitlist/broadcast', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ subject, body, filters, ...extra }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data?.error as string) ?? 'Request failed.');
+    return data;
+  }
+
+  async function onPreview() {
+    setError(null);
+    setResult(null);
+    setBusy(true);
+    try {
+      setPreview((await call({ preview: true })) as PreviewData);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Preview failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onSend() {
+    setError(null);
+    setBusy(true);
+    try {
+      setResult((await call({})) as SendResultData);
+      setPreview(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Send failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const filterSummary = `tier=${filters.tier} · status=${filters.status} · country=${filters.country}${
+    filters.email ? ` · email~"${filters.email}"` : ''
+  }`;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(4, 8, 16, 0.72)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+        zIndex: 100,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: 'min(560px, 100%)',
+          maxHeight: '88vh',
+          overflowY: 'auto',
+          background: 'var(--bg-panel)',
+          border: '1px solid var(--rule-strong)',
+          borderRadius: 8,
+          padding: '24px 26px',
+          color: 'var(--ink)',
+        }}
+      >
+        <div style={{ fontFamily: 'var(--f-mono)', fontSize: 10.5, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--teal)', marginBottom: 6 }}>
+          ·· Broadcast · transactional ··
+        </div>
+        <h2 style={{ fontFamily: 'var(--f-display)', fontSize: 22, fontWeight: 600, margin: '0 0 4px' }}>
+          Email waitlist contacts
+        </h2>
+        <p style={{ fontSize: 12.5, color: 'var(--ink-dim)', margin: '0 0 4px', lineHeight: 1.5 }}>
+          Sends one email per contact matching the current filters. Unsubscribed contacts are
+          always excluded, every email carries an unsubscribe link, and re-sending the same
+          message never double-delivers.
+        </p>
+        <p style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--ink-faint)', margin: '0 0 16px' }}>
+          {filterSummary}
+        </p>
+
+        {result ? (
+          <div
+            style={{
+              background: 'var(--bg-void)',
+              border: '1px solid var(--teal)',
+              borderRadius: 6,
+              padding: 16,
+              fontSize: 13,
+              lineHeight: 1.7,
+            }}
+          >
+            <strong style={{ color: 'var(--teal)' }}>
+              {result.dry_run ? 'Dry run complete (logged, not sent).' : 'Broadcast sent.'}
+            </strong>
+            <div style={{ marginTop: 8, color: 'var(--ink-dim)' }}>
+              {result.dry_run ? 'Logged' : 'Sent'}: <strong>{result.sent}</strong> · Failed:{' '}
+              <strong>{result.failed}</strong> · Skipped (already received):{' '}
+              <strong>{result.skipped_already_sent}</strong>
+              {result.capped_not_sent > 0 && (
+                <>
+                  {' '}· Not sent (run cap):{' '}
+                  <strong style={{ color: 'var(--amber)' }}>{result.capped_not_sent}</strong>
+                </>
+              )}
+            </div>
+            {result.capped_not_sent > 0 && (
+              <div style={{ marginTop: 8, fontSize: 12, color: 'var(--amber)' }}>
+                {result.capped_not_sent} recipient(s) exceeded the per-run cap — run again to send
+                the remainder (idempotency prevents duplicates).
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            <Field label={`Subject (${subject.trim().length}/200)`}>
+              <input
+                type="text"
+                value={subject}
+                onChange={e => {
+                  setSubject(e.target.value.slice(0, 200));
+                  setPreview(null);
+                }}
+                placeholder="Fiat billing is now open — claim your founding rate"
+                style={inputStyle}
+              />
+            </Field>
+            <Field label={`Body (${body.trim().length}/5000) — blank lines separate paragraphs`}>
+              <textarea
+                value={body}
+                onChange={e => {
+                  setBody(e.target.value.slice(0, 5000));
+                  setPreview(null);
+                }}
+                rows={6}
+                placeholder={'Hi,\n\nFiat billing is now live. Use the link below to claim your founding rate, locked for life.\n\n— the eYKON team'}
+                style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+              />
+            </Field>
+
+            {error && (
+              <div style={{ fontSize: 12.5, color: 'var(--red, #e0566a)', margin: '4px 0 12px' }}>
+                {error}
+              </div>
+            )}
+
+            {preview && (
+              <div
+                style={{
+                  background: 'var(--bg-void)',
+                  border: '1px solid var(--rule-soft)',
+                  borderRadius: 6,
+                  padding: 14,
+                  marginBottom: 14,
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                }}
+              >
+                Will send to <strong style={{ color: 'var(--teal)' }}>{preview.recipient_count}</strong>{' '}
+                contact(s). <span style={{ color: 'var(--ink-faint)' }}>
+                  ({preview.matching} match filters · {preview.already_sent} already received this
+                  message{preview.capped > 0 ? ` · ${preview.capped} over the per-run cap` : ''})
+                </span>
+                {preview.dry_run && (
+                  <div style={{ marginTop: 8, color: 'var(--amber)', fontSize: 12 }}>
+                    ⚠ DRY RUN — emails will be logged, not actually delivered (EMAIL_DRY_RUN /
+                    auth disabled).
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
+              <button type="button" onClick={onClose} style={btnGhost}>
+                Cancel
+              </button>
+              {!preview ? (
+                <button
+                  type="button"
+                  onClick={onPreview}
+                  disabled={!canCompose || busy}
+                  style={canCompose && !busy ? btnPrimary : btnDisabled}
+                >
+                  {busy ? 'Checking…' : 'Preview recipients →'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onSend}
+                  disabled={busy || preview.recipient_count === 0}
+                  style={busy || preview.recipient_count === 0 ? btnDisabled : btnSend}
+                >
+                  {busy
+                    ? 'Sending…'
+                    : preview.dry_run
+                      ? `Dry-run ${preview.recipient_count} →`
+                      : `Send to ${preview.recipient_count} →`}
+                </button>
+              )}
+            </div>
+          </>
+        )}
+
+        {result && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+            <button type="button" onClick={onClose} style={btnPrimary}>
+              Done
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: 'block', marginBottom: 14 }}>
+      <span
+        style={{
+          display: 'block',
+          fontFamily: 'var(--f-mono)',
+          fontSize: 9.5,
+          letterSpacing: '0.14em',
+          textTransform: 'uppercase',
+          color: 'var(--ink-faint)',
+          marginBottom: 5,
+        }}
+      >
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  boxSizing: 'border-box',
+  padding: '9px 11px',
+  fontSize: 13.5,
+  background: 'var(--bg-void)',
+  border: '1px solid var(--rule)',
+  borderRadius: 4,
+  color: 'var(--ink)',
+};
+
+const btnBase: React.CSSProperties = {
+  fontFamily: 'var(--f-mono)',
+  fontSize: 11.5,
+  letterSpacing: '0.12em',
+  textTransform: 'uppercase',
+  borderRadius: 4,
+  padding: '10px 16px',
+  fontWeight: 600,
+  cursor: 'pointer',
+};
+
+const btnGhost: React.CSSProperties = {
+  ...btnBase,
+  color: 'var(--ink-dim)',
+  background: 'transparent',
+  border: '1px solid var(--rule-strong)',
+};
+
+const btnPrimary: React.CSSProperties = {
+  ...btnBase,
+  color: 'var(--bg-void)',
+  background: 'var(--teal)',
+  border: '1px solid var(--teal)',
+};
+
+const btnSend: React.CSSProperties = {
+  ...btnBase,
+  color: '#fff',
+  background: 'var(--red, #e0566a)',
+  border: '1px solid var(--red, #e0566a)',
+};
+
+const btnDisabled: React.CSSProperties = {
+  ...btnBase,
+  color: 'var(--ink-faint)',
+  background: 'var(--rule-soft)',
+  border: '1px solid var(--rule-soft)',
+  cursor: 'not-allowed',
+};
