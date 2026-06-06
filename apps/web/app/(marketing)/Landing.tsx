@@ -12,8 +12,11 @@ import { CalibrationAnchor } from '@/components/landing/CalibrationAnchor';
 // Billing cycle state — drives prices and CTAs across the pricing grid.
 type Cycle = 'monthly' | 'annual' | 'annual-crypto';
 
-// The cycle the pricing grid lands on. Annual is a better anchor than monthly.
-const DEFAULT_CYCLE: Cycle = 'annual';
+// The cycle the pricing grid lands on. Default to Annual + Crypto: it is the
+// only rail that can actually transact today (the fiat tabs just open the
+// waitlist), and it anchors on the best price + the founding offer. Revisit
+// when fiat (Lemon Squeezy) launches.
+const DEFAULT_CYCLE: Cycle = 'annual-crypto';
 
 type PriceText = { amt: string; per: string; strike: string; savings: string };
 
