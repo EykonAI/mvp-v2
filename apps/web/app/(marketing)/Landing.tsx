@@ -12,6 +12,9 @@ import { CalibrationAnchor } from '@/components/landing/CalibrationAnchor';
 // Billing cycle state — drives prices and CTAs across the pricing grid.
 type Cycle = 'monthly' | 'annual' | 'annual-crypto';
 
+// The cycle the pricing grid lands on. Annual is a better anchor than monthly.
+const DEFAULT_CYCLE: Cycle = 'annual';
+
 type PriceText = { amt: string; per: string; strike: string; savings: string };
 
 const PRO_PRICES: Record<Cycle, PriceText> = {
@@ -72,7 +75,7 @@ const ENTERPRISE_CTA: Record<Cycle, CtaAction> = {
 const NAV_ANCHORS = ['top', 'platform', 'intelligence', 'pricing', 'faq'] as const;
 
 export function Landing() {
-  const [cycle, setCycle] = useState<Cycle>('monthly');
+  const [cycle, setCycle] = useState<Cycle>(DEFAULT_CYCLE);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalTier, setModalTier] = useState<'pro' | 'enterprise'>('pro');
   const [activeSection, setActiveSection] = useState<string>('top');
@@ -109,9 +112,9 @@ export function Landing() {
 
   function trackCycleChange(nextCycle: Cycle) {
     setCycle(nextCycle);
-    // Don't double-count monthly (the landing defaults there); only fire
-    // plan_selected when the user deliberately moves off the default.
-    if (nextCycle !== 'monthly') {
+    // Only fire plan_selected when the user deliberately moves off the
+    // default cycle — landing on DEFAULT_CYCLE isn't a deliberate choice.
+    if (nextCycle !== DEFAULT_CYCLE) {
       captureBrowser({
         event: 'plan_selected',
         plan: 'pricing_toggle',
