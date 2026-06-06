@@ -50,7 +50,10 @@ const PRO_CTA: Record<Cycle, CtaAction> = {
   annual: { kind: 'waitlist', tier: 'pro', label: 'Join fiat waitlist →' },
   'annual-crypto': {
     kind: 'crypto',
-    href: '/auth/signup?plan=pro_founding_annual',
+    // Route through /pricing (the auth-aware checkout router), NOT
+    // /auth/signup: signed-in users must land straight on the NOWPayments
+    // launcher; /pricing redirects only signed-out users to signup.
+    href: '/pricing?plan=pro_founding_annual',
     label: 'Claim Founding Rate (crypto) →',
   },
 };
@@ -60,7 +63,8 @@ const ENTERPRISE_CTA: Record<Cycle, CtaAction> = {
   annual: { kind: 'waitlist', tier: 'enterprise', label: 'Join fiat waitlist →' },
   'annual-crypto': {
     kind: 'crypto',
-    href: '/auth/signup?plan=enterprise_founding_annual',
+    // See PRO_CTA: /pricing is the auth-aware checkout router.
+    href: '/pricing?plan=enterprise_founding_annual',
     label: 'Start 3-Seat Team (crypto) →',
   },
 };
