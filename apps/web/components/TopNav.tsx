@@ -43,8 +43,15 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
         gap: 28,
       }}
     >
-      {/* Brand */}
-      <div className="flex items-center gap-2.5">
+      {/* Brand — links home to the globe (/app). TopNav renders only in the
+          signed-in app (globe / intel / notif), so /app is always the right
+          destination; the landing logo (#top) lives in Landing.tsx, untouched. */}
+      <Link
+        href="/app"
+        title="Back to the globe"
+        className="flex items-center gap-2.5"
+        style={{ textDecoration: 'none' }}
+      >
         <div className="relative" style={{ width: 28, height: 18 }}>
           <svg viewBox="0 0 28 18" width="28" height="18">
             <path
@@ -78,7 +85,7 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
             .ai
           </sup>
         </span>
-      </div>
+      </Link>
 
       <div style={{ width: 1, height: 22, background: 'var(--rule-strong)' }} />
 
