@@ -77,6 +77,25 @@ export function Landing() {
   const [modalTier, setModalTier] = useState<'pro' | 'enterprise'>('pro');
   const [activeSection, setActiveSection] = useState<string>('top');
 
+  // Founding seats remaining — wired to the real computed count
+  // (GET /api/founding/spots → lib/founding-seats, decision D-4). The page
+  // stays static; we progressively replace the marketing fallback once the
+  // real number loads. Both pills below read `spotsLeft ?? 847`.
+  const [spotsLeft, setSpotsLeft] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/founding/spots')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (alive && d && typeof d.spots_left === 'number') setSpotsLeft(d.spots_left);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const spotsDisplay = (spotsLeft ?? 847).toLocaleString('en-US');
+
   function openWaitlist(tier: 'pro' | 'enterprise') {
     setModalTier(tier);
     setModalOpen(true);
@@ -202,7 +221,7 @@ export function Landing() {
           Built for OSINT analysts and day-traders.
         </p>
         <p className="hero-meta">
-          <span className="count">■ 847</span> of <span className="count">1,000</span>{' '}
+          <span className="count">■ {spotsDisplay}</span> of <span className="count">1,000</span>{' '}
           founding seats remaining · USD pricing · Pay in fiat or crypto
         </p>
         <div className="hero-ctas">
@@ -377,7 +396,7 @@ export function Landing() {
 
         <div className="scarcity-strip">
           <span className="mark">■</span> Founding seats remaining ·{' '}
-          <span className="count">847</span> of <span className="count">1,000</span>
+          <span className="count">{spotsDisplay}</span> of <span className="count">1,000</span>
         </div>
 
         <div className="toggle-wrap">
