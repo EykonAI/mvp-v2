@@ -37,6 +37,7 @@ import {
   ObserverWelcome,
   type ObserverWelcomeProps,
 } from './templates/ObserverWelcome';
+import { WaitlistBroadcast } from './templates/WaitlistBroadcast';
 
 type TemplateId =
   | 'waitlist_confirmation'
@@ -46,7 +47,8 @@ type TemplateId =
   | 'advocate_welcome'
   | 'advocate_submission_confirmation'
   | 'advocate_submission_founder_notification'
-  | 'observer_welcome';
+  | 'observer_welcome'
+  | 'waitlist_broadcast';
 
 type SendResult =
   | { state: 'sent'; resendMessageId: string; logId: string }
@@ -126,6 +128,7 @@ async function deliver(
   context: Record<string, unknown>,
   userId: string | null | undefined,
   notificationQueueId: string | null | undefined,
+  headers?: Record<string, string>,
 ): Promise<SendResult> {
   const send = shouldActuallySend();
   const initialStatus: 'queued' | 'dry_run' = send ? 'queued' : 'dry_run';
@@ -151,6 +154,7 @@ async function deliver(
       to,
       subject,
       html,
+      ...(headers ? { headers } : {}),
     });
     if (error || !data?.id) {
       const msg = error?.message ?? 'no message id returned';
@@ -184,6 +188,39 @@ export async function sendWaitlistConfirmation(
     { email: input.email, tier: input.tier, position: input.position ?? null },
     input.userId,
     input.notificationQueueId,
+  );
+}
+
+export async function sendWaitlistBroadcast(
+  input: BaseSendInput & {
+    subject: string;
+    heading: string;
+    bodyParagraphs: string[];
+    unsubscribeUrl: string;
+    campaignKey: string;
+  },
+): Promise<SendResult> {
+  const html = await render(
+    <WaitlistBroadcast
+      heading={input.heading}
+      bodyParagraphs={input.bodyParagraphs}
+      unsubscribeUrl={input.unsubscribeUrl}
+    />,
+  );
+  // List-Unsubscribe (RFC 2369) + one-click POST (RFC 8058) so inbox
+  // providers surface a native unsubscribe control alongside the in-body link.
+  return deliver(
+    input.to,
+    input.subject,
+    html,
+    'waitlist_broadcast',
+    { campaign_key: input.campaignKey, heading: input.heading },
+    input.userId,
+    input.notificationQueueId,
+    {
+      'List-Unsubscribe': `<${input.unsubscribeUrl}>`,
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    },
   );
 }
 

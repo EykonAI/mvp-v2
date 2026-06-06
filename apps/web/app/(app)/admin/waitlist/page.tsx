@@ -31,7 +31,7 @@ export default async function WaitlistAdminPage() {
   const { data: rows } = await admin
     .from('fiat_waitlist')
     .select(
-      'id, email, tier, note, referral_code, country, confirmed_email, notified_at, converted_user_id, created_at',
+      'id, email, tier, note, referral_code, country, confirmed_email, notified_at, converted_user_id, unsubscribed_at, created_at',
     )
     .order('created_at', { ascending: false })
     .limit(2000);
@@ -46,6 +46,7 @@ export default async function WaitlistAdminPage() {
     confirmed_email: Boolean(r.confirmed_email),
     notified_at: (r.notified_at as string | null) ?? null,
     converted_user_id: (r.converted_user_id as string | null) ?? null,
+    unsubscribed_at: (r.unsubscribed_at as string | null) ?? null,
     created_at: String(r.created_at ?? ''),
   }));
 
@@ -57,6 +58,7 @@ export default async function WaitlistAdminPage() {
     confirmed: entries.filter(e => e.confirmed_email).length,
     notified: entries.filter(e => e.notified_at !== null).length,
     converted: entries.filter(e => e.converted_user_id !== null).length,
+    unsubscribed: entries.filter(e => e.unsubscribed_at !== null).length,
     cap: seats.cap,
     claimed: seats.claimed,
     paidFounders: seats.paidFounders,
