@@ -24,10 +24,30 @@ export async function POST(req: NextRequest) {
     .from('anomaly_flags')
     .select('*')
     .gte('created_at', since)
-    .eq('processed', true)
+    // No processed filter: the detectors insert with the default
+    // processed=false and nothing ever promotes them, so the previous
+    // .eq('processed', true) starved this cron (0 events ever). De-dup is
+    // handled below against convergence_events instead.
     .limit(400);
 
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+
+  // Cells that already produced a convergence within this 6h window, so the
+  // 15-min cadence doesn't re-emit the same cluster ~24× per window.
+  const { data: recentConv } = await supabase
+    .from('convergence_events')
+    .select('bounding_box')
+    .gte('created_at', since);
+  const occupied = new Set<string>(
+    (recentConv ?? [])
+      .map(c => {
+        const bb = (c as { bounding_box?: { lat_min?: number; lon_min?: number } }).bounding_box;
+        return bb && Number.isFinite(bb.lat_min) && Number.isFinite(bb.lon_min)
+          ? `${bb.lat_min}:${bb.lon_min}`
+          : null;
+      })
+      .filter((k): k is string => k !== null),
+  );
 
   // Group flags into 5°×5° spatial bins keyed on domain union size.
   const bins = new Map<string, Array<any>>();
@@ -45,6 +65,8 @@ export async function POST(req: NextRequest) {
   for (const [key, cluster] of bins) {
     const domains = new Set(cluster.map(c => c.domain));
     if (domains.size < 2) continue; // need at least two independent domains for a convergence
+    if (occupied.has(key)) continue; // already emitted a convergence for this cell in-window
+    occupied.add(key);
     const joint_p_value = Math.min(0.5, 0.3 / cluster.length);
     const [lat, lon] = key.split(':').map(Number);
 

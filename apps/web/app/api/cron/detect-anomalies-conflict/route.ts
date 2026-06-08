@@ -122,6 +122,10 @@ export async function POST(req: NextRequest) {
           threshold,
           sigma: std > 0 ? (current - mean) / std : null,
           bbox,
+          // Representative point (bbox centroid) so compute-convergences can
+          // bin this flag into its 5°×5° cells alongside Maritime/Energy.
+          latitude: (bbox.lat_min + bbox.lat_max) / 2,
+          longitude: (bbox.lon_min + bbox.lon_max) / 2,
           detected_at: now.toISOString(),
         },
       });

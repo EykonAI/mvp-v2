@@ -110,10 +110,10 @@ const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
   {
     bucket: 'EnergyPipelines',
     table: 'gas_pipelines',
-    columns: 'name, country, status, ingested_at',
+    columns: 'pipeline_name, start_country, status, ingested_at',
     recencyColumn: 'ingested_at',
-    countryColumn: 'country',
-    format: r => `[EnergyPipelines @${r.ingested_at ?? '?'}] ${r.name ?? '?'} · ${r.country ?? '?'} · ${r.status ?? ''}`,
+    countryColumn: 'start_country',
+    format: r => `[EnergyPipelines @${r.ingested_at ?? '?'}] ${r.pipeline_name ?? '?'} · ${r.start_country ?? '?'} · ${r.status ?? ''}`,
   },
   {
     bucket: 'Mining',
