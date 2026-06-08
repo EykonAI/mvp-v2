@@ -19,6 +19,7 @@ import {
   readAdvancedFlag,
   resolvePersonaFromSearchParams,
   subscribeAdvancedFlag,
+  writeActivePersona,
 } from '@/lib/intelligence-analyst/persona-visibility';
 import { captureBrowser } from '@/lib/analytics/client';
 import { ShareButton } from '@/components/share/ShareButton';
@@ -174,7 +175,7 @@ export default function ChatPanel() {
   // Persist persona on change.
   useEffect(() => {
     try {
-      window.localStorage.setItem(PERSONA_STORAGE_KEY, persona);
+      writeActivePersona(persona);
     } catch { /* ignore */ }
   }, [persona]);
 

@@ -5,6 +5,7 @@ import {
   readAdvancedFlag,
   subscribeAdvancedFlag,
   writeAdvancedFlag,
+  writeActivePersona,
 } from '@/lib/intelligence-analyst/persona-visibility';
 import {
   DEFAULT_PERSONA,
@@ -62,7 +63,7 @@ export function AdvancedPersonasCard() {
   const onConfirmSwitchAndHide = () => {
     setEnabled(false);
     writeAdvancedFlag(false);
-    window.localStorage.setItem(PERSONA_STORAGE_KEY, DEFAULT_PERSONA);
+    writeActivePersona(DEFAULT_PERSONA);
     setActivePersona(DEFAULT_PERSONA);
     captureBrowser({
       event: 'persona_changed',

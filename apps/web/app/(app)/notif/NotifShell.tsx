@@ -24,6 +24,7 @@ import {
   readAdvancedFlag,
   resolvePersonaFromSearchParams,
   subscribeAdvancedFlag,
+  writeActivePersona,
 } from '@/lib/intelligence-analyst/persona-visibility';
 import { captureBrowser } from '@/lib/analytics/client';
 
@@ -132,7 +133,7 @@ export function NotifShell({
       return next;
     });
     if (typeof window !== 'undefined') {
-      localStorage.setItem(PERSONA_STORAGE_KEY, next);
+      writeActivePersona(next);
     }
   };
 
