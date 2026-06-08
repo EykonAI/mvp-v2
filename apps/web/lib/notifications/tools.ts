@@ -263,7 +263,7 @@ export const BUCKET_TABLES: ReadonlyArray<BucketTableSpec> = [
   { bucket: 'Maritime',          table: 'vessel_positions',  recencyColumn: 'ingested_at',                                defaultDistinctColumn: 'mmsi',   geoRegionRpc: 'recent_vessels_in_region' },
   { bucket: 'EnergyPower',       table: 'power_plants',      recencyColumn: 'ingested_at', countryColumn: 'country' },
   { bucket: 'EnergyRefineries',  table: 'refineries',        recencyColumn: 'ingested_at', countryColumn: 'country' },
-  { bucket: 'EnergyPipelines',   table: 'gas_pipelines',     recencyColumn: 'ingested_at', countryColumn: 'country' },
+  { bucket: 'EnergyPipelines',   table: 'gas_pipelines',     recencyColumn: 'ingested_at', countryColumn: 'start_country' },
   { bucket: 'Mining',            table: 'mines',             recencyColumn: 'ingested_at', countryColumn: 'country' },
   { bucket: 'AviationInfra',     table: 'airports',          recencyColumn: 'ingested_at', countryColumn: 'iso_country' },
   { bucket: 'MaritimeInfra',     table: 'ports',             recencyColumn: 'ingested_at', countryColumn: 'country' },

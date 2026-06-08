@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
         supabase
           .from('energy_flows')
           .select('id', { count: 'exact', head: true })
-          .gte('created_at', since),
+          .gte('ingested_at', since),
       ]);
 
       // Normalise each count against a loose per-theatre ceiling.
