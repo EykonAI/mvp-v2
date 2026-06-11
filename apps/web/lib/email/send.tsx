@@ -38,6 +38,11 @@ import {
   type ObserverWelcomeProps,
 } from './templates/ObserverWelcome';
 import { WaitlistBroadcast } from './templates/WaitlistBroadcast';
+import {
+  PersonaDigest,
+  type PersonaDigestProps,
+} from './templates/PersonaDigest';
+import { digestSubject } from '@/lib/notifications/digest';
 
 type TemplateId =
   | 'waitlist_confirmation'
@@ -48,7 +53,8 @@ type TemplateId =
   | 'advocate_submission_confirmation'
   | 'advocate_submission_founder_notification'
   | 'observer_welcome'
-  | 'waitlist_broadcast';
+  | 'waitlist_broadcast'
+  | 'persona_digest';
 
 type SendResult =
   | { state: 'sent'; resendMessageId: string; logId: string }
@@ -340,6 +346,37 @@ export async function sendObserverWelcome(
     { firstName: input.firstName, personaPhrase: input.personaPhrase },
     input.userId,
     input.notificationQueueId,
+  );
+}
+
+export async function sendPersonaDigest(
+  input: BaseSendInput & PersonaDigestProps,
+): Promise<SendResult> {
+  const html = await render(<PersonaDigest {...input} />);
+  const subject = digestSubject(input.data);
+  // List-Unsubscribe (RFC 2369) + one-click POST (RFC 8058), same pattern
+  // as sendWaitlistBroadcast — recurring bulk mail must carry a native
+  // unsubscribe control, not just the in-body link.
+  return deliver(
+    input.to,
+    subject,
+    html,
+    'persona_digest',
+    {
+      persona: input.data.persona,
+      cadence: input.data.cadence,
+      window_hours: input.data.windowHours,
+      convergences: input.data.convergences.length,
+      anomalies: input.data.totals.anomalies,
+      infra_incidents: input.data.totals.infraIncidents,
+      is_empty: input.data.isEmpty,
+    },
+    input.userId,
+    input.notificationQueueId,
+    {
+      'List-Unsubscribe': `<${input.unsubscribeUrl}>`,
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    },
   );
 }
 
