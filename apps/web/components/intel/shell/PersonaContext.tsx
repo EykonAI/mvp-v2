@@ -11,6 +11,7 @@ import {
   PERSONA_STORAGE_KEY,
   migrateAdvancedFlagFromActivePersona,
   resolvePersonaFromSearchParams,
+  writeActivePersona,
 } from '@/lib/intelligence-analyst/persona-visibility';
 import { captureBrowser } from '@/lib/analytics/client';
 
@@ -72,7 +73,7 @@ export function PersonaProvider({ children }: { children: React.ReactNode }) {
       url.searchParams.set('persona', chosen);
       window.history.replaceState({}, '', url.toString());
     }
-    window.localStorage.setItem(PERSONA_STORAGE_KEY, chosen);
+    writeActivePersona(chosen);
 
     if (resolved) {
       captureBrowser({
@@ -100,7 +101,7 @@ export function PersonaProvider({ children }: { children: React.ReactNode }) {
       return p;
     });
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem(PERSONA_STORAGE_KEY, p);
+      writeActivePersona(p);
       const url = new URL(window.location.href);
       url.searchParams.set('persona', p);
       url.searchParams.delete('p');

@@ -84,3 +84,28 @@ export function resolvePersonaFromSearchParams(
   }
   return { persona: raw, auto_enabled_advanced: auto };
 }
+
+/**
+ * Set the active persona in localStorage AND best-effort sync it to the
+ * server so server-side features (the digest cron — migration 052's
+ * user_profiles.preferred_persona) can read it. The server write is
+ * fire-and-forget: it never blocks the UI, and a failure (logged-out
+ * visitor, offline) is ignored — localStorage stays the client's source
+ * of truth. Use this everywhere instead of a bare
+ * localStorage.setItem(PERSONA_STORAGE_KEY, ...).
+ */
+export function writeActivePersona(persona: string): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(PERSONA_STORAGE_KEY, persona);
+  if (!isValidPersona(persona)) return;
+  try {
+    void fetch('/api/profile/persona', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona }),
+      keepalive: true,
+    }).catch(() => undefined);
+  } catch {
+    /* ignore — localStorage is authoritative for the client */
+  }
+}
