@@ -48,7 +48,11 @@ export default function ConvergenceFeed() {
   const [data, setData] = useState<Payload | null>(null);
 
   useEffect(() => {
-    fetch('/api/intel/convergences?hours=24')
+    // Latest 5 real events regardless of age — convergences are rare by
+    // design, so a time window left this panel on demo cards most days.
+    // Demo entries now appear ONLY on true cold start (no real event has
+    // ever been recorded), clearly labelled as samples.
+    fetch('/api/intel/convergences?latest=5')
       .then(r => (r.ok ? r.json() : null))
       .then((j: Payload | null) => setData(j))
       .catch(() => setData(null));
@@ -70,7 +74,7 @@ export default function ConvergenceFeed() {
             margin: 0,
           }}
         >
-          No recent convergences — showing illustrative events
+          No convergences recorded yet — showing illustrative samples
         </p>
       )}
       {events.map(c => (
@@ -94,6 +98,19 @@ export default function ConvergenceFeed() {
               }}
             >
               {c.location}
+              <span
+                style={{
+                  fontFamily: 'var(--f-mono)',
+                  fontSize: 9.5,
+                  fontWeight: 400,
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                  color: 'var(--ink-faint)',
+                  marginLeft: 8,
+                }}
+              >
+                {degraded ? 'sample' : timeAgo(c.created_at)}
+              </span>
             </span>
             <span
               className="num-lg"
@@ -133,6 +150,16 @@ export default function ConvergenceFeed() {
       ))}
     </div>
   );
+}
+
+function timeAgo(iso: string): string {
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hoursAgo = Math.floor(minutes / 60);
+  if (hoursAgo < 48) return `${hoursAgo}h ago`;
+  return `${Math.floor(hoursAgo / 24)}d ago`;
 }
 
 function chipColour(domain: string): string {
