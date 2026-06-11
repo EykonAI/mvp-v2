@@ -5,14 +5,16 @@ import { useEffect, useState } from 'react';
 
 /**
  * Persistent Calibration trust badge — lives in the TopNav left zone,
- * after the Live pill. Reads /api/intel/calibration/summary and renders
- * the aggregate Brier + resolved-count as a status pill. Click → the
- * public /calibration page (Pro+ users still reach the workspace via
- * the existing Intel tab).
+ * after the Live pill, stacked label-over-metric so it pairs with the
+ * ConvergenceBadge beside it. Reads /api/intel/calibration/summary and
+ * renders the resolved-count. Click → the public /calibration page
+ * (Pro+ users still reach the workspace via the existing Intel tab).
  *
- * Surfaces calibration as a credential rather than as a section: every
- * page render exposes the actual number, so trust accrues even for
- * users who never click through.
+ * The aggregate Brier is deliberately NOT shown here (2026-06-11
+ * decision): it is jargon in the nav and is duplicated one glance away
+ * in the Calibration Ledger strip and the /calibration page. The chip
+ * keeps "N resolved" — a monotonically growing track-record number —
+ * while the Brier remains the warm/warming-up detector internally.
  *
  * Behaviour rules (from 2026-05-19 brief §5):
  *   • Fetch once on mount, then poll every 5 minutes. The Brier moves
@@ -83,56 +85,33 @@ export default function CalibrationBadge() {
   return (
     <Link
       href={HREF}
-      className="hidden lg:inline-flex items-center"
+      className="hidden lg:inline-flex"
       aria-label="View Calibration Ledger"
       style={{
         fontFamily: 'var(--f-mono)',
-        fontSize: 10.5,
-        letterSpacing: '0.15em',
-        textTransform: 'uppercase',
-        color: 'var(--ink-dim)',
         textDecoration: 'none',
-        gap: 8,
+        flexDirection: 'column',
+        gap: 3,
+        lineHeight: 1,
       }}
     >
-      <span style={{ color: 'var(--ink-dim)' }}>Calibration</span>
-
-      {state.brier == null ? (
-        <span style={{ color: 'var(--ink-dim)', textTransform: 'none' }}>
-          warming up
+      <span
+        style={{
+          fontSize: 10.5,
+          letterSpacing: '0.15em',
+          textTransform: 'uppercase',
+          color: 'var(--ink-dim)',
+        }}
+      >
+        Calibration
+      </span>
+      <span style={{ fontSize: 11.5, color: 'var(--ink)', letterSpacing: 'normal' }}>
+        {state.brier == null
+          ? 'warming up'
+          : `${state.resolved ?? '—'} resolved`}{' '}
+        <span style={{ color: 'var(--teal)' }} aria-hidden="true">
+          →
         </span>
-      ) : (
-        <>
-          <span
-            style={{
-              color: 'var(--ink)',
-              textTransform: 'none',
-              letterSpacing: 'normal',
-              fontSize: 11.5,
-            }}
-          >
-            {state.brier} Brier
-          </span>
-          {state.resolved != null && state.resolved > 0 && (
-            <>
-              <span style={{ color: 'var(--ink-dim)' }}>·</span>
-              <span
-                style={{
-                  color: 'var(--ink-dim)',
-                  textTransform: 'none',
-                  letterSpacing: 'normal',
-                  fontSize: 11.5,
-                }}
-              >
-                {state.resolved} resolved
-              </span>
-            </>
-          )}
-        </>
-      )}
-
-      <span style={{ color: 'var(--teal)' }} aria-hidden="true">
-        →
       </span>
     </Link>
   );
