@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, getServerSupabase } from '@/lib/auth/session';
-import { getFeedHealth } from '@/lib/notifications/feed-health';
+import { getFeedHealth, getRegionVesselHealth } from '@/lib/notifications/feed-health';
+import { gatedMaritimeRegionSlugs } from '@/lib/notifications/suggestion-library';
 
 // /api/notifications/feeds-health — read-only diagnostic endpoint.
 //
@@ -22,8 +23,12 @@ export async function GET(_req: NextRequest) {
 
   const supabase = getServerSupabase();
   const health = await getFeedHealth(supabase);
+  // Region-granular AIS freshness for the slugs the suggestion library
+  // gates on (honesty-pass v3) — same probes the /notif page uses.
+  const regions = await getRegionVesselHealth(supabase, gatedMaritimeRegionSlugs());
   return NextResponse.json({
     fetchedAt: new Date().toISOString(),
     feeds: health,
+    regions,
   });
 }

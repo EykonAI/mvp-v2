@@ -781,16 +781,100 @@ export function suggestionFeedRequirementsMet(
   return true;
 }
 
+// ─── Region-aware AIS gating (honesty-pass v3) ───────────────────
+//
+// The bucket gate above is feed-granular: vessel_positions as a whole
+// is hot, so a suggestion scoped to a strait with ZERO AIS coverage
+// (Hormuz) still rendered — and the rule it creates can never fire.
+// This layer resolves which geo_regions slug an AIS-DEPENDENT
+// suggestion targets and hides it while that region is cold, using
+// getRegionVesselHealth() from feed-health. Self-healing like the
+// bucket gate: coverage arrives → suggestion reappears, no edit.
+//
+// Deliberately narrow: only configs that READ vessel_positions
+// (single_event tool / multi_event predicate) are region-gated.
+// outcome_ai / cross_data_ai entries that merely *mention* a region
+// (e.g. 'Hormuz tension') stay visible — their conflict/GDELT text
+// sources have global coverage even where AIS does not.
+//
+// Region resolution is metadata-only (id tokens + title text) — the
+// suggestion CONTENT is untouched, per the standing library freeze.
+
+// alias (as it appears in ids/titles) → geo_regions.slug (042 seeds).
+// Longest-first so 'bab-el-mandeb' wins before any shorter overlap.
+const MARITIME_REGION_ALIASES: ReadonlyArray<readonly [string, string]> = [
+  ['bab-el-mandeb', 'bab-el-mandeb'],
+  ['bab el mandeb', 'bab-el-mandeb'],
+  ['babelmandeb', 'bab-el-mandeb'],
+  ['persian-gulf', 'persian-gulf'],
+  ['persian gulf', 'persian-gulf'],
+  ['black-sea', 'black-sea'],
+  ['black sea', 'black-sea'],
+  ['blacksea', 'black-sea'],
+  ['red-sea', 'red-sea'],
+  ['red sea', 'red-sea'],
+  ['redsea', 'red-sea'],
+  ['bosphorus', 'bosphorus'],
+  ['malacca', 'malacca'],
+  ['hormuz', 'hormuz'],
+  ['panama', 'panama'],
+  ['suez', 'suez'],
+];
+
+function configReadsVesselPositions(config: SuggestionConfig): boolean {
+  if (config.rule_type === 'single_event') return config.tool === 'vessel_positions';
+  if (config.rule_type === 'multi_event') {
+    return config.predicates.some(p => p.tool === 'vessel_positions');
+  }
+  return false;
+}
+
+/**
+ * The geo_regions slug an AIS-dependent suggestion is scoped to, or
+ * null when it is not AIS-dependent / not region-scoped (global
+ * vessel rules are gated by the bucket layer alone).
+ */
+export function aisRegionSlugFor(suggestion: Suggestion): string | null {
+  if (!configReadsVesselPositions(suggestion.config)) return null;
+  const idLc = suggestion.id.toLowerCase();
+  const titleLc = suggestion.title.toLowerCase();
+  for (const [alias, slug] of MARITIME_REGION_ALIASES) {
+    if (idLc.includes(alias) || titleLc.includes(alias)) return slug;
+  }
+  return null;
+}
+
+/** Unique region slugs the library needs probed — drives the /notif
+ *  page's getRegionVesselHealth() call. Computed from metadata, so a
+ *  new region-scoped suggestion is auto-probed with no extra wiring. */
+export function gatedMaritimeRegionSlugs(): string[] {
+  const all: Suggestion[] = [
+    ...Object.values(PERSONA_SUGGESTIONS).flat(),
+    ...CROSS_DATA_SUGGESTIONS,
+  ];
+  const slugs = new Set<string>();
+  for (const s of all) {
+    const slug = aisRegionSlugFor(s);
+    if (slug) slugs.add(slug);
+  }
+  return Array.from(slugs).sort();
+}
+
 /**
  * Compute the set of suggestion ids whose feed requirements are NOT
  * met. The /notif page passes this set to NotifShell, which skips any
  * card whose id is in it. Order of operations:
  *   1. /notif page (Server Component) calls getFeedHealth(supabase)
- *   2. computeHiddenSuggestionIds(feedHealth) → string[]
+ *      and getRegionVesselHealth(supabase, gatedMaritimeRegionSlugs())
+ *   2. computeHiddenSuggestionIds(feedHealth, regionHealth) → string[]
  *   3. <NotifShell hiddenSuggestionIds={…} />
+ *
+ * regionHealth is optional so existing callers/tests stay valid; when
+ * omitted, only the bucket-granular gate applies.
  */
 export function computeHiddenSuggestionIds(
   feedHealth: SuggestionFeedHealth,
+  regionHealth?: import('./feed-health').RegionVesselHealth,
 ): string[] {
   const hidden: string[] = [];
   const all: Suggestion[] = [
@@ -798,7 +882,14 @@ export function computeHiddenSuggestionIds(
     ...CROSS_DATA_SUGGESTIONS,
   ];
   for (const s of all) {
-    if (!suggestionFeedRequirementsMet(s, feedHealth)) hidden.push(s.id);
+    if (!suggestionFeedRequirementsMet(s, feedHealth)) {
+      hidden.push(s.id);
+      continue;
+    }
+    if (regionHealth) {
+      const slug = aisRegionSlugFor(s);
+      if (slug && regionHealth[slug]?.freshness === 'cold') hidden.push(s.id);
+    }
   }
   return hidden;
 }
