@@ -163,6 +163,54 @@ function toRow(s, nowIso) {
 
 class RateLimitedError extends Error {}
 
+// Node's fetch reports every network-layer failure as the opaque
+// "fetch failed" TypeError; the real story (DNS vs connect-timeout vs
+// reset) lives in err.cause. Surface it so the Railway logs are
+// actionable — UND_ERR_CONNECT_TIMEOUT = SYNs dropped (IP-level block
+// or broken routing), ENOTFOUND/EAI_AGAIN = DNS, ECONNRESET = peer
+// closed mid-handshake.
+function describeError(err) {
+  const code = err?.cause?.code || err?.cause?.name || err?.code || '';
+  return code ? `${code}: ${err.message}` : err.message;
+}
+
+// One-shot network diagnostic at boot, because the worker's failure
+// mode (2026-06-12) was an opaque all-boxes "fetch failed" from
+// Railway while the same endpoints answered from a residential IP.
+// Logs in-container DNS for the OpenSky hosts plus two reachability
+// probes — api.github.com as the known-good control, and an anonymous
+// 1°×1° /states/all call (no credits/credentials needed) as the
+// OpenSky probe. Output reads as one block right after the banner.
+async function bootDiagnostics() {
+  const dns = require('node:dns').promises;
+  console.log('  network diagnostics:');
+  for (const host of ['opensky-network.org', 'auth.opensky-network.org', 'api.github.com']) {
+    try {
+      const addrs = await dns.lookup(host, { all: true });
+      console.log(`    dns ${host} → ${addrs.map((a) => a.address).join(', ')}`);
+    } catch (e) {
+      console.log(`    dns ${host} → ERR ${e.code || e.message}`);
+    }
+  }
+  for (const url of [
+    'https://api.github.com',
+    'https://opensky-network.org/api/states/all?lamin=0&lomin=0&lamax=1&lomax=1',
+  ]) {
+    const host = new URL(url).host;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12_000);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal });
+      console.log(`    probe ${host} → HTTP ${res.status}`);
+      try { await res.body?.cancel(); } catch { /* drained or absent */ }
+    } catch (e) {
+      console.log(`    probe ${host} → ERR ${describeError(e)}`);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+
 async function fetchBox(box) {
   const token = await getToken();
   const params = new URLSearchParams({
@@ -208,7 +256,7 @@ async function cycle() {
       }
       perBox.push(`${box.label}=${kept}`);
     } catch (err) {
-      perBox.push(`${box.label}=ERR(${err.message})`);
+      perBox.push(`${box.label}=ERR(${describeError(err)})`);
       if (err instanceof RateLimitedError) {
         perBox.push('(skipping rest of cycle — credit budget exhausted until daily reset)');
         break;
@@ -257,7 +305,9 @@ console.log(
   `  ${BOXES.length} bboxes (4 regional + 6 chokepoints), cycle every ${POLL_INTERVAL_MS / 1000}s (~23 credits/cycle vs 4k/day budget)`,
 );
 console.log('  ' + BOXES.map((b) => b.label).join(', '));
-loop();
+bootDiagnostics()
+  .catch((e) => console.error('boot diagnostics threw:', describeError(e)))
+  .finally(() => loop());
 
 process.on('SIGTERM', () => {
   console.log('SIGTERM — stopping after current cycle…');
