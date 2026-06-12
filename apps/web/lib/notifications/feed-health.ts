@@ -130,7 +130,92 @@ export async function getFeedHealth(supabase: SupabaseClient): Promise<FeedHealt
   }
 }
 
+// ─── Region-aware vessel health (honesty-pass v3) ────────────────
+//
+// The bucket probe above is FEED-granular: vessel_positions as a whole
+// is hot (Europe/Med + Asia-Pacific coverage), so every Maritime
+// suggestion passed the gate even when the specific strait it names
+// has zero AIS coverage (e.g. Hormuz: 0 fresh vessels, while Malacca
+// sees hundreds/day). Result: region-scoped AIS suggestions that could
+// NEVER fire stayed visible — worse than no suggestion.
+//
+// This probe is REGION-granular: per geo_regions slug, count how many
+// of the most recent in-region vessel rows are <24h old, via the
+// recent_vessels_in_region RPC (migration 042, polygon ST_Intersects).
+// 'cold' regions get their AIS-dependent suggestions hidden by
+// computeHiddenSuggestionIds — and self-heal the moment a data source
+// covering that region comes online, same philosophy as the bucket
+// gate. Same 5-min cache, same fail-open posture.
+
+export interface RegionVesselStatus {
+  slug: string;
+  /** Fresh (<24h) rows among the latest REGION_PROBE_LIMIT in-region
+   *  rows; -1 = probe failed (treated as live, fail-open). */
+  freshRows24h: number;
+  freshness: 'live' | 'cold';
+}
+
+export type RegionVesselHealth = Record<string, RegionVesselStatus>;
+
+// 10 fresh rows/24h cleanly separates zero-coverage regions (Hormuz,
+// Red Sea: 0/day on the current AIS feed) from thinly-but-genuinely
+// covered ones (Panama ~20/day, Bosphorus ~40/day, Malacca ~280/day).
+const REGION_LIVE_MIN_ROWS_24H = 10;
+const REGION_PROBE_LIMIT = 25;
+
+let regionCache: { fetchedAt: number; key: string; value: RegionVesselHealth } | null = null;
+
+async function probeRegion(
+  supabase: SupabaseClient,
+  slug: string,
+): Promise<RegionVesselStatus> {
+  try {
+    const { data, error } = await supabase.rpc('recent_vessels_in_region', {
+      p_region_slug: slug,
+      p_limit: REGION_PROBE_LIMIT,
+    });
+    if (error) throw new Error(error.message);
+    const rows = ((data ?? []) as unknown) as Array<Record<string, unknown>>;
+    const cutoff = Date.now() - LIVE_THRESHOLD_HOURS * 3_600_000;
+    const fresh = rows.filter(r => {
+      const ts = typeof r.ingested_at === 'string' ? Date.parse(r.ingested_at) : NaN;
+      return Number.isFinite(ts) && ts >= cutoff;
+    }).length;
+    return {
+      slug,
+      freshRows24h: fresh,
+      freshness: fresh >= REGION_LIVE_MIN_ROWS_24H ? 'live' : 'cold',
+    };
+  } catch {
+    // Fail-open: a transient RPC error must not hide live suggestions.
+    return { slug, freshRows24h: -1, freshness: 'live' };
+  }
+}
+
+/**
+ * Probe AIS freshness for the given geo_regions slugs. Memoised
+ * in-process for CACHE_TTL_MS (keyed on the slug set) — the slug list
+ * comes from the suggestion library and only changes on deploy.
+ */
+export async function getRegionVesselHealth(
+  supabase: SupabaseClient,
+  slugs: string[],
+): Promise<RegionVesselHealth> {
+  const uniq = Array.from(new Set(slugs)).sort();
+  if (uniq.length === 0) return {};
+  const key = uniq.join(',');
+  const now = Date.now();
+  if (regionCache && regionCache.key === key && now - regionCache.fetchedAt < CACHE_TTL_MS) {
+    return regionCache.value;
+  }
+  const entries = await Promise.all(uniq.map(s => probeRegion(supabase, s)));
+  const value = Object.fromEntries(entries.map(e => [e.slug, e])) as RegionVesselHealth;
+  regionCache = { fetchedAt: now, key, value };
+  return value;
+}
+
 /** Test hook — clears the in-process cache. Not exported for runtime. */
 export function _resetFeedHealthCacheForTests(): void {
   cache = null;
+  regionCache = null;
 }

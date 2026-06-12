@@ -1,7 +1,10 @@
 import { getCurrentTier } from '@/lib/subscription';
 import { getServerSupabase } from '@/lib/auth/session';
-import { getFeedHealth } from '@/lib/notifications/feed-health';
-import { computeHiddenSuggestionIds } from '@/lib/notifications/suggestion-library';
+import { getFeedHealth, getRegionVesselHealth } from '@/lib/notifications/feed-health';
+import {
+  computeHiddenSuggestionIds,
+  gatedMaritimeRegionSlugs,
+} from '@/lib/notifications/suggestion-library';
 import { NotifShell } from './NotifShell';
 
 // Server-side wrapper for the Notification Center.
@@ -20,6 +23,12 @@ import { NotifShell } from './NotifShell';
 // down to NotifShell. NotifShell skips those cards when rendering, so
 // the library self-heals the moment a feed comes back online. The
 // probe is memoised 5 min in-process; fail-open on any error.
+//
+// Honesty-pass v3: the bucket probe is feed-granular, so a strait with
+// zero AIS coverage (Hormuz) still passed while vessel_positions as a
+// whole was hot. We additionally probe the geo_regions slugs the
+// library's AIS-dependent suggestions target and hide those whose
+// region is cold — same self-healing + fail-open posture.
 
 interface NotifPageProps {
   searchParams: { filter?: string };
@@ -30,7 +39,8 @@ export default async function NotifPage({ searchParams }: NotifPageProps) {
   const recentFilter = searchParams.filter === 'recent';
   const supabase = getServerSupabase();
   const feedHealth = await getFeedHealth(supabase);
-  const hiddenSuggestionIds = computeHiddenSuggestionIds(feedHealth);
+  const regionHealth = await getRegionVesselHealth(supabase, gatedMaritimeRegionSlugs());
+  const hiddenSuggestionIds = computeHiddenSuggestionIds(feedHealth, regionHealth);
   return (
     <NotifShell
       recentFilter={recentFilter}
