@@ -24,27 +24,32 @@
  * adsbexchange-com1 (https://rapidapi.com/adsbx/api/adsbexchange-com1/
  * pricing) and set RAPIDAPI_KEY on this Railway service.
  *
- * COST BUDGET (RapidAPI entry tier = $10/mo / 10,000 requests/mo):
- * each cycle costs exactly POLL_POINTS.length (=10) requests — one per
- * poll point. At the default 45-min cadence:
- *   10 points × (1440 ÷ 45 = 32) cycles/day × 30 days ≈ 9,600 req/mo
- * — inside the 10k cap with headroom. Do NOT lower POLL_INTERVAL_MS
- * below ~2_700_000 (45 min) or add poll points without redoing this
- * arithmetic: at the old 10-min cadence the same 10 points would burn
- * ~43,200/mo (4× over budget). On HTTP 429 the remaining points of the
- * cycle are skipped (the monthly quota is already spent).
+ * COST BUDGET — cadence is auto-calibrated to the plan, NOT hardcoded.
+ * One cycle costs POLL_POINTS.length requests (one per poll point), so
+ * the poll interval is derived from the plan's monthly request budget:
+ *   affordable cycles/mo = MONTHLY_REQUEST_BUDGET × BUDGET_SAFETY ÷ pts
+ *   interval             = avg-month ÷ affordable cycles
+ * Defaults: 10,000 req/mo ($10 RapidAPI entry tier) × 0.9 safety ÷ 10
+ * points ⇒ 900 cycles/mo ⇒ ~48.7 min cadence ⇒ ~9,000 req/mo, so a
+ * full month (even 31 days) stays under quota with headroom. Upgrade
+ * the plan → raise MONTHLY_REQUEST_BUDGET and the cadence speeds up
+ * automatically; add poll points → the cadence slows automatically to
+ * stay in budget. An explicit POLL_INTERVAL_MS overrides the maths
+ * (boot warns if the override would exceed the budget). On HTTP 429 the
+ * remaining points of the cycle are skipped (the monthly quota is spent).
  *
  * UNITS: ADSBexchange v2 reports ADS-B-native units — alt_baro in feet
  * ('ground' on the deck), gs in knots, track in degrees — which is
  * exactly what downstream consumers expect, so (unlike the OpenSky
  * era) NO unit conversion happens at ingest.
  *
- * MILITARY / TYPE: aircraft_positions has no `type` / `military`
- * column, so — exactly as in the adsb.lol and OpenSky eras — only the
- * scalar columns in toRow are written (ADSBexchange's `t` / `dbFlags`
- * are dropped). /api/aircraft (apps/web/app/api/aircraft/route.ts)
- * returns type:''/military:false; reviving military highlighting needs
- * a migration + a read-path change, not just this worker.
+ * MILITARY / TYPE: migration 054 adds `type` + `military` to
+ * aircraft_positions, so toRow persists ADSBexchange's type code (`t`)
+ * and the military bit (dbFlags & 1). /api/aircraft surfaces them and
+ * the Globe's red military highlight + "(Military)" tooltip (MapView)
+ * and the "Military" sub-layer (lib/layer-config.ts) light up again.
+ * The migration MUST be applied before this worker runs, or the upsert
+ * 500s on the missing columns.
  *
  * geom is set by the auto_geom_aircraft trigger (migration 001) from
  * lat/lon — we only write the scalar columns. icao24 upsert relies on
@@ -63,7 +68,13 @@ const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
 const ADSBX_HOST = 'adsbexchange-com1.p.rapidapi.com';
 const ADSBX_BASE = `https://${ADSBX_HOST}/v2`;
 
-const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS) || 2_700_000; // 45 min — see COST BUDGET above
+// Cadence is calibrated to the plan once POLL_POINTS is known (see the
+// COST BUDGET note in the header). These are the knobs:
+const MONTHLY_REQUEST_BUDGET = Number(process.env.MONTHLY_REQUEST_BUDGET) || 10_000; // plan quota, requests/mo
+const BUDGET_SAFETY = Number(process.env.BUDGET_SAFETY) || 0.9; // fraction of the quota to actually use
+const DAYS_PER_MONTH = 30.44; // avg calendar month, so even a 31-day month stays under budget
+const MS_PER_MONTH = DAYS_PER_MONTH * 24 * 60 * 60 * 1000;
+
 const REQUEST_SPACING_MS = Number(process.env.REQUEST_SPACING_MS) || 1_000;  // gap between point requests
 const FETCH_TIMEOUT_MS = 20_000;
 const BATCH_SIZE = 500;   // rows per upsert call
@@ -109,6 +120,21 @@ function toPollPoint(box) {
 
 const POLL_POINTS = BOXES.map(toPollPoint);
 
+// ─── Cadence calibrated to the plan ────────────────────────────
+// Spend at most BUDGET_SAFETY of the monthly quota and spread it evenly
+// across the month. One cycle = one request per poll point.
+const REQUESTS_PER_CYCLE = POLL_POINTS.length;
+function calibrateIntervalMs() {
+  const affordableCycles = Math.max(
+    1,
+    Math.floor((MONTHLY_REQUEST_BUDGET * BUDGET_SAFETY) / REQUESTS_PER_CYCLE),
+  );
+  return Math.ceil(MS_PER_MONTH / affordableCycles);
+}
+const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS) || calibrateIntervalMs();
+const EST_CYCLES_PER_MONTH = Math.floor(MS_PER_MONTH / POLL_INTERVAL_MS);
+const EST_REQUESTS_PER_MONTH = EST_CYCLES_PER_MONTH * REQUESTS_PER_CYCLE;
+
 if (!SUPABASE_URL) { console.error('NEXT_PUBLIC_SUPABASE_URL missing'); process.exit(1); }
 if (!SUPABASE_KEY) { console.error('SUPABASE_SERVICE_ROLE_KEY missing'); process.exit(1); }
 if (!RAPIDAPI_KEY) {
@@ -129,8 +155,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // adsb.lol proxy branch) so ingested rows match the Globe contract.
 // `country` carries the registration string `r` — the documented Air
 // registration-country caveat (PR #132), not a true origin country.
-// `t` (type) and `dbFlags` (military) are intentionally NOT written:
-// aircraft_positions has no column for them (see header).
+// `type` is ADSBexchange's type code `t`; `military` is dbFlags bit 0
+// (migration 054 added both columns) — these drive the Globe's military
+// highlight and the "Military" sub-layer.
 function toRow(a, nowIso) {
   const lat = Number(a.lat);
   const lon = Number(a.lon);
@@ -148,6 +175,8 @@ function toRow(a, nowIso) {
     on_ground: onGround,
     country: a.r || null,
     squawk: a.squawk || null,
+    type: (typeof a.t === 'string' ? a.t.trim() : '') || null,
+    military: (Number(a.dbFlags) & 1) === 1,
     ingested_at: nowIso, // refresh recency on every upsert so feed-health sees Air as hot
   };
 }
@@ -285,9 +314,19 @@ async function loop() {
 
 console.log('eYKON ADS-B ingest starting… (provider: ADSBexchange / RapidAPI)');
 console.log(
-  `  ${POLL_POINTS.length} points (4 regional + 6 chokepoints), cycle every ${POLL_INTERVAL_MS / 1000}s ` +
-  `(~${POLL_POINTS.length} req/cycle vs 10k/mo budget)`,
+  `  ${POLL_POINTS.length} points (4 regional + 6 chokepoints), ` +
+  `cycle every ${Math.round(POLL_INTERVAL_MS / 1000)}s (~${(POLL_INTERVAL_MS / 60_000).toFixed(1)} min)`,
 );
+console.log(
+  `  plan ${MONTHLY_REQUEST_BUDGET} req/mo × ${BUDGET_SAFETY} safety ⇒ ` +
+  `~${EST_REQUESTS_PER_MONTH} req/mo (${EST_CYCLES_PER_MONTH} cycles × ${REQUESTS_PER_CYCLE} pts)`,
+);
+if (EST_REQUESTS_PER_MONTH > MONTHLY_REQUEST_BUDGET) {
+  console.warn(
+    `  ⚠ POLL_INTERVAL_MS=${POLL_INTERVAL_MS} projects ${EST_REQUESTS_PER_MONTH} req/mo, ` +
+    `OVER the ${MONTHLY_REQUEST_BUDGET} budget — raise the interval or MONTHLY_REQUEST_BUDGET`,
+  );
+}
 console.log('  ' + POLL_POINTS.map((p) => `${p.label}@${p.dist}nm`).join(', '));
 bootDiagnostics()
   .catch((e) => console.error('boot diagnostics threw:', describeError(e)))

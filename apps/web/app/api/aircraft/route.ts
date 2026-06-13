@@ -7,7 +7,7 @@ import { createServerSupabase } from '@/lib/supabase-server';
 //                                this 502s from Railway — see
 //                                services/adsb-ingest for the saga).
 //   default / "supabase"      -> read aircraft_positions from Supabase,
-//                                populated by services/adsb-ingest (OpenSky).
+//                                populated by services/adsb-ingest (ADSBexchange).
 //
 // Citizen 24h feed-delay (trial-mechanism brief §5.4): aircraft_positions is
 // upsert-keyed on icao24, so it holds only each aircraft's LATEST position —
@@ -29,7 +29,7 @@ async function fetchFromSupabase(params: URLSearchParams) {
 
   let query = supabase
     .from('aircraft_positions')
-    .select('icao24,callsign,latitude,longitude,altitude,velocity,heading,on_ground,country,squawk,ingested_at')
+    .select('icao24,callsign,latitude,longitude,altitude,velocity,heading,on_ground,country,squawk,type,military,ingested_at')
     .gte('ingested_at', sinceISO)
     .order('ingested_at', { ascending: false })
     .limit(limit);
@@ -68,12 +68,12 @@ async function fetchFromSupabase(params: URLSearchParams) {
       on_ground: a.on_ground ?? false,
       country: a.country || '',
       squawk: a.squawk || '',
-      // Not stored in aircraft_positions (came from adsb.lol's `t` / dbFlags).
-      // Kept in the response shape so the Globe contract is unchanged; military
-      // highlighting is the one minor regression vs the old proxy — revisit by
-      // adding columns to the ingest worker + migration if it's wanted back.
-      type: '',
-      military: false,
+      // type + military come from ADSBexchange (`t` / dbFlags bit 0), persisted
+      // into aircraft_positions by services/adsb-ingest (migration 054). They
+      // drive the Globe's red military highlight + "(Military)" tooltip
+      // (MapView) and the "Military" sub-layer (lib/layer-config.ts).
+      type: a.type || '',
+      military: a.military ?? false,
       updated_at: a.ingested_at,
     })),
   });
@@ -120,7 +120,7 @@ async function fetchFromAdsblol(params: URLSearchParams) {
       country: a.r || '',
       squawk: a.squawk,
       type: a.t || '',
-      military: a.dbFlags === 1,
+      military: (Number(a.dbFlags) & 1) === 1,
     })),
   });
 }
