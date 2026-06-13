@@ -1,37 +1,55 @@
 /**
- * eYKON.ai — ADS-B Ingestion Worker (OpenSky Network)
+ * eYKON.ai — ADS-B Ingestion Worker (ADSBexchange via RapidAPI)
  *
- * Polls the OpenSky Network REST API for live aircraft and upserts the
+ * Polls ADSBexchange (RapidAPI) for live aircraft and upserts the
  * latest position per icao24 into Supabase `aircraft_positions`. The
  * Air DataBucket / geofence RPCs then see live rows and the
  * Notification Center's Air-bucket suggestions self-heal (PR #149).
+ * /api/aircraft READs that table (PR #180) rather than proxying live,
+ * so this worker is the ONLY thing that hits the external API — cost
+ * is governed purely by the poll cadence below.
  *
- * PROVIDER HISTORY: v1 polled adsb.lol (free, no key) — but adsb.lol
- * blocks datacenter/cloud egress IPs (verified 2026-06-12: HTTP 451 /
- * dropped connections from Railway on every request, while the same
- * endpoint returns 200 from a residential IP). It can never work from
- * Railway. OpenSky is the brief's sanctioned free upstream, serves
- * server-side clients officially, and its bbox query covers our BOXES
- * natively (full-region coverage instead of point+radius sampling).
+ * PROVIDER HISTORY: adsb.lol (free) and OpenSky (free, OAuth2) were
+ * both tried and BOTH are blocked from Railway's datacenter egress —
+ * adsb.lol returns HTTP 451, OpenSky's API host drops the SYN
+ * (UND_ERR_CONNECT_TIMEOUT), confirmed from Railway EU-West AND
+ * US-West (so it's an IP-level block, not a routing fluke). The fix is
+ * a server-friendly paid feed: ADSBexchange on RapidAPI (flat fee,
+ * answers datacenter clients). Its v2 API is the one adsb.lol cloned,
+ * so the response shape ({ ac: [...] }) and field names are identical
+ * to the adsb.lol era — the point+radius query (toPollPoint) and field
+ * mapping (toRow) below are restored from the pre-#178 worker.
  *
- * AUTH: OAuth2 client-credentials only since 2026-03-18 (basic auth
- * retired). Set OPENSKY_CLIENT_ID / OPENSKY_CLIENT_SECRET on the
- * Railway service. Tokens last ~30 min and are cached/refreshed here.
+ * AUTH: a static RapidAPI key, no token dance. Subscribe to
+ * adsbexchange-com1 (https://rapidapi.com/adsbx/api/adsbexchange-com1/
+ * pricing) and set RAPIDAPI_KEY on this Railway service.
  *
- * CREDIT BUDGET (free tier = 4,000 credits/day, resets daily):
- * cost per /states/all bbox query is area-tiered —
- *   ≤25 deg² → 1 · ≤100 → 2 · ≤400 → 3 · >400 → 4
- * Our cycle: 4 regional boxes (all >400 deg²) = 16 credits + six
- * chokepoints (16, 9, 18, 1, 48→2, 4 deg²) = 7 credits ⇒ ~23
- * credits/cycle. Default cadence 10 min ⇒ 144 cycles/day ⇒ ~3,312
- * credits — inside budget with margin. A 60s cadence would burn ~33k/
- * day: do NOT lower POLL_INTERVAL_MS below ~480s without re-doing this
- * arithmetic. On HTTP 429 the remaining boxes of the cycle are skipped
- * (further calls would also 429 and waste nothing).
+ * COST BUDGET — cadence is auto-calibrated to the plan, NOT hardcoded.
+ * One cycle costs POLL_POINTS.length requests (one per poll point), so
+ * the poll interval is derived from the plan's monthly request budget:
+ *   affordable cycles/mo = MONTHLY_REQUEST_BUDGET × BUDGET_SAFETY ÷ pts
+ *   interval             = avg-month ÷ affordable cycles
+ * Defaults: 10,000 req/mo ($10 RapidAPI entry tier) × 0.9 safety ÷ 10
+ * points ⇒ 900 cycles/mo ⇒ ~48.7 min cadence ⇒ ~9,000 req/mo, so a
+ * full month (even 31 days) stays under quota with headroom. Upgrade
+ * the plan → raise MONTHLY_REQUEST_BUDGET and the cadence speeds up
+ * automatically; add poll points → the cadence slows automatically to
+ * stay in budget. An explicit POLL_INTERVAL_MS overrides the maths
+ * (boot warns if the override would exceed the budget). On HTTP 429 the
+ * remaining points of the cycle are skipped (the monthly quota is spent).
  *
- * UNITS: OpenSky reports metric (baro_altitude m, velocity m/s); the
- * adsb.lol era stored feet/knots and downstream consumers assume that,
- * so we convert at ingest to keep row semantics unchanged.
+ * UNITS: ADSBexchange v2 reports ADS-B-native units — alt_baro in feet
+ * ('ground' on the deck), gs in knots, track in degrees — which is
+ * exactly what downstream consumers expect, so (unlike the OpenSky
+ * era) NO unit conversion happens at ingest.
+ *
+ * MILITARY / TYPE: migration 054 adds `type` + `military` to
+ * aircraft_positions, so toRow persists ADSBexchange's type code (`t`)
+ * and the military bit (dbFlags & 1). /api/aircraft surfaces them and
+ * the Globe's red military highlight + "(Military)" tooltip (MapView)
+ * and the "Military" sub-layer (lib/layer-config.ts) light up again.
+ * The migration MUST be applied before this worker runs, or the upsert
+ * 500s on the missing columns.
  *
  * geom is set by the auto_geom_aircraft trigger (migration 001) from
  * lat/lon — we only write the scalar columns. icao24 upsert relies on
@@ -45,33 +63,40 @@ const { createClient } = require('@supabase/supabase-js');
 // ─── Config ────────────────────────────────────────────────────
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const OPENSKY_CLIENT_ID = process.env.OPENSKY_CLIENT_ID;
-const OPENSKY_CLIENT_SECRET = process.env.OPENSKY_CLIENT_SECRET;
+const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
 
-const OPENSKY_TOKEN_URL =
-  'https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token';
-const OPENSKY_STATES_URL = 'https://opensky-network.org/api/states/all';
+const ADSBX_HOST = 'adsbexchange-com1.p.rapidapi.com';
+const ADSBX_BASE = `https://${ADSBX_HOST}/v2`;
 
-const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS) || 600_000; // 10 min — see credit budget above
-const REQUEST_SPACING_MS = Number(process.env.REQUEST_SPACING_MS) || 1_000;
+// Cadence is calibrated to the plan once POLL_POINTS is known (see the
+// COST BUDGET note in the header). These are the knobs:
+const MONTHLY_REQUEST_BUDGET = Number(process.env.MONTHLY_REQUEST_BUDGET) || 10_000; // plan quota, requests/mo
+const BUDGET_SAFETY = Number(process.env.BUDGET_SAFETY) || 0.9; // fraction of the quota to actually use
+const DAYS_PER_MONTH = 30.44; // avg calendar month, so even a 31-day month stays under budget
+const MS_PER_MONTH = DAYS_PER_MONTH * 24 * 60 * 60 * 1000;
+
+const REQUEST_SPACING_MS = Number(process.env.REQUEST_SPACING_MS) || 1_000;  // gap between point requests
 const FETCH_TIMEOUT_MS = 20_000;
-const BATCH_SIZE = 500; // rows per upsert call
-
-const M_TO_FT = 3.28084;
-const MS_TO_KT = 1.94384;
+const BATCH_SIZE = 500;   // rows per upsert call
+const MIN_DIST_NM = 50;   // floor so chokepoint boxes still catch approaching traffic
+const MAX_DIST_NM = 250;  // ADSBexchange radius cap (same as the adsb.lol v2 API it clones)
 
 // ─── Poll regions ──────────────────────────────────────────────
 // Same 4 broad regions + 6 chokepoints as services/ais-ingest
-// (PR #143). OpenSky /states/all takes a bbox directly (lamin/lomin/
-// lamax/lomax), so unlike the adsb.lol point+radius API these boxes
-// are covered in FULL — no centre-sampling.
+// (PR #143). The ADSBexchange v2 API is point+radius (not bbox), so
+// each box becomes its centre point and a radius that covers it
+// (capped at MAX_DIST_NM). The broad regions are larger than the cap,
+// so they are sampled at their centre — partial coverage, easy to
+// extend by adding more points later. The six chokepoints are small
+// enough to be fully covered and are the priority (Hormuz must not be
+// starved).
 const BOXES = [
-  // Broad regions (cost 4 credits each)
+  // Broad regions
   { label: 'Europe + Mediterranean', lat_min: 30,   lat_max: 70,   lon_min: -15,  lon_max: 45 },
   { label: 'Americas Atlantic',      lat_min: -10,  lat_max: 60,   lon_min: -90,  lon_max: -30 },
   { label: 'Africa + Indian Ocean',  lat_min: -40,  lat_max: 40,   lon_min: 10,   lon_max: 60 },
   { label: 'Asia-Pacific',           lat_min: -15,  lat_max: 50,   lon_min: 90,   lon_max: 180 },
-  // Chokepoints (cost 1–2 credits each)
+  // Chokepoints
   { label: 'Strait of Hormuz',       lat_min: 24,   lat_max: 28,   lon_min: 54,   lon_max: 58 },
   { label: 'Bab-el-Mandeb',          lat_min: 11,   lat_max: 14,   lon_min: 42,   lon_max: 45 },
   { label: 'Suez Canal',             lat_min: 27,   lat_max: 33,   lon_min: 31,   lon_max: 34 },
@@ -80,11 +105,41 @@ const BOXES = [
   { label: 'Panama Canal',           lat_min: 8,    lat_max: 10,   lon_min: -81,  lon_max: -79 },
 ];
 
+// adsb.lol / ADSBexchange v2 query is point+radius, not bbox: collapse
+// each box to its centre and a radius (nm) that covers it, clamped to
+// [MIN_DIST_NM, MAX_DIST_NM].
+function toPollPoint(box) {
+  const lat = (box.lat_min + box.lat_max) / 2;
+  const lon = (box.lon_min + box.lon_max) / 2;
+  const dLatNm = (box.lat_max - box.lat_min) * 60;
+  const dLonNm = (box.lon_max - box.lon_min) * 60 * Math.cos((lat * Math.PI) / 180);
+  const halfDiagNm = 0.5 * Math.sqrt(dLatNm * dLatNm + dLonNm * dLonNm);
+  const dist = Math.min(MAX_DIST_NM, Math.max(MIN_DIST_NM, Math.round(halfDiagNm)));
+  return { label: box.label, lat: Number(lat.toFixed(4)), lon: Number(lon.toFixed(4)), dist };
+}
+
+const POLL_POINTS = BOXES.map(toPollPoint);
+
+// ─── Cadence calibrated to the plan ────────────────────────────
+// Spend at most BUDGET_SAFETY of the monthly quota and spread it evenly
+// across the month. One cycle = one request per poll point.
+const REQUESTS_PER_CYCLE = POLL_POINTS.length;
+function calibrateIntervalMs() {
+  const affordableCycles = Math.max(
+    1,
+    Math.floor((MONTHLY_REQUEST_BUDGET * BUDGET_SAFETY) / REQUESTS_PER_CYCLE),
+  );
+  return Math.ceil(MS_PER_MONTH / affordableCycles);
+}
+const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS) || calibrateIntervalMs();
+const EST_CYCLES_PER_MONTH = Math.floor(MS_PER_MONTH / POLL_INTERVAL_MS);
+const EST_REQUESTS_PER_MONTH = EST_CYCLES_PER_MONTH * REQUESTS_PER_CYCLE;
+
 if (!SUPABASE_URL) { console.error('NEXT_PUBLIC_SUPABASE_URL missing'); process.exit(1); }
 if (!SUPABASE_KEY) { console.error('SUPABASE_SERVICE_ROLE_KEY missing'); process.exit(1); }
-if (!OPENSKY_CLIENT_ID || !OPENSKY_CLIENT_SECRET) {
+if (!RAPIDAPI_KEY) {
   console.error(
-    'OPENSKY_CLIENT_ID / OPENSKY_CLIENT_SECRET missing — create an API client at opensky-network.org and set both on this Railway service',
+    'RAPIDAPI_KEY missing — subscribe to adsbexchange-com1 on RapidAPI and set RAPIDAPI_KEY on this Railway service',
   );
   process.exit(1);
 }
@@ -95,68 +150,33 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ─── OAuth2 token cache ────────────────────────────────────────
-let cachedToken = null; // { value: string, expiresAtMs: number }
-
-async function getToken() {
-  if (cachedToken && Date.now() < cachedToken.expiresAtMs - 60_000) {
-    return cachedToken.value;
-  }
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(OPENSKY_TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: OPENSKY_CLIENT_ID,
-        client_secret: OPENSKY_CLIENT_SECRET,
-      }),
-      signal: ctrl.signal,
-    });
-    if (!res.ok) throw new Error(`token HTTP ${res.status}`);
-    const json = await res.json();
-    if (!json.access_token) throw new Error('token response missing access_token');
-    cachedToken = {
-      value: json.access_token,
-      expiresAtMs: Date.now() + (Number(json.expires_in) || 1800) * 1000,
-    };
-    return cachedToken.value;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// ─── OpenSky state vector → aircraft_positions row ─────────────
-// /states/all returns { time, states: [[...17 cols...]] | null }.
-// Indices per the OpenSky REST docs:
-//   0 icao24 · 1 callsign · 2 origin_country · 5 longitude ·
-//   6 latitude · 7 baro_altitude(m) · 8 on_ground · 9 velocity(m/s) ·
-//   10 true_track(deg) · 14 squawk
-// `country` now carries OpenSky's origin_country (a real country
-// name) — an upgrade over the adsb.lol era, which stored the
-// registration string (the documented PR #132 caveat).
-function toRow(s, nowIso) {
-  const icao24 = typeof s[0] === 'string' ? s[0].trim() : '';
-  const lon = Number(s[5]);
-  const lat = Number(s[6]);
-  if (!icao24 || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-  const onGround = s[8] === true;
-  const baroAltM = Number(s[7]);
-  const velocityMs = Number(s[9]);
-  const track = Number(s[10]);
+// ─── ADSBexchange aircraft → aircraft_positions row ────────────
+// Field mapping mirrors apps/web/app/api/aircraft/route.ts (the
+// adsb.lol proxy branch) so ingested rows match the Globe contract.
+// `country` carries the registration string `r` — the documented Air
+// registration-country caveat (PR #132), not a true origin country.
+// `type` is ADSBexchange's type code `t`; `military` is dbFlags bit 0
+// (migration 054 added both columns) — these drive the Globe's military
+// highlight and the "Military" sub-layer.
+function toRow(a, nowIso) {
+  const lat = Number(a.lat);
+  const lon = Number(a.lon);
+  if (!a.hex || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const onGround = a.alt_baro === 'ground';
+  const altitude = onGround ? 0 : (Number.isFinite(Number(a.alt_baro)) ? Number(a.alt_baro) : null);
   return {
-    icao24,
-    callsign: (typeof s[1] === 'string' ? s[1].trim() : '') || null,
+    icao24: String(a.hex),
+    callsign: (a.flight || '').trim() || null,
     latitude: lat,
     longitude: lon,
-    altitude: onGround ? 0 : (Number.isFinite(baroAltM) ? Math.round(baroAltM * M_TO_FT) : null),
-    velocity: Number.isFinite(velocityMs) ? Math.round(velocityMs * MS_TO_KT * 10) / 10 : null,
-    heading: Number.isFinite(track) ? track : null,
+    altitude,
+    velocity: Number.isFinite(Number(a.gs)) ? Number(a.gs) : null,
+    heading: Number.isFinite(Number(a.track)) ? Number(a.track) : null,
     on_ground: onGround,
-    country: (typeof s[2] === 'string' ? s[2].trim() : '') || null,
-    squawk: (typeof s[14] === 'string' ? s[14].trim() : '') || null,
+    country: a.r || null,
+    squawk: a.squawk || null,
+    type: (typeof a.t === 'string' ? a.t.trim() : '') || null,
+    military: (Number(a.dbFlags) & 1) === 1,
     ingested_at: nowIso, // refresh recency on every upsert so feed-health sees Air as hot
   };
 }
@@ -165,7 +185,7 @@ class RateLimitedError extends Error {}
 
 // Node's fetch reports every network-layer failure as the opaque
 // "fetch failed" TypeError; the real story (DNS vs connect-timeout vs
-// reset) lives in err.cause. Surface it so the Railway logs are
+// reset) lives in err.cause. Surface it so the Railway logs stay
 // actionable — UND_ERR_CONNECT_TIMEOUT = SYNs dropped (IP-level block
 // or broken routing), ENOTFOUND/EAI_AGAIN = DNS, ECONNRESET = peer
 // closed mid-handshake.
@@ -174,17 +194,16 @@ function describeError(err) {
   return code ? `${code}: ${err.message}` : err.message;
 }
 
-// One-shot network diagnostic at boot, because the worker's failure
-// mode (2026-06-12) was an opaque all-boxes "fetch failed" from
-// Railway while the same endpoints answered from a residential IP.
-// Logs in-container DNS for the OpenSky hosts plus two reachability
-// probes — api.github.com as the known-good control, and an anonymous
-// 1°×1° /states/all call (no credits/credentials needed) as the
-// OpenSky probe. Output reads as one block right after the banner.
+// One-shot boot diagnostic (kept from the OpenSky-era saga, PR #179):
+// log in-container DNS for the ADSBexchange host plus a key-free
+// reachability probe to api.github.com as a known-good control. We do
+// NOT probe the RapidAPI host here — it requires the paid key and would
+// cost a request; the first cycle's `err=` count validates auth and
+// reachability for real.
 async function bootDiagnostics() {
   const dns = require('node:dns').promises;
   console.log('  network diagnostics:');
-  for (const host of ['opensky-network.org', 'auth.opensky-network.org', 'api.github.com']) {
+  for (const host of [ADSBX_HOST, 'api.github.com']) {
     try {
       const addrs = await dns.lookup(host, { all: true });
       console.log(`    dns ${host} → ${addrs.map((a) => a.address).join(', ')}`);
@@ -192,48 +211,41 @@ async function bootDiagnostics() {
       console.log(`    dns ${host} → ERR ${e.code || e.message}`);
     }
   }
-  for (const url of [
-    'https://api.github.com',
-    'https://opensky-network.org/api/states/all?lamin=0&lomin=0&lamax=1&lomax=1',
-  ]) {
-    const host = new URL(url).host;
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 12_000);
-    try {
-      const res = await fetch(url, { signal: ctrl.signal });
-      console.log(`    probe ${host} → HTTP ${res.status}`);
-      try { await res.body?.cancel(); } catch { /* drained or absent */ }
-    } catch (e) {
-      console.log(`    probe ${host} → ERR ${describeError(e)}`);
-    } finally {
-      clearTimeout(timer);
-    }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 12_000);
+  try {
+    const res = await fetch('https://api.github.com', { signal: ctrl.signal });
+    console.log(`    probe api.github.com → HTTP ${res.status}`);
+    try { await res.body?.cancel(); } catch { /* drained or absent */ }
+  } catch (e) {
+    console.log(`    probe api.github.com → ERR ${describeError(e)}`);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
-async function fetchBox(box) {
-  const token = await getToken();
-  const params = new URLSearchParams({
-    lamin: String(box.lat_min),
-    lomin: String(box.lon_min),
-    lamax: String(box.lat_max),
-    lomax: String(box.lon_max),
-  });
+async function fetchPoint(pt) {
+  const url = `${ADSBX_BASE}/lat/${pt.lat}/lon/${pt.lon}/dist/${pt.dist}/`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(`${OPENSKY_STATES_URL}?${params}`, {
-      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    const res = await fetch(url, {
+      headers: {
+        Accept: 'application/json',
+        'X-RapidAPI-Key': RAPIDAPI_KEY,
+        'X-RapidAPI-Host': ADSBX_HOST,
+      },
       signal: ctrl.signal,
     });
-    if (res.status === 401) {
-      cachedToken = null; // token revoked/expired early — re-auth on next call
-      throw new Error('HTTP 401 (token invalidated, will re-auth)');
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(
+        `HTTP ${res.status} (RapidAPI key rejected — check RAPIDAPI_KEY and the adsbexchange-com1 subscription)`,
+      );
     }
-    if (res.status === 429) throw new RateLimitedError('HTTP 429 (daily credits exhausted)');
+    if (res.status === 429) throw new RateLimitedError('HTTP 429 (monthly request quota exhausted)');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
-    return Array.isArray(json.states) ? json.states : [];
+    return json.ac || json.aircraft || [];
   } finally {
     clearTimeout(timer);
   }
@@ -243,22 +255,22 @@ async function fetchBox(box) {
 async function cycle() {
   const startedAt = Date.now();
   const nowIso = new Date().toISOString();
-  const byIcao = new Map(); // dedupe across overlapping boxes; last write wins
-  const perBox = [];
+  const byIcao = new Map(); // dedupe across overlapping points; last write wins
+  const perPoint = [];
 
-  for (const box of BOXES) {
+  for (const pt of POLL_POINTS) {
     try {
-      const states = await fetchBox(box);
+      const aircraft = await fetchPoint(pt);
       let kept = 0;
-      for (const s of states) {
-        const row = toRow(s, nowIso);
+      for (const a of aircraft) {
+        const row = toRow(a, nowIso);
         if (row) { byIcao.set(row.icao24, row); kept++; }
       }
-      perBox.push(`${box.label}=${kept}`);
+      perPoint.push(`${pt.label}=${kept}`);
     } catch (err) {
-      perBox.push(`${box.label}=ERR(${describeError(err)})`);
+      perPoint.push(`${pt.label}=ERR(${describeError(err)})`);
       if (err instanceof RateLimitedError) {
-        perBox.push('(skipping rest of cycle — credit budget exhausted until daily reset)');
+        perPoint.push('(skipping rest of cycle — monthly request quota exhausted)');
         break;
       }
     }
@@ -280,7 +292,7 @@ async function cycle() {
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
   console.log(
     `[${new Date().toISOString()}] cycle ${elapsed}s ` +
-    `distinct=${rows.length} upsert=${upserted} err=${errored} | ${perBox.join(' ')}`,
+    `distinct=${rows.length} upsert=${upserted} err=${errored} | ${perPoint.join(' ')}`,
   );
 }
 
@@ -300,11 +312,22 @@ async function loop() {
   }
 }
 
-console.log('eYKON ADS-B ingest starting… (provider: OpenSky Network, OAuth2)');
+console.log('eYKON ADS-B ingest starting… (provider: ADSBexchange / RapidAPI)');
 console.log(
-  `  ${BOXES.length} bboxes (4 regional + 6 chokepoints), cycle every ${POLL_INTERVAL_MS / 1000}s (~23 credits/cycle vs 4k/day budget)`,
+  `  ${POLL_POINTS.length} points (4 regional + 6 chokepoints), ` +
+  `cycle every ${Math.round(POLL_INTERVAL_MS / 1000)}s (~${(POLL_INTERVAL_MS / 60_000).toFixed(1)} min)`,
 );
-console.log('  ' + BOXES.map((b) => b.label).join(', '));
+console.log(
+  `  plan ${MONTHLY_REQUEST_BUDGET} req/mo × ${BUDGET_SAFETY} safety ⇒ ` +
+  `~${EST_REQUESTS_PER_MONTH} req/mo (${EST_CYCLES_PER_MONTH} cycles × ${REQUESTS_PER_CYCLE} pts)`,
+);
+if (EST_REQUESTS_PER_MONTH > MONTHLY_REQUEST_BUDGET) {
+  console.warn(
+    `  ⚠ POLL_INTERVAL_MS=${POLL_INTERVAL_MS} projects ${EST_REQUESTS_PER_MONTH} req/mo, ` +
+    `OVER the ${MONTHLY_REQUEST_BUDGET} budget — raise the interval or MONTHLY_REQUEST_BUDGET`,
+  );
+}
+console.log('  ' + POLL_POINTS.map((p) => `${p.label}@${p.dist}nm`).join(', '));
 bootDiagnostics()
   .catch((e) => console.error('boot diagnostics threw:', describeError(e)))
   .finally(() => loop());

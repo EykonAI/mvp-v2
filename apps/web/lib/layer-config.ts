@@ -20,9 +20,9 @@ export const CATEGORIES: CategoryDef[] = [
     icon: '✈',
     sublayers: [
       { key: 'aircraft.civilian', label: 'Civilian', status: 'live',
-        dataKey: 'aircraft', predicate: () => true },
-      { key: 'aircraft.military', label: 'Military', status: 'planned',
-        comingSoon: 'Phase 2 — ADS-B Exchange unfiltered military feed' },
+        dataKey: 'aircraft', predicate: (a: any) => !a.military },
+      { key: 'aircraft.military', label: 'Military', status: 'live',
+        dataKey: 'aircraft', predicate: (a: any) => !!a.military },
     ],
   },
   {
