@@ -130,9 +130,11 @@ export const WATCHLIST_LIMITS: Record<Tier, number> = {
 
 // Citizen feed delay in milliseconds. Reads of /api/vessels and
 // /api/conflicts return data as-of NOW - this offset for Citizen tier.
-// /api/aircraft is a live proxy to adsb.lol (no Supabase backing) and
-// is exempted in code — Citizens see live aircraft data, the trade-off
-// is documented in the trial-mechanism brief §5.4.
+// /api/aircraft is exempted in code — Citizens see live aircraft data,
+// the trade-off is documented in the trial-mechanism brief §5.4. It now
+// reads the aircraft_positions table (services/adsb-ingest), but that
+// table is upsert-keyed on icao24 with no historical time-series, so the
+// 24h-ago snapshot still isn't possible — the live exception stands.
 export const CITIZEN_FEED_DELAY_MS = 24 * 60 * 60 * 1000;
 
 // ─── Citizen Intelligence Center access (trial-mechanism brief §5.2) ───
