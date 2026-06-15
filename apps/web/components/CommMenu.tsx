@@ -14,6 +14,7 @@ import type { CSSProperties } from 'react';
 
 const LINKS = [
   { href: '/me', label: 'Profile' },
+  { href: '/leaderboard', label: 'Leaderboard' },
   { href: '/messages', label: 'Messages' },
   { href: '/rooms', label: 'Rooms' },
 ];
