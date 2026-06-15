@@ -152,7 +152,7 @@ export default async function ProfilePage({
 
       <div style={{ display: 'flex', gap: 28, marginTop: 28, flexWrap: 'wrap' }}>
         <aside style={{ width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <ReputationPassport resolvedCount={data.resolvedCount} />
+          <ReputationPassport resolvedCount={data.resolvedCount} reputation={data.reputation} />
           <div style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--ink-dim)', lineHeight: 1.8 }}>
             <span style={{ color: 'var(--ink)' }}>{fmtCount(data.followers)}</span> followers ·{' '}
             <span style={{ color: 'var(--ink)' }}>{fmtCount(data.following)}</span> following
