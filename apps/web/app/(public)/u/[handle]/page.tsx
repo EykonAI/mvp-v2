@@ -3,8 +3,13 @@ import type { CSSProperties, ReactNode } from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { commProfilesEnabled } from '@/lib/flags';
-import { loadProfile, type ProfilePrediction, type ProfileLink } from '@/lib/comm/profile';
+import { loadProfile, isFollowing, type ProfilePrediction, type ProfileLink } from '@/lib/comm/profile';
 import { personaLabel } from '@/lib/intelligence-analyst/personas';
+import { ReputationPassport } from '@/components/profile/ReputationPassport';
+import { Wall } from '@/components/profile/Wall';
+import { FollowButton } from '@/components/profile/FollowButton';
+import { ShareButton } from '@/components/profile/ShareButton';
+import { getCurrentUser } from '@/lib/auth/session';
 
 // /u/<handle> — public, read-only COMM profile (Phase 1 of the COMM
 // User Profile Page brief). The home of the Calibration Passport and the
@@ -58,6 +63,9 @@ export default async function ProfilePage({
 
   const p = data.profile;
   const slug = p.handle ?? p.public_id ?? params.handle;
+  const viewer = await getCurrentUser();
+  const isOwner = !!viewer && viewer.id === p.id;
+  const initialFollowing = viewer && !isOwner ? await isFollowing(viewer.id, p.id) : false;
   const name = p.display_name || (p.handle ? `@${p.handle}` : 'Analyst');
   const tab = pickTab(searchParams?.tab);
   const joined = p.created_at ? new Date(p.created_at).getUTCFullYear() : null;
@@ -65,6 +73,17 @@ export default async function ProfilePage({
 
   return (
     <article style={{ maxWidth: 980, margin: '0 auto', padding: '36px 24px 72px' }}>
+      {p.cover_url && (
+        <div
+          style={{
+            height: 132,
+            borderRadius: 10,
+            marginBottom: 20,
+            background: `center/cover no-repeat url("${p.cover_url}")`,
+            border: '1px solid var(--rule)',
+          }}
+        />
+      )}
       <header style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div
           style={{
@@ -116,12 +135,16 @@ export default async function ProfilePage({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
-          <Link href="/auth/signup" style={primaryBtn}>
-            Sign up to follow →
-          </Link>
-          <div style={{ display: 'flex', gap: 6 }}>
+          {isOwner ? (
+            <Link href="/settings/profile" style={primaryBtn} prefetch={false}>
+              Edit profile
+            </Link>
+          ) : (
+            <FollowButton profileId={p.id} isAuthed={!!viewer} initialFollowing={initialFollowing} />
+          )}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <ShareButton />
             <SoonChip>Message</SoonChip>
-            <SoonChip>Spaces</SoonChip>
             <SoonChip>Subscribe</SoonChip>
           </div>
         </div>
@@ -129,37 +152,11 @@ export default async function ProfilePage({
 
       <div style={{ display: 'flex', gap: 28, marginTop: 28, flexWrap: 'wrap' }}>
         <aside style={{ width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <section
-            style={{
-              background: 'var(--bg-panel)',
-              border: '1px solid var(--rule)',
-              borderRadius: 6,
-              padding: '16px 18px',
-            }}
-          >
-            <div className="eyebrow" style={{ color: 'var(--teal)' }}>
-              Calibration Passport
-            </div>
-            <div
-              style={{
-                fontFamily: 'var(--f-display)',
-                fontSize: 22,
-                color: 'var(--ink)',
-                marginTop: 8,
-              }}
-            >
-              Calibrating
-            </div>
-            <div
-              style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--ink-dim)', marginTop: 4 }}
-            >
-              {data.resolvedCount} resolved call{data.resolvedCount === 1 ? '' : 's'}
-            </div>
-            <p style={{ fontSize: 11.5, color: 'var(--ink-faint)', marginTop: 10, lineHeight: 1.5 }}>
-              A verified skill score appears once enough of this analyst’s predictions resolve.
-            </p>
-          </section>
-          <div style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--ink-dim)' }}>
+          <ReputationPassport resolvedCount={data.resolvedCount} />
+          <div style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--ink-dim)', lineHeight: 1.8 }}>
+            <span style={{ color: 'var(--ink)' }}>{fmtCount(data.followers)}</span> followers ·{' '}
+            <span style={{ color: 'var(--ink)' }}>{fmtCount(data.following)}</span> following
+            <br />
             {data.resolvedCount} resolved · {data.predictions.length} call
             {data.predictions.length === 1 ? '' : 's'}
             {joined ? ` · joined ${joined}` : ''}
@@ -196,12 +193,7 @@ export default async function ProfilePage({
           </nav>
           <div style={{ marginTop: 18 }}>
             {tab === 'predictions' && <PredictionsTab predictions={data.predictions} />}
-            {tab === 'wall' && (
-              <ComingSoon
-                title="Wall"
-                note="Short, character-limited posts — arriving with the COMM rollout."
-              />
-            )}
+            {tab === 'wall' && <Wall initialPosts={data.wall} isOwner={isOwner} />}
             {tab === 'spaces' && (
               <ComingSoon
                 title="Spaces"
@@ -456,4 +448,9 @@ function PredictionRowView({ p }: { p: ProfilePrediction }) {
       </span>
     </div>
   );
+}
+
+function fmtCount(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`;
+  return String(n);
 }
