@@ -6,6 +6,7 @@ import NotificationBell from '@/components/NotificationBell';
 import CalibrationBadge from '@/components/CalibrationBadge';
 import ConvergenceBadge from '@/components/ConvergenceBadge';
 import LogoutButton from '@/components/LogoutButton';
+import CommMenu from '@/components/CommMenu';
 
 interface TopNavProps {
   chatOpen?: boolean;
@@ -105,48 +106,7 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
       </span>
 
       <WelcomeGreeting />
-      <Link
-        href="/settings/profile"
-        title="Your profile & settings"
-        style={{
-          fontFamily: 'var(--f-mono)',
-          fontSize: 10.5,
-          letterSpacing: '0.12em',
-          textTransform: 'uppercase',
-          color: 'var(--ink-dim)',
-          textDecoration: 'none',
-        }}
-      >
-        Profile
-      </Link>
-      <Link
-        href="/messages"
-        title="Direct messages"
-        style={{
-          fontFamily: 'var(--f-mono)',
-          fontSize: 10.5,
-          letterSpacing: '0.12em',
-          textTransform: 'uppercase',
-          color: 'var(--ink-dim)',
-          textDecoration: 'none',
-        }}
-      >
-        Messages
-      </Link>
-      <Link
-        href="/rooms"
-        title="Group rooms"
-        style={{
-          fontFamily: 'var(--f-mono)',
-          fontSize: 10.5,
-          letterSpacing: '0.12em',
-          textTransform: 'uppercase',
-          color: 'var(--ink-dim)',
-          textDecoration: 'none',
-        }}
-      >
-        Rooms
-      </Link>
+      <CommMenu />
       <LogoutButton />
 
       {/* LIVE pill */}
