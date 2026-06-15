@@ -19,7 +19,7 @@ export default async function ThreadPage({ params }: { params: { room: string } 
 
   const [other, initial] = await Promise.all([
     otherParticipant(supabase, params.room, user.id),
-    loadMessages(supabase, params.room),
+    loadMessages(supabase, params.room, undefined, user.id),
   ]);
   await markRead(supabase, params.room, user.id);
 

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { commProfilesEnabled } from '@/lib/flags';
 import { loadProfile, isFollowing, type ProfilePrediction, type ProfileLink } from '@/lib/comm/profile';
+import { isBlockedByMe } from '@/lib/comm/moderation';
 import { personaLabel } from '@/lib/intelligence-analyst/personas';
 import { ReputationPassport } from '@/components/profile/ReputationPassport';
 import { Wall } from '@/components/profile/Wall';
@@ -11,6 +12,7 @@ import { FollowButton } from '@/components/profile/FollowButton';
 import { ShareButton } from '@/components/profile/ShareButton';
 import { MakeACall } from '@/components/profile/MakeACall';
 import { MessageButton } from '@/components/profile/MessageButton';
+import { ProfileModeration } from '@/components/profile/ProfileModeration';
 import { getCurrentUser } from '@/lib/auth/session';
 
 // /u/<handle> — public, read-only COMM profile (Phase 1 of the COMM
@@ -68,6 +70,7 @@ export default async function ProfilePage({
   const viewer = await getCurrentUser();
   const isOwner = !!viewer && viewer.id === p.id;
   const initialFollowing = viewer && !isOwner ? await isFollowing(viewer.id, p.id) : false;
+  const viewerBlocked = viewer && !isOwner ? await isBlockedByMe(viewer.id, p.id) : false;
   const name = p.display_name || (p.handle ? `@${p.handle}` : 'Analyst');
   const tab = pickTab(searchParams?.tab);
   const joined = p.created_at ? new Date(p.created_at).getUTCFullYear() : null;
@@ -147,6 +150,7 @@ export default async function ProfilePage({
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <ShareButton />
             {!isOwner && <MessageButton profileId={p.id} isAuthed={!!viewer} />}
+            {!isOwner && viewer && <ProfileModeration profileId={p.id} blocked={viewerBlocked} />}
             <SoonChip>Subscribe</SoonChip>
           </div>
         </div>

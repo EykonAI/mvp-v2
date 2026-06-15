@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { getCurrentUser } from '@/lib/auth/session';
 import { getOrCreateDm } from '@/lib/comm/dm';
+import { isBlockedBetween } from '@/lib/comm/moderation';
 
 // Start (or reopen) a 1:1 DM with another user. Returns the room id; the
 // profile "Message" button navigates to /messages/<room_id>.
@@ -28,6 +29,9 @@ export async function POST(req: NextRequest) {
   const supabase = createServerSupabase();
   const { data: target } = await supabase.from('user_profiles').select('id').eq('id', to).maybeSingle();
   if (!target) return NextResponse.json({ error: 'user_not_found' }, { status: 404 });
+  if (await isBlockedBetween(supabase, user.id, to)) {
+    return NextResponse.json({ error: 'blocked' }, { status: 403 });
+  }
 
   const roomId = await getOrCreateDm(supabase, user.id, to);
   if (!roomId) return NextResponse.json({ error: 'could_not_create' }, { status: 500 });

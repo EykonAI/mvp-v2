@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
   const supabase = createServerSupabase();
   if (!(await isMember(supabase, room, user.id))) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
-  const messages = await loadMessages(supabase, room, after);
+  const messages = await loadMessages(supabase, room, after, user.id);
   await markRead(supabase, room, user.id);
   return NextResponse.json({ messages });
 }
