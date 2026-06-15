@@ -39,10 +39,19 @@ export interface ProfilePrediction {
   status: 'resolved' | 'open';
 }
 
+export interface WallPost {
+  id: string;
+  body: string;
+  created_at: string;
+}
+
 export interface ProfileData {
   profile: PublicProfile;
   predictions: ProfilePrediction[];
   resolvedCount: number;
+  wall: WallPost[];
+  followers: number;
+  following: number;
 }
 
 const HANDLE_RE = /^[A-Za-z0-9_]{1,32}$/;
@@ -132,6 +141,9 @@ export async function loadProfile(param: string): Promise<ProfileData | null> {
     },
   );
 
+  const wall = await loadWall(supabase, row.id);
+  const [followers, following] = await loadFollowCounts(supabase, row.id);
+
   return {
     profile: {
       id: row.id,
@@ -148,7 +160,75 @@ export async function loadProfile(param: string): Promise<ProfileData | null> {
     },
     predictions,
     resolvedCount: predictions.filter((p) => p.status === 'resolved').length,
+    wall,
+    followers,
+    following,
   };
+}
+
+// Wall posts for the profile owner. Fail-soft: if comm_wall_posts does
+// not exist yet (migration 056 not applied) the query errors and we
+// return [] so the live /u/ page never regresses to a 500.
+async function loadWall(
+  supabase: ReturnType<typeof createServerSupabase>,
+  authorId: string,
+): Promise<WallPost[]> {
+  try {
+    const { data, error } = await supabase
+      .from('comm_wall_posts')
+      .select('id, body, created_at')
+      .eq('author_id', authorId)
+      .eq('visibility', 'public')
+      .order('created_at', { ascending: false })
+      .limit(30);
+    if (error || !data) return [];
+    return (data as { id: string; body: string; created_at: string }[]).map((p) => ({
+      id: p.id,
+      body: p.body,
+      created_at: p.created_at,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// Follower / following counts. Fail-soft on a missing table (migration
+// 057 not yet applied) → [0, 0], so the live page never regresses.
+async function loadFollowCounts(
+  supabase: ReturnType<typeof createServerSupabase>,
+  profileId: string,
+): Promise<[number, number]> {
+  try {
+    const [a, b] = await Promise.all([
+      supabase
+        .from('comm_follows')
+        .select('follower_id', { count: 'exact', head: true })
+        .eq('followee_id', profileId),
+      supabase
+        .from('comm_follows')
+        .select('followee_id', { count: 'exact', head: true })
+        .eq('follower_id', profileId),
+    ]);
+    return [a.count ?? 0, b.count ?? 0];
+  } catch {
+    return [0, 0];
+  }
+}
+
+// True if `viewerId` follows `profileId`. Fail-soft on a missing table.
+export async function isFollowing(viewerId: string, profileId: string): Promise<boolean> {
+  try {
+    const supabase = createServerSupabase();
+    const { data } = await supabase
+      .from('comm_follows')
+      .select('follower_id')
+      .eq('follower_id', viewerId)
+      .eq('followee_id', profileId)
+      .maybeSingle();
+    return !!data;
+  } catch {
+    return false;
+  }
 }
 
 function toNum(v: unknown): number | null {
