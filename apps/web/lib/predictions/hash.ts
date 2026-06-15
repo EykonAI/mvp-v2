@@ -49,3 +49,42 @@ export function computePredictionHash(input: {
 
   return createHash('sha256').update(canonical, 'utf-8').digest('hex');
 }
+
+/**
+ * Salted commitment hash for a SEALED prediction (§9 commit-reveal).
+ *
+ * Same canonical form as computePredictionHash, concatenated with a
+ * server-held secret `nonce`, so the commitment is *hiding* as well as
+ * *binding*: without the nonce the small (statement, probability) space
+ * is brute-forceable, which would unseal a still-committed call. At
+ * resolves_at the plaintext + nonce are revealed and re-hashed to verify
+ * against this value.
+ *
+ * The canonical form MUST match computePredictionHash above — change one,
+ * change both (and the SQL backfill in migration 036).
+ */
+export function computeCommitHash(input: {
+  statement: string;
+  targetObservable: string;
+  resolvesAt: Date | string;
+  issuedAt: Date | string;
+  predictedMean: number | string | null | undefined;
+  nonce: string;
+}): string {
+  const toIsoUtc = (value: Date | string): string =>
+    (value instanceof Date ? value : new Date(value)).toISOString();
+
+  const meanText =
+    input.predictedMean === null || input.predictedMean === undefined
+      ? ''
+      : String(input.predictedMean);
+
+  const canonical =
+    input.statement +
+    input.targetObservable +
+    toIsoUtc(input.resolvesAt) +
+    toIsoUtc(input.issuedAt) +
+    meanText;
+
+  return createHash('sha256').update(canonical + input.nonce, 'utf-8').digest('hex');
+}
