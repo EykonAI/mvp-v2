@@ -1,4 +1,5 @@
 import { createServerSupabase } from '@/lib/supabase-server';
+import { blockedByMe } from '@/lib/comm/moderation';
 
 // Direct-message helpers (COMM B1). A DM is a comm_rooms row with
 // kind='dm' and dm_key = sorted(uidA,uidB). All functions take the
@@ -72,7 +73,12 @@ export async function isMember(supabase: SB, roomId: string, userId: string): Pr
   return !!data;
 }
 
-export async function loadMessages(supabase: SB, roomId: string, afterIso?: string): Promise<DmMessage[]> {
+export async function loadMessages(
+  supabase: SB,
+  roomId: string,
+  afterIso?: string,
+  viewerId?: string,
+): Promise<DmMessage[]> {
   let q = supabase
     .from('comm_messages')
     .select('id, author_id, body, created_at')
@@ -80,6 +86,11 @@ export async function loadMessages(supabase: SB, roomId: string, afterIso?: stri
     .order('created_at', { ascending: true })
     .limit(200);
   if (afterIso) q = q.gt('created_at', afterIso);
+  if (viewerId) {
+    // Hide messages from users the viewer has blocked (DMs + rooms).
+    const blocked = await blockedByMe(supabase, viewerId);
+    if (blocked.length) q = q.not('author_id', 'in', `(${blocked.join(',')})`);
+  }
   const { data } = await q;
   return (data as DmMessage[] | null) ?? [];
 }

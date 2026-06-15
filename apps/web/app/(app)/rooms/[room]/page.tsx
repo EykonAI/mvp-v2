@@ -20,7 +20,7 @@ export default async function RoomPage({ params }: { params: { room: string } })
   const room = await loadRoom(supabase, params.room, user.id);
   if (!room) notFound();
 
-  const initial = room.is_member ? await loadMessages(supabase, params.room) : [];
+  const initial = room.is_member ? await loadMessages(supabase, params.room, undefined, user.id) : [];
   if (room.is_member) await markRead(supabase, params.room, user.id);
 
   return (
