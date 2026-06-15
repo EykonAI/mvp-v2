@@ -8,6 +8,8 @@ import { loadRoom } from '@/lib/comm/rooms';
 import { loadMessages, markRead } from '@/lib/comm/dm';
 import { Thread } from '@/components/comm/Thread';
 import { JoinRoomButton } from '@/components/comm/JoinRoomButton';
+import { AskAnalyst } from '@/components/comm/AskAnalyst';
+import { getAnalystId } from '@/lib/comm/analyst';
 
 export const metadata: Metadata = { title: 'Room — eYKON.ai', robots: { index: false, follow: false } };
 export const dynamic = 'force-dynamic';
@@ -22,6 +24,7 @@ export default async function RoomPage({ params }: { params: { room: string } })
 
   const initial = room.is_member ? await loadMessages(supabase, params.room, undefined, user.id) : [];
   if (room.is_member) await markRead(supabase, params.room, user.id);
+  const analystId = getAnalystId();
 
   return (
     <>
@@ -39,7 +42,10 @@ export default async function RoomPage({ params }: { params: { room: string } })
         </div>
 
         {room.is_member ? (
-          <Thread roomId={room.id} me={user.id} initial={initial} />
+          <>
+            <Thread roomId={room.id} me={user.id} initial={initial} analystId={analystId ?? undefined} />
+            {analystId && <AskAnalyst roomId={room.id} />}
+          </>
         ) : (
           <div style={{ padding: 28, textAlign: 'center', border: '1px dashed var(--rule)', borderRadius: 8 }}>
             <p style={{ color: 'var(--ink-dim)', fontSize: 13, marginBottom: 14 }}>Join to see the conversation and post.</p>

@@ -7,7 +7,17 @@ import type { DmMessage } from '@/lib/comm/dm';
 // polls for new messages every 4s (Supabase Realtime is a later
 // enhancement). Mine align right, theirs left.
 
-export function Thread({ roomId, me, initial }: { roomId: string; me: string; initial: DmMessage[] }) {
+export function Thread({
+  roomId,
+  me,
+  initial,
+  analystId,
+}: {
+  roomId: string;
+  me: string;
+  initial: DmMessage[];
+  analystId?: string;
+}) {
   const [messages, setMessages] = useState<DmMessage[]>(initial);
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
@@ -71,12 +81,19 @@ export function Thread({ roomId, me, initial }: { roomId: string; me: string; in
           <div style={{ color: 'var(--ink-faint)', fontSize: 12.5, textAlign: 'center', marginTop: 20 }}>No messages yet — say hello.</div>
         ) : (
           messages.map((m) => {
-            const mine = m.author_id === me;
+            const isAnalyst = !!analystId && m.author_id === analystId;
+            const mine = !isAnalyst && m.author_id === me;
             return (
-              <div key={m.id} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '76%' }}>
+              <div key={m.id} style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: isAnalyst ? '92%' : '76%' }}>
+                {isAnalyst && (
+                  <div style={{ fontFamily: 'var(--f-mono)', fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--teal)', marginBottom: 3 }}>
+                    ⬡ eYKON Analyst
+                  </div>
+                )}
                 <div
                   style={{
                     background: mine ? 'var(--teal-deep)' : 'var(--bg-raised)',
+                    border: isAnalyst ? '1px solid var(--teal-dim)' : '1px solid transparent',
                     color: 'var(--ink)',
                     borderRadius: 10,
                     padding: '8px 12px',
