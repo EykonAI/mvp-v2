@@ -10,6 +10,7 @@ import { Wall } from '@/components/profile/Wall';
 import { FollowButton } from '@/components/profile/FollowButton';
 import { ShareButton } from '@/components/profile/ShareButton';
 import { MakeACall } from '@/components/profile/MakeACall';
+import { MessageButton } from '@/components/profile/MessageButton';
 import { getCurrentUser } from '@/lib/auth/session';
 
 // /u/<handle> — public, read-only COMM profile (Phase 1 of the COMM
@@ -145,7 +146,7 @@ export default async function ProfilePage({
           )}
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <ShareButton />
-            <SoonChip>Message</SoonChip>
+            {!isOwner && <MessageButton profileId={p.id} isAuthed={!!viewer} />}
             <SoonChip>Subscribe</SoonChip>
           </div>
         </div>
