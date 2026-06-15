@@ -9,6 +9,7 @@ import { ReputationPassport } from '@/components/profile/ReputationPassport';
 import { Wall } from '@/components/profile/Wall';
 import { FollowButton } from '@/components/profile/FollowButton';
 import { ShareButton } from '@/components/profile/ShareButton';
+import { MakeACall } from '@/components/profile/MakeACall';
 import { getCurrentUser } from '@/lib/auth/session';
 
 // /u/<handle> — public, read-only COMM profile (Phase 1 of the COMM
@@ -192,7 +193,12 @@ export default async function ProfilePage({
             ))}
           </nav>
           <div style={{ marginTop: 18 }}>
-            {tab === 'predictions' && <PredictionsTab predictions={data.predictions} />}
+            {tab === 'predictions' && (
+              <>
+                {isOwner && <MakeACall />}
+                <PredictionsTab predictions={data.predictions} />
+              </>
+            )}
             {tab === 'wall' && <Wall initialPosts={data.wall} isOwner={isOwner} />}
             {tab === 'spaces' && (
               <ComingSoon
