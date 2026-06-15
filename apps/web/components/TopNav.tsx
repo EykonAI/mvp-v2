@@ -133,6 +133,20 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
       >
         Messages
       </Link>
+      <Link
+        href="/rooms"
+        title="Group rooms"
+        style={{
+          fontFamily: 'var(--f-mono)',
+          fontSize: 10.5,
+          letterSpacing: '0.12em',
+          textTransform: 'uppercase',
+          color: 'var(--ink-dim)',
+          textDecoration: 'none',
+        }}
+      >
+        Rooms
+      </Link>
       <LogoutButton />
 
       {/* LIVE pill */}
