@@ -141,8 +141,8 @@ export default async function ProfilePage({
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
           {isOwner ? (
-            <Link href="/settings/profile" style={primaryBtn} prefetch={false}>
-              Edit profile
+            <Link href="/settings/profile" style={settingsBtn} prefetch={false}>
+              Profile settings
             </Link>
           ) : (
             <FollowButton profileId={p.id} isAuthed={!!viewer} initialFollowing={initialFollowing} />
@@ -226,14 +226,14 @@ export default async function ProfilePage({
   );
 }
 
-const primaryBtn: CSSProperties = {
+const settingsBtn: CSSProperties = {
   fontFamily: 'var(--f-mono)',
   fontSize: 11,
   letterSpacing: '0.06em',
   textTransform: 'uppercase',
-  color: 'var(--bg-void)',
-  background: 'var(--teal)',
-  border: '1px solid var(--teal-dim)',
+  color: '#FFFFFF',
+  background: 'var(--red)',
+  border: '1px solid var(--red)',
   borderRadius: 3,
   padding: '9px 16px',
   textDecoration: 'none',
