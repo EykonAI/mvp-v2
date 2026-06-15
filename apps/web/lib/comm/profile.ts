@@ -1,4 +1,5 @@
 import { createServerSupabase } from '@/lib/supabase-server';
+import type { ReputationData } from '@/components/profile/ReputationPassport';
 
 // Loader for the public COMM profile page (/u/<handle>).
 //
@@ -52,6 +53,7 @@ export interface ProfileData {
   wall: WallPost[];
   followers: number;
   following: number;
+  reputation: ReputationData | null;
 }
 
 const HANDLE_RE = /^[A-Za-z0-9_]{1,32}$/;
@@ -143,6 +145,7 @@ export async function loadProfile(param: string): Promise<ProfileData | null> {
 
   const wall = await loadWall(supabase, row.id);
   const [followers, following] = await loadFollowCounts(supabase, row.id);
+  const reputation = await loadReputation(supabase, row.id);
 
   return {
     profile: {
@@ -163,6 +166,7 @@ export async function loadProfile(param: string): Promise<ProfileData | null> {
     wall,
     followers,
     following,
+    reputation,
   };
 }
 
@@ -213,6 +217,62 @@ async function loadFollowCounts(
   } catch {
     return [0, 0];
   }
+}
+
+// Owner reputation for the Calibration Passport (§9 A2). Respects
+// reputation_opt_in and the shown gate (n_resolved >= MIN_SAMPLE), so a
+// score never surfaces before it's earned. Fail-soft → null = calibrating.
+async function loadReputation(
+  supabase: ReturnType<typeof createServerSupabase>,
+  authorId: string,
+): Promise<ReputationData | null> {
+  try {
+    const { data: prof } = await supabase
+      .from('user_profiles')
+      .select('reputation_opt_in')
+      .eq('id', authorId)
+      .maybeSingle();
+    if (prof && (prof as { reputation_opt_in?: boolean }).reputation_opt_in === false) return null;
+
+    const { data, error } = await supabase
+      .from('user_reputation')
+      .select('feature, brier_skill, rank_percentile')
+      .eq('author_id', authorId)
+      .eq('shown', true);
+    if (error || !data || data.length === 0) return null;
+
+    const rows = data as { feature: string; brier_skill: number | null; rank_percentile: number | null }[];
+    const all = rows.find((r) => r.feature === '_all');
+    if (!all || all.brier_skill == null) return null;
+
+    const domains = rows
+      .filter((r) => r.feature !== '_all' && r.brier_skill != null)
+      .map((r) => ({ key: r.feature, label: featureLabel(r.feature), value: Number(r.brier_skill) }));
+
+    return {
+      brierSkill: Number(all.brier_skill),
+      percentile: all.rank_percentile == null ? null : Number(all.rank_percentile),
+      domains,
+      spark: [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+const FEATURE_LABELS: Record<string, string> = {
+  ais_chokepoint_weekly: 'Chokepoints',
+  conflict_escalation: 'Conflict',
+  posture_shift: 'Posture',
+  trade_flow: 'Trade flow',
+  eia_weekly: 'Energy',
+};
+
+function featureLabel(feature: string): string {
+  return (
+    FEATURE_LABELS[feature] ??
+    feature.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  );
 }
 
 // True if `viewerId` follows `profileId`. Fail-soft on a missing table.
