@@ -119,6 +119,20 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
       >
         Profile
       </Link>
+      <Link
+        href="/messages"
+        title="Direct messages"
+        style={{
+          fontFamily: 'var(--f-mono)',
+          fontSize: 10.5,
+          letterSpacing: '0.12em',
+          textTransform: 'uppercase',
+          color: 'var(--ink-dim)',
+          textDecoration: 'none',
+        }}
+      >
+        Messages
+      </Link>
       <LogoutButton />
 
       {/* LIVE pill */}
