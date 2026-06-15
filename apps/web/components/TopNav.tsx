@@ -105,6 +105,20 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
       </span>
 
       <WelcomeGreeting />
+      <Link
+        href="/settings/profile"
+        title="Your profile & settings"
+        style={{
+          fontFamily: 'var(--f-mono)',
+          fontSize: 10.5,
+          letterSpacing: '0.12em',
+          textTransform: 'uppercase',
+          color: 'var(--ink-dim)',
+          textDecoration: 'none',
+        }}
+      >
+        Profile
+      </Link>
       <LogoutButton />
 
       {/* LIVE pill */}
