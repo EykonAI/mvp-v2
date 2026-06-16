@@ -38,7 +38,19 @@ export default async function RoomsPage() {
                 href={`/rooms/${r.id}`}
                 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 8, textDecoration: 'none', border: '1px solid var(--rule-soft)', background: 'var(--bg-panel)' }}
               >
-                <span style={{ color: 'var(--ink)', fontSize: 14, fontWeight: 600 }}>{r.title ?? 'Untitled room'}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                  {r.event_spawned && (
+                    <span
+                      title="Auto-opened from a live convergence event"
+                      style={{ fontFamily: 'var(--f-mono)', fontSize: 8.5, letterSpacing: '0.1em', color: 'var(--teal)', border: '1px solid var(--teal-dim)', borderRadius: 3, padding: '2px 5px', flexShrink: 0 }}
+                    >
+                      EVENT
+                    </span>
+                  )}
+                  <span style={{ color: 'var(--ink)', fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {r.title ?? 'Untitled room'}
+                  </span>
+                </span>
                 <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10.5, color: 'var(--ink-faint)' }}>
                   {r.member_count} member{r.member_count === 1 ? '' : 's'}
                   {r.is_member ? ' · joined' : ''}
