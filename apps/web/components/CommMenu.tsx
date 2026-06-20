@@ -18,6 +18,7 @@ const LINKS = [
   { href: '/leaderboard', label: 'Leaderboard' },
   { href: '/messages', label: 'Messages' },
   { href: '/rooms', label: 'Rooms' },
+  { href: '/spaces', label: 'Spaces' },
 ];
 
 const trigger: CSSProperties = {
