@@ -211,3 +211,57 @@ export async function loadSpace(supabase: SB, spaceId: string, viewerId: string)
     is_member: member,
   };
 }
+
+// ── E2 plumbing (no payments) ───────────────────────────────────
+
+// Grant (or renew) an active subscription + room membership. The E2
+// checkout-confirmation path calls this once a key purchase is verified.
+// Idempotent per (space, subscriber). Granting membership is what makes the
+// existing Thread / message API / in-room analyst work for the subscriber.
+export async function grantSubscription(
+  supabase: SB,
+  spaceId: string,
+  subscriberId: string,
+  opts: { providerRef?: string; amountUsdc?: number; startedAt?: string; expiresAt?: string } = {},
+): Promise<boolean> {
+  const { error } = await supabase.from('comm_space_subscriptions').upsert(
+    {
+      space_id: spaceId,
+      subscriber_id: subscriberId,
+      status: 'active',
+      provider_ref: opts.providerRef ?? null,
+      amount_usdc: opts.amountUsdc ?? null,
+      started_at: opts.startedAt ?? new Date().toISOString(),
+      expires_at: opts.expiresAt ?? null,
+    },
+    { onConflict: 'space_id,subscriber_id' },
+  );
+  if (error) return false;
+  await supabase
+    .from('comm_room_members')
+    .upsert({ room_id: spaceId, user_id: subscriberId }, { onConflict: 'room_id,user_id', ignoreDuplicates: true });
+  return true;
+}
+
+// Record the deployed Unlock lock for a space (E2b, after the platform
+// deploys it on Base with the creator as beneficiary).
+export async function setSpaceLock(
+  supabase: SB,
+  spaceId: string,
+  lockAddress: string,
+  network: string,
+): Promise<boolean> {
+  const { error } = await supabase.from('comm_spaces').update({ lock_address: lockAddress, network }).eq('space_id', spaceId);
+  return !error;
+}
+
+export async function hasActiveSubscription(supabase: SB, spaceId: string, userId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('comm_space_subscriptions')
+    .select('id')
+    .eq('space_id', spaceId)
+    .eq('subscriber_id', userId)
+    .eq('status', 'active')
+    .maybeSingle();
+  return !!data;
+}
