@@ -128,6 +128,7 @@ Add these scheduled triggers on the web service. Each must include the
 | `/api/cron/evaluate-rules-cheap`              | every 15 min          | notif branch  | Notification Center · single + multi-event rules   |
 | `/api/cron/evaluate-rules-ai`                 | every 1 h             | notif branch  | Notification Center · outcome + cross-data AI rules|
 | `/api/cron/spawn-event-rooms`                 | every 1 h             | comm branch   | COMM · open a discussion room per new convergence  |
+| `/api/cron/expire-space-subs`                 | every 6 h             | comm branch   | COMM · expire lapsed paid-space subscriptions      |
 
 The `pre-existing` rows shipped with the Phase-9 Intelligence Center work and
 must already be configured on Railway — verify they are still present after
