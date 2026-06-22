@@ -58,8 +58,11 @@ export default function ConvergenceFeed() {
       .catch(() => setData(null));
   }, []);
 
-  const events = data && data.events.length > 0 ? data.events : DEMO;
-  const degraded = !data || data.events.length === 0;
+  const realEvents = data && data.events.length > 0 ? data.events : null;
+  const events = realEvents ?? DEMO;
+  const degraded = !realEvents; // cold start — no real convergence ever recorded
+  // Quiet feed: real events exist, but the newest is over a week old.
+  const stale = !!realEvents && Date.now() - Date.parse(realEvents[0].created_at) > 7 * 24 * 3600_000;
 
   return (
     <div className="flex flex-col" style={{ gap: 10 }}>
@@ -75,6 +78,20 @@ export default function ConvergenceFeed() {
           }}
         >
           No convergences recorded yet — showing illustrative samples
+        </p>
+      )}
+      {stale && (
+        <p
+          style={{
+            fontFamily: 'var(--f-mono)',
+            fontSize: 9.5,
+            letterSpacing: '0.12em',
+            color: 'var(--ink-faint)',
+            textTransform: 'uppercase',
+            margin: 0,
+          }}
+        >
+          Feed quiet — newest convergence {timeAgo(events[0].created_at)}
         </p>
       )}
       {events.map(c => (
