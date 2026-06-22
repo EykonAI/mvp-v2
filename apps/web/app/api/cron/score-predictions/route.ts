@@ -6,6 +6,15 @@ import { resolveBySource, type PredictionRow } from '@/lib/predictions/resolvers
 export const dynamic = 'force-dynamic';
 export const maxDuration = 180;
 
+// Calibration honesty gate: the Ledger is "warming up" (degraded) until it has a
+// meaningful sample of *informative* forecasts. A flat 0.5 prior on a binary
+// outcome yields a Brier of exactly 0.25 — the no-skill identity, not a real
+// track record — so degraded is gated on whether any prediction departs from the
+// 0.5 prior AND on the resolved-sample count, NOT on whether the metric is "—".
+const FLAT_PRIOR = 0.5;
+const INFORMATIVE_EPS = 0.05; // a prediction is informative only if |mean - 0.5| >= this
+const MIN_RESOLVED = 10;      // require this many resolved outcomes before publishing a score
+
 /**
  * Score-predictions · hourly.
  * Finds predictions_register rows whose resolves_at ≤ now but have
@@ -78,11 +87,13 @@ async function materialiseSummary(supabase: any) {
     { key: 'precision', feature: null,                  window_days: 7 },
   ];
   const metrics: any[] = [];
+  let aggResolved = 0;        // resolved outcomes in the all-feature 30d window
+  let aggInformative = false; // any of those predictions departs from the 0.5 prior
   for (const w of windows) {
     const since = new Date(Date.now() - w.window_days * 24 * 3600_000).toISOString();
     let query = supabase
       .from('prediction_outcomes')
-      .select('brier, calibration_bin, observed_at, predictions_register!inner(feature)')
+      .select('brier, calibration_bin, observed_at, predictions_register!inner(feature, predicted_distribution)')
       .gte('observed_at', since);
     if (w.feature) query = query.eq('predictions_register.feature', w.feature);
     const { data } = await query.limit(5000);
@@ -95,12 +106,27 @@ async function materialiseSummary(supabase: any) {
       trend: 'flat',
       spark: briers.slice(-8).length >= 2 ? briers.slice(-8) : [0.2, 0.2, 0.2, 0.2, 0.2, 0.2],
     });
+
+    // Derive the honesty gate from the headline (all-feature, 30d) window.
+    if (w.key === 'brier') {
+      aggResolved = briers.length;
+      aggInformative = (data ?? []).some((r: any) => {
+        const reg = Array.isArray(r.predictions_register) ? r.predictions_register[0] : r.predictions_register;
+        const mean = Number(reg?.predicted_distribution?.mean);
+        return Number.isFinite(mean) && Math.abs(mean - FLAT_PRIOR) >= INFORMATIVE_EPS;
+      });
+    }
   }
+
+  // Warming up until there is a meaningful sample of informative forecasts.
+  // (Previously this keyed off metrics.every(value === '—'), so a flat-0.5
+  // Brier of 0.250 silently flipped the Ledger to "live" and hid the caveat.)
+  const degraded = aggResolved < MIN_RESOLVED || !aggInformative;
 
   await supabase
     .from('calibration_summary')
     .upsert(
-      { id: 1, metrics, generated_at: new Date().toISOString(), degraded: metrics.every(m => m.value === '—') },
+      { id: 1, metrics, generated_at: new Date().toISOString(), degraded },
       { onConflict: 'id' },
     );
 }
