@@ -1,6 +1,7 @@
 import { createServerSupabase } from '@/lib/supabase-server';
 import { EIA_CUSHING_CRUDE_STOCKS } from '@/lib/eia/client';
 import { computePredictionHash } from './hash';
+import { round3, clampProbability } from './forecast';
 
 export interface IssueEiaWeeklyResult {
   ok: boolean;
@@ -53,20 +54,28 @@ export async function issueEiaWeekly(opts: { now?: Date } = {}): Promise<IssueEi
     };
   }
 
-  const { data: latest } = await supabase
+  // Trailing history, newest first — [0] is the baseline print; the full set
+  // feeds the base-rate forecast below.
+  const { data: history } = await supabase
     .from('eia_inventory_observations')
     .select('period, value')
     .eq('series_id', EIA_CUSHING_CRUDE_STOCKS)
     .order('period', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(120);
 
+  const latest = history?.[0];
   if (!latest) {
     return { ok: false, skipped_reason: 'no_baseline_observation' };
   }
 
   const baseline = Number(latest.value);
-  const predictedMean = 0.5; // flat prior; see fn-doc
+
+  // Real forecast: the climatological week-over-week DRAW base rate — the
+  // fraction of recent weeks whose print fell vs the prior week. Replaces the
+  // flat 0.5 prior so the Ledger grades an informative forecast; falls back to
+  // 0.5 only when there is too little history to estimate a rate.
+  const draw = weekOverWeekDrawRate(history ?? []);
+  const predictedMean = draw == null ? 0.5 : round3(clampProbability(draw.rate));
   const statement = `EIA Cushing crude inventories on ${ymdUtc(resolvesAt)} will draw versus the prior week's ${formatThousands(baseline)} kbbl print.`;
 
   const hash = computePredictionHash({
@@ -85,6 +94,8 @@ export async function issueEiaWeekly(opts: { now?: Date } = {}): Promise<IssueEi
         series_id: EIA_CUSHING_CRUDE_STOCKS,
         baseline_kbbl: baseline,
         baseline_period: latest.period,
+        forecast_basis: draw == null ? 'flat_prior_insufficient_history' : 'wow_draw_base_rate',
+        forecast_sample_weeks: draw?.transitions ?? 0,
       },
       predicted_distribution: { mean: predictedMean, type: 'point' },
       target_observable: targetObservable,
@@ -139,4 +150,29 @@ function ymdUtc(d: Date): string {
 
 function formatThousands(n: number): string {
   return new Intl.NumberFormat('en-US').format(Math.round(n));
+}
+
+/**
+ * Week-over-week DRAW base rate: the fraction of consecutive-week transitions
+ * whose print fell vs the prior week. `rows` may arrive in any order — we sort
+ * by period. Returns null when there are fewer than MIN_HISTORY prints (too
+ * little to estimate an informative rate; the caller keeps the 0.5 prior).
+ */
+function weekOverWeekDrawRate(
+  rows: { period: string; value: number | string }[],
+): { rate: number; transitions: number } | null {
+  const MIN_HISTORY = 8;
+  const vals = rows
+    .slice()
+    .sort((a, b) => (a.period < b.period ? -1 : a.period > b.period ? 1 : 0))
+    .map((r) => Number(r.value))
+    .filter((n) => Number.isFinite(n));
+  if (vals.length < MIN_HISTORY) return null;
+  let draws = 0;
+  let transitions = 0;
+  for (let i = 1; i < vals.length; i++) {
+    transitions++;
+    if (vals[i] < vals[i - 1]) draws++;
+  }
+  return transitions ? { rate: draws / transitions, transitions } : null;
 }

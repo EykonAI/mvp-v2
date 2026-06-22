@@ -1,5 +1,6 @@
 import { createServerSupabase } from '@/lib/supabase-server';
 import { computePredictionHash } from './hash';
+import { round3, clampProbability, normalCdf } from './forecast';
 
 /**
  * Issue this week's chokepoint AIS-anchored prediction.
@@ -98,7 +99,17 @@ export async function issueChokepointWeekly(opts: {
   const stddev = Math.sqrt(variance);
 
   const predictedDirection: 'above' | 'below' = 'above';
-  const predictedMean = 0.5;
+
+  // Real forecast: persistence/momentum. If the most recent week already runs
+  // above the trailing baseline, next week is likelier to as well. P(above) =
+  // normalCdf(standardised recent-vs-baseline gap), clamped. Replaces the flat
+  // 0.5 prior so the Ledger grades an informative forecast.
+  const recent = counts.slice(-7);
+  const recentMean = recent.length
+    ? recent.reduce((a, b) => a + b, 0) / recent.length
+    : mean;
+  const z = stddev > 0 ? (recentMean - mean) / stddev : 0;
+  const predictedMean = round3(clampProbability(normalCdf(z)));
   const statement = buildStatement({
     slug,
     resolvesAt,
@@ -125,6 +136,9 @@ export async function issueChokepointWeekly(opts: {
         baseline_stddev: round2(stddev),
         baseline_observation_count: counts.length,
         predicted_direction: predictedDirection,
+        forecast_basis: 'recent_vs_baseline_momentum',
+        recent_mean_vessels: round2(recentMean),
+        forecast_z: round2(z),
       },
       predicted_distribution: { mean: predictedMean, type: 'point' },
       target_observable: targetObservable,
