@@ -1,19 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
-import { scoreVessel } from '@/lib/intel/shadowFleet';
+import { scoreVessel, computeRealFeatures } from '@/lib/intel/shadowFleet';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
-const FOC = new Set(['PAN', 'LBR', 'MHL', 'BHS', 'COK', 'GAB', 'CMR', 'VUT', 'BRB', 'BLZ']);
+// Only the recently-active fleet is "trackable". vessel_positions accumulates
+// latest-per-MMSI, so a 30-day window is dominated by vessels that long ago
+// left our AIS coverage — not dark-fleet, just gone. Scoring the recent window
+// keeps the leads list to vessels we are actually tracking.
+const ACTIVE_WINDOW_H = 72;
+const UPSERT_BATCH = 1000;
 
 /**
  * Compute-shadow-fleet-scores · hourly.
- * Rebuilds vessel_profiles for every vessel seen in the last 30 days.
- * V1 feature set is synthesised from vessel_positions — the full
- * feature set (cargo mismatch, port-call anomalies, opaque BO) requires
- * the enrichment pipeline the operator will stand up separately.
+ *
+ * v2 scores ONLY from signals the live AIS feed provides — the dark-gap (hours
+ * since last fix, measured against the feed's freshest observation so a feed
+ * outage doesn't flag everything) and flag-of-convenience. The v1 cargo /
+ * port-call / beneficial-owner / flag-history / vessel-age features were
+ * loop-index placeholders with no data source; they saturated the composite
+ * near 1.0 (~95% of vessels flagged) and were removed. Restore them (here, in
+ * computeRealFeatures, and the weights fixture) once the enrichment pipeline
+ * lands.
+ *
+ * Profiles for vessels that have left the active window are pruned, so
+ * vessel_profiles reflects the current tracked fleet with real scores only
+ * (this also clears the legacy synthetic rows on the first run).
  */
 export async function POST(req: NextRequest) {
   const unauth = requireCronSecret(req);
@@ -21,53 +35,62 @@ export async function POST(req: NextRequest) {
 
   const supabase = createServerSupabase();
   const now = new Date();
-  const since = new Date(now.getTime() - 30 * 24 * 3600_000).toISOString();
+  const since = new Date(now.getTime() - ACTIVE_WINDOW_H * 3600_000).toISOString();
 
   const { data: positions, error } = await supabase
     .from('vessel_positions')
-    .select('mmsi, name, flag, vessel_type, speed, ingested_at')
+    .select('mmsi, name, flag, ingested_at')
     .gte('ingested_at', since)
     .order('ingested_at', { ascending: false })
     .limit(10_000);
 
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (!positions || positions.length === 0) {
+    return NextResponse.json({ ok: true, scored: 0, note: 'no recent positions' });
+  }
+
+  // Data clock = freshest observation in the batch (rows are desc by
+  // ingested_at). Gaps are measured against this, not wall-clock, so a stalled
+  // feed doesn't flag every vessel as dark.
+  const dataClock = new Date(positions[0].ingested_at).getTime();
 
   const latestByMmsi = new Map<string, any>();
-  for (const p of positions ?? []) {
+  for (const p of positions) {
     if (!latestByMmsi.has(p.mmsi)) latestByMmsi.set(p.mmsi, p);
   }
 
-  const upserts: any[] = [];
-  let i = 0;
-  for (const [mmsi, p] of latestByMmsi) {
-    const gapHours = ((now.getTime() - new Date(p.ingested_at).getTime()) / 3600_000) || 0;
-    const features = {
-      ais_gap_hours_log: Math.log1p(gapHours),
-      flag_changes_90d: i % 4,
-      cargo_mismatch_score: 0.2 + (i % 5) * 0.12,
-      port_call_anomaly: 0.15 + (i % 7) * 0.07,
-      beneficial_owner_opaque: i % 3 === 0 ? 1 : 0,
-      flag_of_convenience: FOC.has((p.flag ?? '').toUpperCase()) ? 1 : 0,
-      vessel_age_years: 8 + (i % 25),
-    };
-    const score = scoreVessel(features);
-    upserts.push({
-      mmsi,
+  const upserts = Array.from(latestByMmsi.values()).map((p) => {
+    const gapHours = Math.max(0, (dataClock - new Date(p.ingested_at).getTime()) / 3600_000);
+    const features = computeRealFeatures({ flag: p.flag, gapHours });
+    return {
+      mmsi: p.mmsi,
       name: p.name,
       flag: p.flag,
-      composite_score: score.composite,
+      composite_score: scoreVessel(features).composite,
       indicators: features,
       last_ais_at: p.ingested_at,
-      last_dark_at: gapHours > 6 ? new Date(now.getTime() - gapHours * 3600_000).toISOString() : null,
+      last_dark_at: gapHours > 6 ? p.ingested_at : null,
       computed_at: now.toISOString(),
-    });
-    i++;
-    if (i >= 2000) break; // cap per run
+    };
+  });
+
+  for (let i = 0; i < upserts.length; i += UPSERT_BATCH) {
+    const { error: upErr } = await supabase
+      .from('vessel_profiles')
+      .upsert(upserts.slice(i, i + UPSERT_BATCH), { onConflict: 'mmsi' });
+    if (upErr) return NextResponse.json({ ok: false, error: upErr.message, scored: i }, { status: 500 });
   }
 
-  if (upserts.length > 0) {
-    await supabase.from('vessel_profiles').upsert(upserts, { onConflict: 'mmsi' });
-  }
+  // Prune profiles for vessels that have left the active window so the table
+  // reflects the current tracked fleet (also clears the legacy synthetic rows).
+  const { error: delErr } = await supabase
+    .from('vessel_profiles')
+    .delete()
+    .lt('last_ais_at', since);
 
-  return NextResponse.json({ ok: true, scored: upserts.length });
+  return NextResponse.json({
+    ok: true,
+    scored: upserts.length,
+    pruned: delErr ? `error: ${delErr.message}` : 'ok',
+  });
 }
