@@ -24,6 +24,7 @@ const MAX_BUFFER    = 100_000;         // safety bound
 const BATCH_SIZE    = 500;             // rows per upsert call
 const RECONNECT_MIN = 1_000;
 const RECONNECT_MAX = 60_000;
+const STALE_MS      = 90_000;          // no AIS message in this long ⇒ dead stream, force reconnect
 
 // ─── Subscription bounding boxes ──────────────────────────────
 // AISStream's free-tier rate limit (~155 msg/s globally) means a
@@ -96,6 +97,7 @@ let ws;
 let reconnectDelay = RECONNECT_MIN;
 let messagesIn = 0;
 let lastLogged = Date.now();
+let lastMessageAt = Date.now();        // liveness: bumped on every inbound AIS message
 
 function connect() {
   console.log(`[${new Date().toISOString()}] connecting to AISStream…`);
@@ -104,6 +106,7 @@ function connect() {
   ws.on('open', () => {
     console.log(`  open — subscribing ${BOUNDING_BOXES.length} bboxes (4 regional + 6 chokepoints)`);
     reconnectDelay = RECONNECT_MIN;
+    lastMessageAt = Date.now();         // grace window for the fresh connection
     ws.send(JSON.stringify({
       APIKey: AIS_KEY,
       BoundingBoxes: BOUNDING_BOXES,
@@ -112,6 +115,7 @@ function connect() {
   });
 
   ws.on('message', (raw) => {
+    lastMessageAt = Date.now();
     messagesIn++;
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
@@ -195,6 +199,22 @@ console.log('eYKON AIS ingest starting…');
 console.log(`  flush every ${FLUSH_MS / 1000}s, batches of ${BATCH_SIZE}`);
 connect();
 setInterval(() => { flush().catch((e) => console.error('flush threw:', e.message)); }, FLUSH_MS);
+
+// Liveness watchdog. AISStream pushes a steady message flow when healthy, but a
+// half-open / silently-dropped socket emits no 'close' or 'error' — so the
+// reconnect path never fires and the worker stalls with data frozen (the
+// 2026-06-21 stall). If nothing has arrived within STALE_MS, force the socket
+// closed; terminate() is immediate (close() can hang on a dead socket) and
+// fires 'close', which reconnects with backoff.
+setInterval(() => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return; // CONNECTING/CLOSING handled by the normal lifecycle
+  const silentMs = Date.now() - lastMessageAt;
+  if (silentMs > STALE_MS) {
+    console.warn(`[${new Date().toISOString()}] no AIS messages for ${Math.round(silentMs / 1000)}s — forcing reconnect`);
+    lastMessageAt = Date.now();        // grace so we don't re-fire while the new socket comes up
+    try { ws.terminate(); } catch (e) { console.error('terminate failed:', e.message); }
+  }
+}, 30_000);
 
 process.on('SIGTERM', async () => {
   console.log('SIGTERM — flushing and exiting…');
