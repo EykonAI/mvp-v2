@@ -57,11 +57,22 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  let inserted = 0;
   if (writes.length > 0) {
-    await supabase.from('regime_shifts').insert(writes);
+    const { error } = await supabase.from('regime_shifts').insert(writes);
+    if (error) {
+      // Surface the failure instead of returning ok with 0 rows written — an
+      // unchecked insert here is exactly how a column/schema fault could leave
+      // regime_shifts empty while the cron reported success.
+      return NextResponse.json(
+        { ok: false, error: error.message, attempted: writes.length },
+        { status: 500 },
+      );
+    }
+    inserted = writes.length;
   }
 
-  return NextResponse.json({ ok: true, writes: writes.length });
+  return NextResponse.json({ ok: true, inserted });
 }
 
 async function windowStats(
