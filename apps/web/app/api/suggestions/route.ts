@@ -6,6 +6,7 @@ import {
   type Suggestion,
 } from '@/lib/intelligence-analyst/suggestions';
 import type { UserQueryRow } from '@/lib/intelligence-analyst/relevance';
+import seed from '@/lib/fixtures/posture_seed.json';
 
 // GET /api/suggestions
 //
@@ -37,48 +38,51 @@ export async function GET(_req: NextRequest) {
   // 2. Anomaly suggestions from convergence_events for the user's
   //    pinned theatres. Wrapped in try/catch — if the table or RPC
   //    isn't available, skip the slot rather than 500 the route.
-  const anomalySuggestions = await loadAnomalySuggestions(user.id).catch(() => []);
+  const anomalySuggestions = await loadAnomalySuggestions().catch(() => []);
 
   const suggestions = buildSuggestions({ history, anomalySuggestions });
   return NextResponse.json({ suggestions });
 }
 
-async function loadAnomalySuggestions(userId: string): Promise<Suggestion[]> {
+async function loadAnomalySuggestions(): Promise<Suggestion[]> {
   const admin = createServerSupabase();
 
-  // 1. Pull pinned theatres for this user. The table is owned by
-  //    the supervisor pipeline; we read with the service role.
-  const { data: vec } = await admin
-    .from('user_interest_vectors')
-    .select('pinned_theatres')
-    .eq('user_id', userId)
-    .single();
-  const theatres = (vec?.pinned_theatres ?? []) as string[];
-  if (theatres.length === 0) return [];
-
-  // 2. Recent convergence events for those theatres. The exact
-  //    schema is owned by the Intelligence Center — best-effort
-  //    select; fallback to empty.
+  // The freshest cross-domain convergences become "investigate this" prompts.
+  // convergence_events columns are location / synthesis / created_at — the
+  // previous query selected theatre_slug/event_type/severity/observed_at (none
+  // of which exist) AND gated on user_interest_vectors (empty until interest
+  // vectors ship), so this slot was doubly dead. It now reads the global recent
+  // feed, which is live since the Convergence Feed fix (#208).
   const { data: events } = await admin
     .from('convergence_events')
-    .select('theatre_slug, event_type, severity, observed_at')
-    .in('theatre_slug', theatres)
-    .order('observed_at', { ascending: false })
+    .select('location, synthesis, created_at')
+    .order('created_at', { ascending: false })
     .limit(2);
 
-  return (events ?? []).slice(0, 2).map((e: any) => ({
-    text: `Investigate the convergence in ${prettifyTheatre(e.theatre_slug)} on ${shortDate(e.observed_at)} (${e.event_type})`,
-    buckets: ['Conflict', 'Maritime'] as const, // anomalies span ≥2 buckets by construction
+  return (events ?? []).map((e: any) => ({
+    text: `Investigate the recent cross-domain convergence in ${theatreLabelFor(e.location) ?? 'the flagged region'} around ${shortDate(e.created_at)}`,
+    buckets: ['Conflict', 'Maritime'] as const, // a convergence spans ≥2 domains by construction
     slot: 'anomaly' as const,
   }));
 }
 
-function prettifyTheatre(slug: string): string {
-  if (!slug) return 'a pinned theatre';
-  return slug
-    .split('-')
-    .map(s => s.charAt(0).toUpperCase() + s.slice(1))
-    .join(' ');
+// convergence_events.location is the cell-centre point, e.g. "(45.0, 35.0)".
+// Map it to a posture-seed theatre label when it falls inside a theatre bbox,
+// so the prompt reads "in the Black Sea" rather than a raw coordinate.
+function theatreLabelFor(location: string | null): string | null {
+  const m = /\(?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)?/.exec(location ?? '');
+  if (!m) return null;
+  const lat = parseFloat(m[1]);
+  const lon = parseFloat(m[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  for (const t of seed.theatres) {
+    const b = (t as { bbox?: { lat_min: number; lat_max: number; lon_min: number; lon_max: number } }).bbox;
+    if (!b) continue;
+    if (lat >= b.lat_min && lat <= b.lat_max && lon >= b.lon_min && lon <= b.lon_max) {
+      return (t as { label?: string }).label ?? (t as { slug: string }).slug;
+    }
+  }
+  return null;
 }
 
 function shortDate(iso: string): string {
