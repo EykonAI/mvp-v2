@@ -1,6 +1,6 @@
 {
   "name": "eykon-web",
-  "version":"2.0.0",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
@@ -17,6 +17,7 @@
     "@deck.gl/react": "^9.3.2",
     "@react-email/components": "^1.0.12",
     "@react-email/render": "^1.4.0",
+    "@sentry/nextjs": "^10.60.0",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.45.0",
     "@tanstack/react-table": "^8.20.5",

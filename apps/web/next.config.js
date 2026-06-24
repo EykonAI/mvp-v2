@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 
+const { withSentryConfig } = require('@sentry/nextjs');
+
 // ──────────────────────────────────────────────────────────────────────
 // Security headers (PR-S1, see docs/SECURITY_HARDENING_PLAN.md)
 // ──────────────────────────────────────────────────────────────────────
@@ -54,6 +56,8 @@ const cspDirectives = {
     posthogAssets,
     'https://r.wdfl.co',
     'https://challenges.cloudflare.com',
+    // Sentry error/perf ingest (client SDK). Required once CSP is enforced.
+    'https://*.sentry.io',
   ],
   'frame-src': ["'self'", 'https://challenges.cloudflare.com'],
   'worker-src': ["'self'", 'blob:'],
@@ -106,6 +110,8 @@ const nextConfig = {
   },
   experimental: {
     serverActions: { bodySizeLimit: '2mb' },
+    // Required on Next.js 14 for instrumentation.ts to run (stable in Next 15).
+    instrumentationHook: true,
   },
   // Transpile deck.gl ESM packages
   transpilePackages: [
@@ -127,4 +133,13 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
+// Wrap with Sentry. Source maps upload only when SENTRY_AUTH_TOKEN is set in the
+// build env (Railway) — without it the build still succeeds, maps just aren't
+// uploaded. org/project match the Sentry project (eykon / javascript-nextjs).
+module.exports = withSentryConfig(nextConfig, {
+  org: 'eykon',
+  project: 'javascript-nextjs',
+  silent: !process.env.CI,
+  widenClientFileUpload: true,
+  disableLogger: true,
+});
