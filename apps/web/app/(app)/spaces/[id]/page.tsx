@@ -4,11 +4,14 @@ import { notFound, redirect } from 'next/navigation';
 import TopNav from '@/components/TopNav';
 import { getCurrentUser } from '@/lib/auth/session';
 import { createServerSupabase } from '@/lib/supabase-server';
-import { loadSpace } from '@/lib/comm/spaces';
+import { loadSpace, spacesCheckoutEnabled } from '@/lib/comm/spaces';
+import { getLinkedWallet } from '@/lib/comm/wallets';
 import { loadMessages, markRead } from '@/lib/comm/dm';
 import { Thread } from '@/components/comm/Thread';
 import { AskAnalyst } from '@/components/comm/AskAnalyst';
 import { getAnalystId } from '@/lib/comm/analyst';
+import { ConnectWallet } from '@/components/comm/ConnectWallet';
+import { EnableSubscriptions } from '@/components/comm/EnableSubscriptions';
 
 export const metadata: Metadata = { title: 'Space — eYKON.ai', robots: { index: false, follow: false } };
 export const dynamic = 'force-dynamic';
@@ -24,6 +27,8 @@ export default async function SpacePage({ params }: { params: { id: string } }) 
   const initial = space.is_member ? await loadMessages(supabase, params.id, undefined, user.id) : [];
   if (space.is_member) await markRead(supabase, params.id, user.id);
   const analystId = getAnalystId();
+  const checkout = spacesCheckoutEnabled();
+  const linkedWallet = space.is_creator && checkout ? await getLinkedWallet(supabase, user.id) : null;
 
   return (
     <>
@@ -45,6 +50,45 @@ export default async function SpacePage({ params }: { params: { id: string } }) 
           {fmtUsdc(space.price_usdc)} USDC / {space.cadence === 'annual' ? 'year' : 'month'} · {space.subscriber_count}{' '}
           subscriber{space.subscriber_count === 1 ? '' : 's'}
         </div>
+
+        {space.is_creator && checkout && (
+          <div style={{ border: '1px solid var(--rule)', borderRadius: 10, padding: 16, background: 'var(--bg-panel)', marginBottom: 14 }}>
+            <div className="eyebrow" style={{ color: 'var(--teal)', marginBottom: 8 }}>Monetization</div>
+            {space.lock_address ? (
+              <div style={{ fontSize: 12.5, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
+                ✓ Subscriptions live — lock{' '}
+                <a
+                  href={`https://basescan.org/address/${space.lock_address}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: 'var(--teal)', textDecoration: 'none', fontFamily: 'var(--f-mono)' }}
+                >
+                  {space.lock_address.slice(0, 6)}…{space.lock_address.slice(-4)}
+                </a>{' '}
+                · {fmtUsdc(space.price_usdc)} USDC / {space.cadence === 'annual' ? 'year' : 'month'} · you keep 85% to your linked wallet.
+              </div>
+            ) : !linkedWallet ? (
+              <div style={{ fontSize: 12.5, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
+                <p style={{ margin: '0 0 10px' }}>
+                  Connect your payout wallet — it becomes the lock owner, so subscription funds go directly to it (non-custodial).
+                </p>
+                <ConnectWallet linked={null} />
+              </div>
+            ) : (
+              <div style={{ fontSize: 12.5, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
+                <div style={{ marginBottom: 10 }}>
+                  <ConnectWallet linked={linkedWallet.address} />
+                </div>
+                <p style={{ margin: '0 0 10px' }}>
+                  Deploy this space&rsquo;s lock on Base — {fmtUsdc(space.price_usdc)} USDC /{' '}
+                  {space.cadence === 'annual' ? 'year' : 'month'}; you keep 85% to{' '}
+                  {linkedWallet.address.slice(0, 6)}…{linkedWallet.address.slice(-4)}, 15% platform fee.
+                </p>
+                <EnableSubscriptions spaceId={space.id} />
+              </div>
+            )}
+          </div>
+        )}
 
         {space.is_member ? (
           <>

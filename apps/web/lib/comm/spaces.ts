@@ -13,6 +13,13 @@ const TITLE_MAX = 80;
 const BLURB_MAX = 280;
 const MIN_PERCENTILE = 0.5; // must sit in the top half of the cohort to charge
 
+// E2 checkout feature flag — gates the on-chain subscription path (enable +
+// checkout). Off until the founder has runtime-tested on Base.
+export function spacesCheckoutEnabled(): boolean {
+  const v = (process.env.COMM_SPACES_CHECKOUT ?? '').toLowerCase();
+  return v === 'on' || v === 'true' || v === '1';
+}
+
 export interface SpaceCreator {
   id: string;
   slug: string; // handle ?? public_id — the /u/<slug> route param
@@ -39,6 +46,7 @@ export interface SpaceDetail {
   subscriber_count: number;
   is_creator: boolean;
   is_member: boolean; // creator or active subscriber (comm_room_members)
+  lock_address: string | null;
 }
 
 interface SpaceRow {
@@ -49,6 +57,7 @@ interface SpaceRow {
   blurb: string | null;
   status?: string;
   created_at?: string;
+  lock_address?: string | null;
   comm_rooms: { title: string | null } | { title: string | null }[] | null;
 }
 interface ProfRow {
@@ -180,7 +189,7 @@ export async function listSpaces(supabase: SB, viewerId: string): Promise<SpaceS
 export async function loadSpace(supabase: SB, spaceId: string, viewerId: string): Promise<SpaceDetail | null> {
   const { data } = await supabase
     .from('comm_spaces')
-    .select('space_id, creator_id, price_usdc, cadence, blurb, status, comm_rooms!inner(title)')
+    .select('space_id, creator_id, price_usdc, cadence, blurb, status, lock_address, comm_rooms!inner(title)')
     .eq('space_id', spaceId)
     .maybeSingle();
   if (!data) return null;
@@ -209,6 +218,7 @@ export async function loadSpace(supabase: SB, spaceId: string, viewerId: string)
     subscriber_count: count ?? 0,
     is_creator: row.creator_id === viewerId,
     is_member: member,
+    lock_address: row.lock_address ?? null,
   };
 }
 
