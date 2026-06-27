@@ -12,6 +12,7 @@ import { AskAnalyst } from '@/components/comm/AskAnalyst';
 import { getAnalystId } from '@/lib/comm/analyst';
 import { ConnectWallet } from '@/components/comm/ConnectWallet';
 import { EnableSubscriptions } from '@/components/comm/EnableSubscriptions';
+import { SubscribePanel } from '@/components/comm/SubscribePanel';
 
 export const metadata: Metadata = { title: 'Space — eYKON.ai', robots: { index: false, follow: false } };
 export const dynamic = 'force-dynamic';
@@ -28,7 +29,8 @@ export default async function SpacePage({ params }: { params: { id: string } }) 
   if (space.is_member) await markRead(supabase, params.id, user.id);
   const analystId = getAnalystId();
   const checkout = spacesCheckoutEnabled();
-  const linkedWallet = space.is_creator && checkout ? await getLinkedWallet(supabase, user.id) : null;
+  const linkedWallet = checkout ? await getLinkedWallet(supabase, user.id) : null;
+  const platformWallet = process.env.UNLOCK_PLATFORM_WALLET ?? '';
 
   return (
     <>
@@ -110,15 +112,30 @@ export default async function SpacePage({ params }: { params: { id: string } }) 
               )}
               a subscriber-only space. Subscribe to see the conversation and the in-room analyst.
             </p>
-            <button
-              disabled
-              style={{ fontFamily: 'var(--f-mono)', fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-dim)', background: 'var(--bg-raised)', border: '1px solid var(--rule)', borderRadius: 4, padding: '10px 18px', marginTop: 14, cursor: 'default', opacity: 0.7 }}
-            >
-              Subscribe — soon
-            </button>
-            <p style={{ fontSize: 10.5, color: 'var(--ink-faint)', marginTop: 10, lineHeight: 1.5 }}>
-              Subscriptions open soon — non-custodial USDC via Unlock Protocol.
-            </p>
+            <div style={{ marginTop: 14 }}>
+              {checkout && space.lock_address ? (
+                <SubscribePanel
+                  spaceId={space.id}
+                  lock={space.lock_address}
+                  network={8453}
+                  referrer={platformWallet}
+                  priceLabel={`${fmtUsdc(space.price_usdc)} USDC / ${space.cadence === 'annual' ? 'year' : 'month'}`}
+                  linkedWallet={linkedWallet?.address ?? null}
+                />
+              ) : (
+                <>
+                  <button
+                    disabled
+                    style={{ fontFamily: 'var(--f-mono)', fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-dim)', background: 'var(--bg-raised)', border: '1px solid var(--rule)', borderRadius: 4, padding: '10px 18px', cursor: 'default', opacity: 0.7 }}
+                  >
+                    Subscribe — soon
+                  </button>
+                  <p style={{ fontSize: 10.5, color: 'var(--ink-faint)', marginTop: 10, lineHeight: 1.5 }}>
+                    Subscriptions open soon — non-custodial USDC via Unlock Protocol.
+                  </p>
+                </>
+              )}
+            </div>
           </div>
         )}
       </section>
