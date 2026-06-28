@@ -7,6 +7,7 @@ import CalibrationBadge from '@/components/CalibrationBadge';
 import ConvergenceBadge from '@/components/ConvergenceBadge';
 import LogoutButton from '@/components/LogoutButton';
 import CommMenu from '@/components/CommMenu';
+import AccountMenu from '@/components/AccountMenu';
 
 interface TopNavProps {
   chatOpen?: boolean;
@@ -107,6 +108,7 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
 
       <WelcomeGreeting />
       <CommMenu />
+      <AccountMenu />
       <LogoutButton />
 
       {/* LIVE pill */}

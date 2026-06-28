@@ -4,6 +4,7 @@ import TopNav from '@/components/TopNav';
 import { getUserProfile } from '@/lib/auth/session';
 import { TIER_LABELS } from '@/lib/pricing';
 import { tierMeetsRequirement } from '@/lib/subscription';
+import { ChangePasswordForm } from '@/components/settings/ChangePasswordForm';
 import { ReferralCard } from '@/components/settings/ReferralCard';
 import { ClearHistoryCard } from '@/components/settings/ClearHistoryCard';
 import { ChannelsCard } from '@/components/settings/ChannelsCard';
@@ -128,6 +129,8 @@ export default async function SettingsPage() {
           </dd>
         </dl>
       </section>
+
+      <ChangePasswordForm />
 
       <ReferralCard
         advocateState={advocateState}
