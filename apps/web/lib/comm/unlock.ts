@@ -92,6 +92,9 @@ const LOCK_ABI = [
   { type: 'function', name: 'addLockManager', stateMutability: 'nonpayable', inputs: [{ name: 'account', type: 'address' }], outputs: [] },
   { type: 'function', name: 'renounceLockManager', stateMutability: 'nonpayable', inputs: [], outputs: [] },
   { type: 'function', name: 'getHasValidKey', stateMutability: 'view', inputs: [{ name: '_user', type: 'address' }], outputs: [{ type: 'bool' }] },
+  // idempotency reads — let configureSpaceLock resume a partial deploy without repeating done steps
+  { type: 'function', name: 'referrerFees', stateMutability: 'view', inputs: [{ name: '_referrer', type: 'address' }], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'isLockManager', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'bool' }] },
 ] as const;
 
 // True only when every server-side Unlock env is present.
@@ -99,63 +102,103 @@ export function unlockConfigured(): boolean {
   return !!(process.env.BASE_RPC_URL && process.env.UNLOCK_DEPLOYER_PRIVATE_KEY && process.env.UNLOCK_PLATFORM_WALLET);
 }
 
-// Deploy a per-space lock and hand the creator sole control. Returns the
-// lock address. Four txns (cheap on Base): deploy → referrer fee →
-// add creator as manager → deployer renounces (non-custodial).
-export async function deploySpaceLock(opts: {
-  creator: Address;
+// The deployer is a SINGLE hot wallet with one nonce sequence. Concurrent
+// deploys (a double-clicked "Enable subscriptions", a client retry, a re-fire)
+// race that nonce and the node rejects the loser as "replacement transaction
+// underpriced". Chain every on-chain op through one promise so they run
+// strictly one-at-a-time in this process. (Cross-instance hardening = a
+// lock_status DB guard in the enable route — see PR notes.)
+let deployQueue: Promise<unknown> = Promise.resolve();
+function serializeDeploy<T>(fn: () => Promise<T>): Promise<T> {
+  const run = deployQueue.then(fn, fn);
+  deployQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+// Step 1 — deploy the per-space lock (ONE tx) and return its address. Kept
+// separate from configuration so the caller can persist the address
+// immediately; a later config failure then RESUMES via configureSpaceLock
+// instead of orphaning a lock and redeploying on the next attempt.
+export async function createSpaceLock(opts: {
   priceUsdc: number;
   cadence: 'monthly' | 'annual';
   name: string;
 }): Promise<Address> {
-  const wallet = deployer();
-  const client = pub();
-  const version = await client.readContract({ address: UNLOCK_FACTORY, abi: FACTORY_ABI, functionName: 'publicLockLatestVersion' });
+  return serializeDeploy(async () => {
+    const wallet = deployer();
+    const client = pub();
+    const version = await client.readContract({ address: UNLOCK_FACTORY, abi: FACTORY_ABI, functionName: 'publicLockLatestVersion' });
 
-  const initData = encodeFunctionData({
-    abi: LOCK_INIT_ABI,
-    functionName: 'initialize',
-    args: [
-      wallet.account.address, // deployer is the initial manager (so it can set the fee)
-      BigInt(SECONDS[opts.cadence]),
-      USDC_BASE,
-      parseUnits(String(opts.priceUsdc), 6),
-      MAX_KEYS,
-      opts.name.slice(0, 64),
-    ],
-  });
+    const initData = encodeFunctionData({
+      abi: LOCK_INIT_ABI,
+      functionName: 'initialize',
+      args: [
+        wallet.account.address, // deployer is the initial manager (so it can configure, then renounces)
+        BigInt(SECONDS[opts.cadence]),
+        USDC_BASE,
+        parseUnits(String(opts.priceUsdc), 6),
+        MAX_KEYS,
+        opts.name.slice(0, 64),
+      ],
+    });
 
-  const deployHash = await wallet.writeContract({ address: UNLOCK_FACTORY, abi: FACTORY_ABI, functionName: 'createUpgradeableLockAtVersion', args: [initData, version] });
-  const receipt = await client.waitForTransactionReceipt({ hash: deployHash });
+    const deployHash = await wallet.writeContract({ address: UNLOCK_FACTORY, abi: FACTORY_ABI, functionName: 'createUpgradeableLockAtVersion', args: [initData, version] });
+    const receipt = await client.waitForTransactionReceipt({ hash: deployHash });
 
-  let lock: Address | null = null;
-  for (const log of receipt.logs) {
-    try {
-      const ev = decodeEventLog({ abi: FACTORY_ABI, data: log.data, topics: log.topics });
-      if (ev.eventName === 'NewLock') {
-        lock = (ev.args as unknown as { newLockAddress: Address }).newLockAddress;
-        break;
+    for (const log of receipt.logs) {
+      try {
+        const ev = decodeEventLog({ abi: FACTORY_ABI, data: log.data, topics: log.topics });
+        if (ev.eventName === 'NewLock') {
+          return (ev.args as unknown as { newLockAddress: Address }).newLockAddress;
+        }
+      } catch {
+        /* not the NewLock event */
       }
-    } catch {
-      /* not the NewLock event */
     }
-  }
-  if (!lock) throw new Error('lock address not found in deploy receipt');
+    throw new Error('lock address not found in deploy receipt');
+  });
+}
 
-  // platform 15% referrer fee (deployer is still a manager here)
-  await client.waitForTransactionReceipt({
-    hash: await wallet.writeContract({ address: lock, abi: LOCK_ABI, functionName: 'setReferrerFee', args: [platformWallet(), feeBps()] }),
-  });
-  // creator becomes a manager (controls + withdraws their revenue)
-  await client.waitForTransactionReceipt({
-    hash: await wallet.writeContract({ address: lock, abi: LOCK_ABI, functionName: 'addLockManager', args: [opts.creator] }),
-  });
-  // deployer renounces — from here it can never touch the lock or funds
-  await client.waitForTransactionReceipt({
-    hash: await wallet.writeContract({ address: lock, abi: LOCK_ABI, functionName: 'renounceLockManager', args: [] }),
-  });
+// Step 2 — IDEMPOTENT config: platform referrer fee → creator becomes a
+// manager → deployer renounces (non-custodial). Each step reads on-chain
+// state first and SKIPS what is already done, so calling this again after a
+// partial failure safely completes the lock. Must run while the deployer is
+// still a manager (it is, until the final renounce).
+export async function configureSpaceLock(lock: Address, creator: Address): Promise<void> {
+  return serializeDeploy(async () => {
+    const wallet = deployer();
+    const client = pub();
+    const deployerAddr = wallet.account.address;
+    const platform = platformWallet();
 
-  return lock;
+    // 1) platform referrer fee — only if not already set to the target bps
+    const fee = await client
+      .readContract({ address: lock, abi: LOCK_ABI, functionName: 'referrerFees', args: [platform] })
+      .catch(() => BigInt(0));
+    if (fee !== feeBps()) {
+      const canManage = await client.readContract({ address: lock, abi: LOCK_ABI, functionName: 'isLockManager', args: [deployerAddr] });
+      if (!canManage) throw new Error('referrer fee unset but deployer already renounced — manual fix required');
+      await client.waitForTransactionReceipt({
+        hash: await wallet.writeContract({ address: lock, abi: LOCK_ABI, functionName: 'setReferrerFee', args: [platform, feeBps()] }),
+      });
+    }
+
+    // 2) creator becomes a manager (controls + withdraws their revenue) — once
+    const creatorManages = await client.readContract({ address: lock, abi: LOCK_ABI, functionName: 'isLockManager', args: [creator] });
+    if (!creatorManages) {
+      await client.waitForTransactionReceipt({
+        hash: await wallet.writeContract({ address: lock, abi: LOCK_ABI, functionName: 'addLockManager', args: [creator] }),
+      });
+    }
+
+    // 3) deployer renounces LAST — only if still a manager (idempotent)
+    const deployerManages = await client.readContract({ address: lock, abi: LOCK_ABI, functionName: 'isLockManager', args: [deployerAddr] });
+    if (deployerManages) {
+      await client.waitForTransactionReceipt({
+        hash: await wallet.writeContract({ address: lock, abi: LOCK_ABI, functionName: 'renounceLockManager', args: [] }),
+      });
+    }
+  });
 }
 
 // On-chain access check (detection mode 5b): does `user` hold a valid key?
