@@ -56,7 +56,7 @@ export default async function SpacePage({ params }: { params: { id: string } }) 
         {space.is_creator && checkout && (
           <div style={{ border: '1px solid var(--rule)', borderRadius: 10, padding: 16, background: 'var(--bg-panel)', marginBottom: 14 }}>
             <div className="eyebrow" style={{ color: 'var(--teal)', marginBottom: 8 }}>Monetization</div>
-            {space.lock_address ? (
+            {space.lock_status === 'ready' && space.lock_address ? (
               <div style={{ fontSize: 12.5, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
                 ✓ Subscriptions live — lock{' '}
                 <a
@@ -68,6 +68,10 @@ export default async function SpacePage({ params }: { params: { id: string } }) 
                   {space.lock_address.slice(0, 6)}…{space.lock_address.slice(-4)}
                 </a>{' '}
                 · {fmtUsdc(space.price_usdc)} USDC / {space.cadence === 'annual' ? 'year' : 'month'} · you keep 85% to your linked wallet.
+              </div>
+            ) : space.lock_status === 'working' ? (
+              <div style={{ fontSize: 12.5, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
+                Finishing setup on Base — deploying the lock and handing control to your wallet. This takes a few seconds; refresh shortly.
               </div>
             ) : !linkedWallet ? (
               <div style={{ fontSize: 12.5, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
@@ -81,12 +85,18 @@ export default async function SpacePage({ params }: { params: { id: string } }) 
                 <div style={{ marginBottom: 10 }}>
                   <ConnectWallet linked={linkedWallet.address} />
                 </div>
-                <p style={{ margin: '0 0 10px' }}>
-                  Deploy this space&rsquo;s lock on Base — {fmtUsdc(space.price_usdc)} USDC /{' '}
-                  {space.cadence === 'annual' ? 'year' : 'month'}; you keep 85% to{' '}
-                  {linkedWallet.address.slice(0, 6)}…{linkedWallet.address.slice(-4)}, 15% platform fee.
-                </p>
-                <EnableSubscriptions spaceId={space.id} />
+                {space.lock_status === 'failed' ? (
+                  <p style={{ margin: '0 0 10px' }}>
+                    Setup didn&rsquo;t finish — pick up where it stopped. No funds are at risk; an existing lock resumes rather than redeploying.
+                  </p>
+                ) : (
+                  <p style={{ margin: '0 0 10px' }}>
+                    Deploy this space&rsquo;s lock on Base — {fmtUsdc(space.price_usdc)} USDC /{' '}
+                    {space.cadence === 'annual' ? 'year' : 'month'}; you keep 85% to{' '}
+                    {linkedWallet.address.slice(0, 6)}…{linkedWallet.address.slice(-4)}, 15% platform fee.
+                  </p>
+                )}
+                <EnableSubscriptions spaceId={space.id} label={space.lock_status === 'failed' ? 'Finish setup' : undefined} />
               </div>
             )}
           </div>
