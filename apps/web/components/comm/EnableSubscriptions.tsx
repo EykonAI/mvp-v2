@@ -6,7 +6,7 @@ import type { CSSProperties } from 'react';
 // COMM E2b — creator action to deploy the space's Unlock lock on Base.
 // The deploy is a few on-chain txns (~30s), so the button shows progress.
 
-export function EnableSubscriptions({ spaceId }: { spaceId: string }) {
+export function EnableSubscriptions({ spaceId, label }: { spaceId: string; label?: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -21,7 +21,11 @@ export function EnableSubscriptions({ spaceId }: { spaceId: string }) {
         router.refresh();
       } else {
         const j = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
-        setErr(j.detail || j.error || 'Could not enable subscriptions.');
+        setErr(
+          j.error === 'in_progress'
+            ? 'Setup is already running — refresh in a few seconds.'
+            : j.detail || j.error || 'Could not enable subscriptions.',
+        );
       }
     } catch {
       setErr('Network error — try again.');
@@ -33,7 +37,7 @@ export function EnableSubscriptions({ spaceId }: { spaceId: string }) {
   return (
     <div>
       <button onClick={() => void enable()} disabled={busy} style={{ ...btn, opacity: busy ? 0.6 : 1 }}>
-        {busy ? 'Deploying lock on Base… (~30s)' : 'Enable subscriptions'}
+        {busy ? 'Working on Base… (~30s)' : (label ?? 'Enable subscriptions')}
       </button>
       {err && <div style={{ color: 'var(--red)', fontSize: 11, marginTop: 6 }}>{err}</div>}
     </div>

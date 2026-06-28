@@ -47,6 +47,7 @@ export interface SpaceDetail {
   is_creator: boolean;
   is_member: boolean; // creator or active subscriber (comm_room_members)
   lock_address: string | null;
+  lock_status: string | null; // null | 'working' | 'ready' | 'failed' (mig 065)
 }
 
 interface SpaceRow {
@@ -58,6 +59,7 @@ interface SpaceRow {
   status?: string;
   created_at?: string;
   lock_address?: string | null;
+  lock_status?: string | null;
   comm_rooms: { title: string | null } | { title: string | null }[] | null;
 }
 interface ProfRow {
@@ -189,7 +191,7 @@ export async function listSpaces(supabase: SB, viewerId: string): Promise<SpaceS
 export async function loadSpace(supabase: SB, spaceId: string, viewerId: string): Promise<SpaceDetail | null> {
   const { data } = await supabase
     .from('comm_spaces')
-    .select('space_id, creator_id, price_usdc, cadence, blurb, status, lock_address, comm_rooms!inner(title)')
+    .select('space_id, creator_id, price_usdc, cadence, blurb, status, lock_address, lock_status, comm_rooms!inner(title)')
     .eq('space_id', spaceId)
     .maybeSingle();
   if (!data) return null;
@@ -219,6 +221,7 @@ export async function loadSpace(supabase: SB, spaceId: string, viewerId: string)
     is_creator: row.creator_id === viewerId,
     is_member: member,
     lock_address: row.lock_address ?? null,
+    lock_status: row.lock_status ?? null,
   };
 }
 
@@ -263,6 +266,66 @@ export async function setSpaceLock(
 ): Promise<boolean> {
   const { error } = await supabase.from('comm_spaces').update({ lock_address: lockAddress, network }).eq('space_id', spaceId);
   return !error;
+}
+
+// ── Lock lifecycle status (mig 065) ─────────────────────────────
+// A space's lock deploy/config is guarded by a DB state machine so it is safe
+// under concurrent / multi-replica "Enable" requests. The in-process serializer
+// in unlock.ts only orders calls within ONE Node process; claimSpaceLockWork is
+// the cross-replica lock.
+
+const LOCK_CLAIM_TTL_MS = 5 * 60 * 1000; // a 'working' claim older than this is stale (crashed deploy)
+
+// Atomically claim the right to deploy/configure a space's lock. Exactly one
+// concurrent caller wins (Postgres row-locks the conditional UPDATE), so two
+// requests can't drive the deployer wallet at the same nonce. ok=false carries
+// reason 'ready' (already done) or 'in_progress' (another claim is live).
+export async function claimSpaceLockWork(
+  supabase: SB,
+  spaceId: string,
+): Promise<{ ok: boolean; reason?: 'ready' | 'in_progress' }> {
+  const now = new Date().toISOString();
+  // Common case: never started (null) or a prior failure (reclaimable → resume).
+  const first = await supabase
+    .from('comm_spaces')
+    .update({ lock_status: 'working', lock_status_at: now })
+    .eq('space_id', spaceId)
+    .or('lock_status.is.null,lock_status.eq.failed')
+    .select('space_id')
+    .maybeSingle();
+  if (first.data) return { ok: true };
+
+  // Reclaim a stale 'working' (a deploy that crashed mid-flight).
+  const staleBefore = new Date(Date.now() - LOCK_CLAIM_TTL_MS).toISOString();
+  const second = await supabase
+    .from('comm_spaces')
+    .update({ lock_status: 'working', lock_status_at: now })
+    .eq('space_id', spaceId)
+    .eq('lock_status', 'working')
+    .lt('lock_status_at', staleBefore)
+    .select('space_id')
+    .maybeSingle();
+  if (second.data) return { ok: true };
+
+  const { data: cur } = await supabase
+    .from('comm_spaces')
+    .select('lock_status')
+    .eq('space_id', spaceId)
+    .maybeSingle();
+  return { ok: false, reason: (cur as { lock_status?: string } | null)?.lock_status === 'ready' ? 'ready' : 'in_progress' };
+}
+
+// Advance the lock lifecycle status (the enable route sets 'ready' on success,
+// 'failed' on error — 'failed' is reclaimable so the idempotent flow resumes).
+export async function setLockStatus(
+  supabase: SB,
+  spaceId: string,
+  status: 'working' | 'ready' | 'failed',
+): Promise<void> {
+  await supabase
+    .from('comm_spaces')
+    .update({ lock_status: status, lock_status_at: new Date().toISOString() })
+    .eq('space_id', spaceId);
 }
 
 export async function hasActiveSubscription(supabase: SB, spaceId: string, userId: string): Promise<boolean> {
