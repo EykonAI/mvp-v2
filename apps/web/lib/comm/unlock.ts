@@ -6,6 +6,8 @@ import {
   encodeFunctionData,
   decodeEventLog,
   getAddress,
+  keccak256,
+  toBytes,
   type Address,
 } from 'viem';
 import { base } from 'viem/chains';
@@ -26,6 +28,10 @@ const UNLOCK_FACTORY: Address = '0xd0b14797b9D08493392865647384974470202A78'; //
 const USDC_BASE: Address = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'; // native USDC on Base (6 dp)
 const SECONDS = { monthly: 30 * 24 * 3600, annual: 365 * 24 * 3600 } as const;
 const MAX_KEYS = BigInt(1_000_000); // effectively unlimited subscribers per space
+// PublicLock manager role (OZ AccessControl). On the deployed v15 PublicLock
+// addLockManager() reverts; grantRole(LOCK_MANAGER_ROLE, …) is the version-stable
+// equivalent (verified on-chain), and isLockManager() reads this same role.
+const LOCK_MANAGER_ROLE = keccak256(toBytes('LOCK_MANAGER'));
 
 function feeBps(): bigint {
   return BigInt(process.env.UNLOCK_PLATFORM_FEE_BPS ?? '1500');
@@ -89,7 +95,7 @@ const LOCK_INIT_ABI = [
 
 const LOCK_ABI = [
   { type: 'function', name: 'setReferrerFee', stateMutability: 'nonpayable', inputs: [{ name: '_referrer', type: 'address' }, { name: '_feeBasisPoint', type: 'uint256' }], outputs: [] },
-  { type: 'function', name: 'addLockManager', stateMutability: 'nonpayable', inputs: [{ name: 'account', type: 'address' }], outputs: [] },
+  { type: 'function', name: 'grantRole', stateMutability: 'nonpayable', inputs: [{ name: 'role', type: 'bytes32' }, { name: 'account', type: 'address' }], outputs: [] },
   { type: 'function', name: 'renounceLockManager', stateMutability: 'nonpayable', inputs: [], outputs: [] },
   { type: 'function', name: 'getHasValidKey', stateMutability: 'view', inputs: [{ name: '_user', type: 'address' }], outputs: [{ type: 'bool' }] },
   // idempotency reads — let configureSpaceLock resume a partial deploy without repeating done steps
@@ -183,11 +189,12 @@ export async function configureSpaceLock(lock: Address, creator: Address): Promi
       });
     }
 
-    // 2) creator becomes a manager (controls + withdraws their revenue) — once
+    // 2) creator becomes a manager (controls + withdraws their revenue) — once.
+    // v15 addLockManager() reverts; grant the role directly (verified on-chain).
     const creatorManages = await client.readContract({ address: lock, abi: LOCK_ABI, functionName: 'isLockManager', args: [creator] });
     if (!creatorManages) {
       await client.waitForTransactionReceipt({
-        hash: await wallet.writeContract({ address: lock, abi: LOCK_ABI, functionName: 'addLockManager', args: [creator] }),
+        hash: await wallet.writeContract({ address: lock, abi: LOCK_ABI, functionName: 'grantRole', args: [LOCK_MANAGER_ROLE, creator] }),
       });
     }
 
