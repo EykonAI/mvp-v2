@@ -17,14 +17,15 @@ interface TopNavProps {
 
 /**
  * Global top bar. Brief §3.1 split the bar into two zones:
- *   • Left: brand mark, "Geopolitical Intelligence" tagline,
- *           WELCOME greeting, LIVE pill, trust badges.
+ *   • Left: brand mark, "Geopolitical Intelligence" tagline, WELCOME
+ *           greeting, a stacked Account/Log-out control, LIVE pill, the
+ *           Calibration + Convergence trust badges, and the notification bell.
  *   • Right: the five-pillar cluster — COMM ▾ · GLOBE · INTEL · NOTIF ·
- *           AI ANALYST — plus a bell glyph. COMM (a dropdown) sits just
- *           left of a fixed-width inner cluster whose width equals the
- *           AI Chat panel (--chat-panel-width in globals.css), so the
- *           GLOBE tab's left edge stays vertically above the panel's
- *           left edge even with COMM prepended (COMM UX Uplift brief §2.1a).
+ *           AI ANALYST (the bell now lives by the trust badges so these read
+ *           as five homogeneous tabs). COMM (a dropdown) sits just left of a
+ *           fixed-width inner cluster whose width equals the AI Chat panel
+ *           (--chat-panel-width in globals.css), so the GLOBE tab's left edge
+ *           stays vertically above the panel's left edge (UX Uplift §2.1a).
  *
  * GLOBE/INTEL/NOTIF are <Link>s; AI ANALYST is a <button> toggling the
  * side panel; COMM is a dropdown styled as a peer tab. All share
@@ -109,8 +110,11 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
       </span>
 
       <WelcomeGreeting />
-      <AccountMenu />
-      <LogoutButton />
+      {/* Account + Log out stacked vertically to save horizontal real-estate. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <AccountMenu />
+        <LogoutButton />
+      </div>
 
       {/* LIVE pill */}
       <span
@@ -144,6 +148,10 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
           the chat-panel-width alignment below. */}
       <CalibrationBadge />
       <ConvergenceBadge />
+      {/* Notification bell — sits with the trust badges (between Convergence
+          and the COMM pillar) so the right cluster reads as five homogeneous
+          pillar tabs, not four-plus-a-glyph. */}
+      <NotificationBell />
 
       {/* Five-pillar cluster. COMM ▾ sits immediately left of the
           fixed-width inner cluster so all five pillars read as one set,
@@ -174,7 +182,6 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
           <TabLink href="/app" label="Globe" active={isGlobe} />
           <TabLink href="/intel" label="Intel" active={isIntel} />
           <TabLink href="/notif" label="Notif" active={isNotif} />
-          <NotificationBell />
           <TabButton
             label="AI Analyst"
             active={!!chatOpen}
