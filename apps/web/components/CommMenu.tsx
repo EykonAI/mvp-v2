@@ -76,6 +76,17 @@ const GROUPS: NavGroup[] = [
 // Route prefixes that light the trigger's active (pillar-selected) state.
 const COMM_ROUTES = ['/radar', '/me', '/u/', '/leaderboard', '/rooms', '/spaces', '/messages'];
 
+// Is a menu item's route the current one? '/me' must match EXACTLY — it is a
+// string prefix of '/messages', so a naive startsWith would also light Profile
+// while on /messages. Every other item is a prefix match (covers nested routes
+// like /spaces/<id>). '/me' redirects to /u/<handle>, so Profile simply won't
+// light while viewing a /u/ profile — acceptable; we don't resolve the handle.
+function isItemActive(itemHref: string, pathname: string | null): boolean {
+  if (!pathname) return false;
+  if (itemHref === '/me') return pathname === '/me';
+  return pathname === itemHref || pathname.startsWith(`${itemHref}/`);
+}
+
 const menu: CSSProperties = {
   position: 'absolute',
   top: 'calc(100% + 8px)',
@@ -168,31 +179,57 @@ export default function CommMenu() {
             <div key={group.heading}>
               <div style={groupHeading}>{group.heading}</div>
               {group.items.map((it) => {
+                const isActive = isItemActive(it.href, pathname);
                 const isHovered = hovered === it.href;
                 const showBadge = it.href === '/messages' && unread > 0;
+                // Active takes precedence over hover: the current route reads in
+                // the teal accent (tinted row + left accent bar + teal label),
+                // visually distinct from the neutral white-wash hover.
+                // Tint matches --teal (#19D0B8 → rgb 25,208,184) at low alpha.
+                const rowBg = isActive
+                  ? 'rgba(25,208,184,0.10)'
+                  : isHovered
+                    ? 'rgba(255,255,255,0.05)'
+                    : 'transparent';
                 return (
                   <Link
                     key={it.href}
                     href={it.href}
                     prefetch={false}
                     role="menuitem"
+                    aria-current={isActive ? 'page' : undefined}
                     onClick={() => setOpen(false)}
                     onMouseEnter={() => setHovered(it.href)}
                     onMouseLeave={() => setHovered((h) => (h === it.href ? null : h))}
                     style={{
+                      position: 'relative',
                       display: 'flex',
                       alignItems: 'center',
                       gap: 11,
                       padding: '7px 10px',
                       borderRadius: 4,
                       textDecoration: 'none',
-                      background: isHovered ? 'rgba(255,255,255,0.05)' : 'transparent',
+                      background: rowBg,
                     }}
                   >
+                    {isActive && (
+                      <span
+                        aria-hidden
+                        style={{
+                          position: 'absolute',
+                          left: 0,
+                          top: 6,
+                          bottom: 6,
+                          width: 2.5,
+                          borderRadius: 2,
+                          background: 'var(--teal)',
+                        }}
+                      />
+                    )}
                     <span
                       style={{
                         display: 'flex',
-                        color: isHovered ? 'var(--teal)' : 'var(--ink-dim)',
+                        color: isActive || isHovered ? 'var(--teal)' : 'var(--ink-dim)',
                         flexShrink: 0,
                       }}
                     >
@@ -204,7 +241,7 @@ export default function CommMenu() {
                           fontFamily: 'var(--f-mono)',
                           fontSize: 11.5,
                           letterSpacing: '0.04em',
-                          color: 'var(--ink)',
+                          color: isActive ? 'var(--teal)' : 'var(--ink)',
                         }}
                       >
                         {it.label}
