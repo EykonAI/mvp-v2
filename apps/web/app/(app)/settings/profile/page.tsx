@@ -76,6 +76,14 @@ export default async function ProfileSettingsPage() {
           )}
         </p>
 
+        <p style={{ fontFamily: 'var(--f-mono)', fontSize: 11.5, color: 'var(--ink-dim)', marginBottom: 28 }}>
+          Run paid spaces?{' '}
+          <Link href="/spaces?tab=manage" style={{ color: 'var(--teal)', textDecoration: 'none' }} prefetch={false}>
+            Creator tools ↗
+          </Link>{' '}
+          — edit, pause, or delete your spaces.
+        </p>
+
         <ProfileEditForm
           initial={{
             handle,

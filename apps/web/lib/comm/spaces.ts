@@ -24,6 +24,8 @@ export interface SpaceCreator {
   id: string;
   slug: string; // handle ?? public_id — the /u/<slug> route param
   name: string;
+  note: number | null; // creator Reputation Note (null while calibrating)
+  nResolved: number; // resolved-call count behind the Note (drives the band)
 }
 export interface SpaceSummary {
   id: string;
@@ -31,10 +33,25 @@ export interface SpaceSummary {
   blurb: string | null;
   price_usdc: number;
   cadence: string;
+  status: string; // 'draft' | 'live' | 'paused' | 'archived'
+  lock_status: string | null; // null | 'working' | 'ready' | 'failed' — buyable only when 'ready'
   creator: SpaceCreator | null;
   subscriber_count: number;
   is_creator: boolean;
   is_subscribed: boolean;
+}
+
+// Per-space row for the creator-only Manage tab (§4.2).
+export interface ManageSpace {
+  id: string;
+  title: string | null;
+  blurb: string | null;
+  price_usdc: number;
+  cadence: string;
+  status: string;
+  lock_address: string | null;
+  lock_status: string | null;
+  subscriber_count: number;
 }
 export interface SpaceDetail {
   id: string;
@@ -69,11 +86,49 @@ interface ProfRow {
   public_id: string | null;
 }
 
-function creatorFrom(p: ProfRow | undefined | null): SpaceCreator | null {
+function creatorFrom(
+  p: ProfRow | undefined | null,
+  rep?: { note: number | null; nResolved: number },
+): SpaceCreator | null {
   if (!p) return null;
   const slug = p.handle ?? p.public_id;
   if (!slug) return null;
-  return { id: p.id, slug, name: p.display_name || (p.handle ? `@${p.handle}` : slug) };
+  return {
+    id: p.id,
+    slug,
+    name: p.display_name || (p.handle ? `@${p.handle}` : slug),
+    note: rep?.note ?? null,
+    nResolved: rep?.nResolved ?? 0,
+  };
+}
+
+// Creator Reputation Notes for the credibility-forward Space cards (§4.1).
+// Reads only shown '_all' rows; an unshown creator stays "Calibrating".
+async function loadCreatorReps(
+  supabase: SB,
+  ids: string[],
+): Promise<Map<string, { note: number | null; nResolved: number }>> {
+  const map = new Map<string, { note: number | null; nResolved: number }>();
+  if (ids.length === 0) return map;
+  try {
+    const { data } = await supabase
+      .from('user_reputation')
+      .select('author_id, reputation_note, n_resolved')
+      .eq('feature', '_all')
+      .eq('shown', true)
+      .in('author_id', ids);
+    for (const r of (data as
+      | { author_id: string; reputation_note: number | null; n_resolved: number | null }[]
+      | null) ?? []) {
+      map.set(r.author_id, {
+        note: r.reputation_note == null ? null : Number(r.reputation_note),
+        nResolved: Number(r.n_resolved ?? 0),
+      });
+    }
+  } catch {
+    /* no reputation yet → all calibrating */
+  }
+  return map;
 }
 function roomTitle(row: SpaceRow): string | null {
   const room = Array.isArray(row.comm_rooms) ? row.comm_rooms[0] : row.comm_rooms;
@@ -143,30 +198,53 @@ export async function createSpace(
   return spaceId;
 }
 
+const SUMMARY_COLS = 'space_id, creator_id, price_usdc, cadence, blurb, status, lock_status, created_at, comm_rooms!inner(title)';
+
 export async function listSpaces(supabase: SB, viewerId: string): Promise<SpaceSummary[]> {
   const { data } = await supabase
     .from('comm_spaces')
-    .select('space_id, creator_id, price_usdc, cadence, blurb, created_at, comm_rooms!inner(title)')
+    .select(SUMMARY_COLS)
     .eq('status', 'live')
     .order('created_at', { ascending: false })
     .limit(100);
-  const rows = (data as SpaceRow[] | null) ?? [];
-  if (rows.length === 0) return [];
+  return hydrateSummaries(supabase, viewerId, (data as SpaceRow[] | null) ?? []);
+}
 
+// Spaces the viewer actively subscribes to (§4.1 — the "My subscriptions" tab).
+export async function listMySubscriptions(supabase: SB, viewerId: string): Promise<SpaceSummary[]> {
+  const { data: subs } = await supabase
+    .from('comm_space_subscriptions')
+    .select('space_id')
+    .eq('subscriber_id', viewerId)
+    .eq('status', 'active');
+  const ids = Array.from(new Set(((subs as { space_id: string }[] | null) ?? []).map((s) => s.space_id)));
+  if (ids.length === 0) return [];
+  const { data } = await supabase
+    .from('comm_spaces')
+    .select(SUMMARY_COLS)
+    .in('space_id', ids)
+    .neq('status', 'archived')
+    .order('created_at', { ascending: false });
+  return hydrateSummaries(supabase, viewerId, (data as SpaceRow[] | null) ?? []);
+}
+
+// Shared builder: comm_spaces rows → SpaceSummary[] with creator (+ Reputation
+// Note), live subscriber counts, and the viewer's creator/subscribed flags.
+async function hydrateSummaries(supabase: SB, viewerId: string, rows: SpaceRow[]): Promise<SpaceSummary[]> {
+  if (rows.length === 0) return [];
   const spaceIds = rows.map((r) => r.space_id);
   const creatorIds = Array.from(new Set(rows.map((r) => r.creator_id)));
 
-  const { data: profs } = await supabase
-    .from('user_profiles')
-    .select('id, handle, display_name, public_id')
-    .in('id', creatorIds);
+  const [{ data: profs }, reps, { data: subs }] = await Promise.all([
+    supabase.from('user_profiles').select('id, handle, display_name, public_id').in('id', creatorIds),
+    loadCreatorReps(supabase, creatorIds),
+    supabase
+      .from('comm_space_subscriptions')
+      .select('space_id, subscriber_id')
+      .eq('status', 'active')
+      .in('space_id', spaceIds),
+  ]);
   const profById = new Map(((profs as ProfRow[] | null) ?? []).map((p) => [p.id, p]));
-
-  const { data: subs } = await supabase
-    .from('comm_space_subscriptions')
-    .select('space_id, subscriber_id')
-    .eq('status', 'active')
-    .in('space_id', spaceIds);
   const subRows = (subs as { space_id: string; subscriber_id: string }[] | null) ?? [];
   const countBySpace = new Map<string, number>();
   const viewerSubbed = new Set<string>();
@@ -181,10 +259,44 @@ export async function listSpaces(supabase: SB, viewerId: string): Promise<SpaceS
     blurb: r.blurb,
     price_usdc: Number(r.price_usdc),
     cadence: r.cadence,
-    creator: creatorFrom(profById.get(r.creator_id)),
+    status: r.status ?? 'live',
+    lock_status: r.lock_status ?? null,
+    creator: creatorFrom(profById.get(r.creator_id), reps.get(r.creator_id)),
     subscriber_count: countBySpace.get(r.space_id) ?? 0,
     is_creator: r.creator_id === viewerId,
     is_subscribed: viewerSubbed.has(r.space_id),
+  }));
+}
+
+// The creator's own spaces for the Manage tab (§4.2) — draft/live/paused
+// (archived = deleted, hidden). Includes subscriber counts + the lock ref.
+export async function listManageSpaces(supabase: SB, creatorId: string): Promise<ManageSpace[]> {
+  const { data } = await supabase
+    .from('comm_spaces')
+    .select('space_id, price_usdc, cadence, blurb, status, lock_address, lock_status, created_at, comm_rooms!inner(title)')
+    .eq('creator_id', creatorId)
+    .in('status', ['draft', 'live', 'paused'])
+    .order('created_at', { ascending: false });
+  const rows = (data as SpaceRow[] | null) ?? [];
+  if (rows.length === 0) return [];
+  const { data: subs } = await supabase
+    .from('comm_space_subscriptions')
+    .select('space_id')
+    .eq('status', 'active')
+    .in('space_id', rows.map((r) => r.space_id));
+  const countBySpace = new Map<string, number>();
+  for (const s of (subs as { space_id: string }[] | null) ?? [])
+    countBySpace.set(s.space_id, (countBySpace.get(s.space_id) ?? 0) + 1);
+  return rows.map((r) => ({
+    id: r.space_id,
+    title: roomTitle(r),
+    blurb: r.blurb,
+    price_usdc: Number(r.price_usdc),
+    cadence: r.cadence,
+    status: r.status ?? 'live',
+    lock_address: r.lock_address ?? null,
+    lock_status: r.lock_status ?? null,
+    subscriber_count: countBySpace.get(r.space_id) ?? 0,
   }));
 }
 
@@ -337,4 +449,100 @@ export async function hasActiveSubscription(supabase: SB, spaceId: string, userI
     .eq('status', 'active')
     .maybeSingle();
   return !!data;
+}
+
+// ── Creator management (§4.2) ───────────────────────────────────
+// All creator-checked. The on-chain lock is never touched here — archiving
+// only UNLINKS it (see setSpaceStatus); the creator's funds stay on Base.
+
+export interface ManageResult {
+  ok: boolean;
+  error?: string;
+}
+
+// Edit a space's display fields. Price/cadence become read-only once a lock
+// is deployed — the on-chain key price governs checkout and can't be changed
+// from the app (the creator manages that on Base).
+export async function updateSpace(
+  supabase: SB,
+  spaceId: string,
+  creatorId: string,
+  patch: { title?: string; blurb?: string | null; priceUsdc?: number; cadence?: 'monthly' | 'annual' },
+): Promise<ManageResult> {
+  const { data: sp } = await supabase
+    .from('comm_spaces')
+    .select('creator_id, status, lock_address')
+    .eq('space_id', spaceId)
+    .maybeSingle();
+  if (!sp) return { ok: false, error: 'not_found' };
+  const cur = sp as { creator_id: string; status: string; lock_address: string | null };
+  if (cur.creator_id !== creatorId) return { ok: false, error: 'forbidden' };
+  if (cur.status === 'archived') return { ok: false, error: 'archived' };
+
+  if ((patch.priceUsdc != null || patch.cadence != null) && cur.lock_address) {
+    return { ok: false, error: 'price_locked_onchain' };
+  }
+
+  if (patch.title != null) {
+    const t = patch.title.trim().slice(0, TITLE_MAX);
+    if (!t) return { ok: false, error: 'invalid_title' };
+    const { error } = await supabase.from('comm_rooms').update({ title: t }).eq('id', spaceId);
+    if (error) return { ok: false, error: 'update_failed' };
+  }
+
+  const upd: Record<string, unknown> = {};
+  if (patch.blurb !== undefined) upd.blurb = patch.blurb ? patch.blurb.trim().slice(0, BLURB_MAX) : null;
+  if (patch.priceUsdc != null) {
+    if (!Number.isFinite(patch.priceUsdc) || patch.priceUsdc < 0) return { ok: false, error: 'invalid_price' };
+    upd.price_usdc = patch.priceUsdc;
+  }
+  if (patch.cadence != null) upd.cadence = patch.cadence === 'annual' ? 'annual' : 'monthly';
+  if (Object.keys(upd).length > 0) {
+    const { error } = await supabase.from('comm_spaces').update(upd).eq('space_id', spaceId);
+    if (error) return { ok: false, error: 'update_failed' };
+  }
+  return { ok: true };
+}
+
+// Pause (hide from discovery, keep existing subs), resume, or archive. Archive
+// is the honest "delete": status→archived, active subs canceled, non-creator
+// room access revoked — but the on-chain lock is only UNLINKED (lock_address
+// cleared), never destroyed. No funds move.
+export async function setSpaceStatus(
+  supabase: SB,
+  spaceId: string,
+  creatorId: string,
+  status: 'live' | 'paused' | 'archived',
+): Promise<ManageResult> {
+  const { data: sp } = await supabase
+    .from('comm_spaces')
+    .select('creator_id, status')
+    .eq('space_id', spaceId)
+    .maybeSingle();
+  if (!sp) return { ok: false, error: 'not_found' };
+  const cur = sp as { creator_id: string; status: string };
+  if (cur.creator_id !== creatorId) return { ok: false, error: 'forbidden' };
+  if (cur.status === 'archived') return { ok: false, error: 'archived' };
+
+  if (status === 'archived') {
+    const { error } = await supabase
+      .from('comm_spaces')
+      .update({ status: 'archived', lock_address: null, lock_status: null, lock_status_at: new Date().toISOString() })
+      .eq('space_id', spaceId);
+    if (error) return { ok: false, error: 'update_failed' };
+    await supabase
+      .from('comm_space_subscriptions')
+      .update({ status: 'canceled' })
+      .eq('space_id', spaceId)
+      .eq('status', 'active');
+    await supabase.from('comm_room_members').delete().eq('room_id', spaceId).neq('user_id', creatorId);
+    return { ok: true };
+  }
+
+  const { error } = await supabase
+    .from('comm_spaces')
+    .update({ status: status === 'paused' ? 'paused' : 'live' })
+    .eq('space_id', spaceId);
+  if (error) return { ok: false, error: 'update_failed' };
+  return { ok: true };
 }
