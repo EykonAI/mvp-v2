@@ -84,10 +84,15 @@ export function perCallDifficulty(c: NoteCall): number {
 }
 
 // Capped, saturating contribution bonus (≤ CONTRIBUTION_CAP). Saturation +
-// the hard cap blunt sybil/engagement-farming; reputation-weighting the
-// follower term is a future tightening (the cap already bounds the damage).
+// the hard cap blunt sybil/engagement-farming, and the follower term is now
+// reputation-weighted to resist sybils at the source: `followerRepScore` is a
+// SUM of per-follower weights (a follow from a high-Note analyst counts ~its
+// note/100; an unrated follower contributes only a small floor ≈0.15), not a
+// raw follower COUNT. So 50 zero-reputation follows barely move the score,
+// while a handful of credible follows do. Accuracy still dominates: the whole
+// bonus is capped at CONTRIBUTION_CAP (12 of 100), unchanged.
 export function contributionScore(s: {
-  followers: number;
+  followerRepScore: number; // Σ per-follower reputation weights (see cron loadContribution)
   predictionBackedPosts: number;
   spaces: number;
 }): number {
@@ -95,7 +100,15 @@ export function contributionScore(s: {
     const v = Math.max(0, x) / k;
     return v / (1 + v);
   };
-  const raw = 5 * sat(s.followers, 25) + 4 * sat(s.spaces, 3) + 3 * sat(s.predictionBackedPosts, 20);
+  // Saturating constants. The follower term's k dropped 25 → 12 because the
+  // input changed from a raw count to a rep-weighted SUM where each follower
+  // adds < 1 (0.15 floor … ~1.0 for a 100-Note follower). With k=12 the term
+  // half-saturates around a rep-weighted score of 12 — e.g. ~13 high-Note
+  // follows, ~24 average (≈0.5) follows, or ~80 sybil (0.15) follows — keeping
+  // the 5-point follower weight comparable to the old raw-count behaviour while
+  // making it far harder to farm with cheap zero-reputation accounts.
+  const raw =
+    5 * sat(s.followerRepScore, 12) + 4 * sat(s.spaces, 3) + 3 * sat(s.predictionBackedPosts, 20);
   return Math.min(CONTRIBUTION_CAP, raw);
 }
 
