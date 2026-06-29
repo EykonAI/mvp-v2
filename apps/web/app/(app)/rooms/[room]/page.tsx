@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import TopNav from '@/components/TopNav';
+import { CommChatShell } from '@/components/comm/CommChatShell';
 import { getCurrentUser } from '@/lib/auth/session';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { loadRoom } from '@/lib/comm/rooms';
@@ -27,8 +27,7 @@ export default async function RoomPage({ params }: { params: { room: string } })
   const analystId = getAnalystId();
 
   return (
-    <>
-      <TopNav />
+    <CommChatShell>
       <section style={{ maxWidth: 720, margin: '0 auto', padding: '24px', color: 'var(--ink)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
           <Link href="/rooms" style={{ color: 'var(--ink-dim)', textDecoration: 'none', fontFamily: 'var(--f-mono)', fontSize: 12 }}>
@@ -53,6 +52,6 @@ export default async function RoomPage({ params }: { params: { room: string } })
           </div>
         )}
       </section>
-    </>
+    </CommChatShell>
   );
 }

@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import TopNav from '@/components/TopNav';
+import { CommChatShell } from '@/components/comm/CommChatShell';
 import { getCurrentUser } from '@/lib/auth/session';
 import { loadLeaderboard, type LeaderboardEntry } from '@/lib/comm/leaderboard';
 
@@ -20,8 +20,7 @@ export default async function LeaderboardPage() {
   const entries = await loadLeaderboard(100);
 
   return (
-    <>
-      <TopNav />
+    <CommChatShell>
       <section style={{ maxWidth: 720, margin: '0 auto', padding: '40px 24px 80px', color: 'var(--ink)' }}>
         <div className="eyebrow" style={{ color: 'var(--teal)' }}>·· Leaderboard ··</div>
         <h1 style={{ fontFamily: 'var(--f-display)', fontSize: 28, marginTop: 8, marginBottom: 6 }}>
@@ -60,7 +59,7 @@ export default async function LeaderboardPage() {
           </div>
         )}
       </section>
-    </>
+    </CommChatShell>
   );
 }
 
