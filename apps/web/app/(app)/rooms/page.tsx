@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import TopNav from '@/components/TopNav';
+import { CommChatShell } from '@/components/comm/CommChatShell';
 import { getCurrentUser } from '@/lib/auth/session';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { listRooms } from '@/lib/comm/rooms';
@@ -18,8 +18,7 @@ export default async function RoomsPage() {
   const rooms = await listRooms(supabase, user.id);
 
   return (
-    <>
-      <TopNav />
+    <CommChatShell>
       <section style={{ maxWidth: 720, margin: '0 auto', padding: '40px 24px 80px', color: 'var(--ink)' }}>
         <div className="eyebrow" style={{ color: 'var(--teal)' }}>·· Rooms ··</div>
         <h1 style={{ fontFamily: 'var(--f-display)', fontSize: 28, marginTop: 8, marginBottom: 16 }}>Group rooms</h1>
@@ -60,6 +59,6 @@ export default async function RoomsPage() {
           </div>
         )}
       </section>
-    </>
+    </CommChatShell>
   );
 }

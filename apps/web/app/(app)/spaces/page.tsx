@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import TopNav from '@/components/TopNav';
+import { CommChatShell } from '@/components/comm/CommChatShell';
 import { getCurrentUser } from '@/lib/auth/session';
 import { createServerSupabase } from '@/lib/supabase-server';
 import {
@@ -45,8 +45,7 @@ export default async function SpacesPage({
   ]);
 
   return (
-    <>
-      <TopNav />
+    <CommChatShell>
       <section style={{ maxWidth: 760, margin: '0 auto', padding: '40px 24px 80px', color: 'var(--ink)' }}>
         <div className="eyebrow" style={{ color: 'var(--teal)' }}>·· Spaces ··</div>
         <h1 style={{ fontFamily: 'var(--f-display)', fontSize: 28, marginTop: 8, marginBottom: 6 }}>Paid spaces</h1>
@@ -109,7 +108,7 @@ export default async function SpacesPage({
           </div>
         )}
       </section>
-    </>
+    </CommChatShell>
   );
 }
 

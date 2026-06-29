@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import TopNav from '@/components/TopNav';
+import { CommChatShell } from '@/components/comm/CommChatShell';
 import { getCurrentUser } from '@/lib/auth/session';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { listThreads } from '@/lib/comm/dm';
@@ -17,8 +17,7 @@ export default async function MessagesPage() {
   const threads = await listThreads(supabase, user.id);
 
   return (
-    <>
-      <TopNav />
+    <CommChatShell>
       <section style={{ maxWidth: 720, margin: '0 auto', padding: '40px 24px 80px', color: 'var(--ink)' }}>
         <div className="eyebrow" style={{ color: 'var(--teal)' }}>·· Messages ··</div>
         <h1 style={{ fontFamily: 'var(--f-display)', fontSize: 28, marginTop: 8, marginBottom: 20 }}>Direct messages</h1>
@@ -69,6 +68,6 @@ export default async function MessagesPage() {
           </div>
         )}
       </section>
-    </>
+    </CommChatShell>
   );
 }

@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import TopNav from '@/components/TopNav';
+import { CommChatShell } from '@/components/comm/CommChatShell';
 import { getCurrentUser } from '@/lib/auth/session';
 import { loadRadar, type RadarItem, type RadarCall, type RadarAuthor } from '@/lib/comm/radar';
 
@@ -18,8 +18,7 @@ export default async function RadarPage() {
   const { followingCount, items } = await loadRadar(user.id, 40);
 
   return (
-    <>
-      <TopNav />
+    <CommChatShell>
       <section style={{ maxWidth: 720, margin: '0 auto', padding: '40px 24px 80px', color: 'var(--ink)' }}>
         <div className="eyebrow" style={{ color: 'var(--teal)' }}>·· Radar ··</div>
         <h1 style={{ fontFamily: 'var(--f-display)', fontSize: 28, marginTop: 8, marginBottom: 6 }}>
@@ -52,7 +51,7 @@ export default async function RadarPage() {
           </div>
         )}
       </section>
-    </>
+    </CommChatShell>
   );
 }
 
