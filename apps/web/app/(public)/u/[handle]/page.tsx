@@ -7,6 +7,7 @@ import { loadProfile, isFollowing, type ProfilePrediction, type ProfileLink } fr
 import { isBlockedByMe } from '@/lib/comm/moderation';
 import { personaLabel } from '@/lib/intelligence-analyst/personas';
 import { ReputationPassport } from '@/components/profile/ReputationPassport';
+import { ReputationNote } from '@/components/profile/ReputationNote';
 import { Wall } from '@/components/profile/Wall';
 import { FollowButton } from '@/components/profile/FollowButton';
 import { ShareButton } from '@/components/profile/ShareButton';
@@ -155,6 +156,18 @@ export default async function ProfilePage({
           </div>
         </div>
       </header>
+
+      {/* Dominant Reputation Note band — the first credibility signal a
+          visitor reads, directly under the identity hero (UX Uplift §3.1). */}
+      <div style={{ marginTop: 20 }}>
+        <ReputationNote
+          size="hero"
+          note={data.reputationNote?.note ?? null}
+          nResolved={data.reputationNote?.nResolved ?? data.resolvedCount}
+          percentile={data.reputationNote?.percentile ?? null}
+          coverage={data.reputationNote?.coverage ?? null}
+        />
+      </div>
 
       <div style={{ display: 'flex', gap: 28, marginTop: 28, flexWrap: 'wrap' }}>
         <aside style={{ width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>

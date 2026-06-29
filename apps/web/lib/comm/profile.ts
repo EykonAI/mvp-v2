@@ -46,6 +46,13 @@ export interface WallPost {
   created_at: string;
 }
 
+export interface ReputationNoteSummary {
+  note: number | null; // 0–100, or null while calibrating
+  nResolved: number;
+  percentile: number | null; // 0..1, 1 = best
+  coverage: number | null; // 0..1
+}
+
 export interface ProfileData {
   profile: PublicProfile;
   predictions: ProfilePrediction[];
@@ -54,6 +61,7 @@ export interface ProfileData {
   followers: number;
   following: number;
   reputation: ReputationData | null;
+  reputationNote: ReputationNoteSummary | null;
 }
 
 const HANDLE_RE = /^[A-Za-z0-9_]{1,32}$/;
@@ -146,6 +154,7 @@ export async function loadProfile(param: string): Promise<ProfileData | null> {
   const wall = await loadWall(supabase, row.id);
   const [followers, following] = await loadFollowCounts(supabase, row.id);
   const reputation = await loadReputation(supabase, row.id);
+  const reputationNote = await loadReputationNote(supabase, row.id);
 
   return {
     profile: {
@@ -167,6 +176,7 @@ export async function loadProfile(param: string): Promise<ProfileData | null> {
     followers,
     following,
     reputation,
+    reputationNote,
   };
 }
 
@@ -254,6 +264,49 @@ async function loadReputation(
       percentile: all.rank_percentile == null ? null : Number(all.rank_percentile),
       domains,
       spark: [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+// The owner's Reputation Note (§3.2) — read from the materialised '_all'
+// row, gated by reputation_opt_in and shown (n_resolved >= MIN_SAMPLE). When
+// no shown row exists the page renders the honest "Calibrating (n/10)" state
+// from resolvedCount, so null here is the cold-start, not an error.
+async function loadReputationNote(
+  supabase: ReturnType<typeof createServerSupabase>,
+  authorId: string,
+): Promise<ReputationNoteSummary | null> {
+  try {
+    const { data: prof } = await supabase
+      .from('user_profiles')
+      .select('reputation_opt_in')
+      .eq('id', authorId)
+      .maybeSingle();
+    if (prof && (prof as { reputation_opt_in?: boolean }).reputation_opt_in === false) return null;
+
+    const { data, error } = await supabase
+      .from('user_reputation')
+      .select('reputation_note, rank_percentile, coverage_ratio, n_resolved')
+      .eq('author_id', authorId)
+      .eq('feature', '_all')
+      .eq('shown', true)
+      .maybeSingle();
+    if (error || !data) return null;
+
+    const row = data as {
+      reputation_note: number | null;
+      rank_percentile: number | null;
+      coverage_ratio: number | null;
+      n_resolved: number | null;
+    };
+    if (row.reputation_note == null) return null;
+    return {
+      note: Number(row.reputation_note),
+      nResolved: Number(row.n_resolved ?? 0),
+      percentile: row.rank_percentile == null ? null : Number(row.rank_percentile),
+      coverage: row.coverage_ratio == null ? null : Number(row.coverage_ratio),
     };
   } catch {
     return null;
