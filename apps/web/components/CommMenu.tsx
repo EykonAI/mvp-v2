@@ -169,9 +169,22 @@ export default function CommMenu() {
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-haspopup="menu"
-        style={{ ...TAB_BASE_STYLE, ...activeStyle(active) }}
+        style={{
+          ...TAB_BASE_STYLE,
+          ...activeStyle(active),
+          // Keep the caret inline with the label (never wrapping under it) so
+          // COMM stays a single-line tab, homogeneous with the other pillars.
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 5,
+          whiteSpace: 'nowrap',
+          flexShrink: 0,
+        }}
       >
-        COMM {open ? '▴' : '▾'}
+        COMM
+        <span aria-hidden style={{ fontSize: 9, lineHeight: 1, opacity: 0.9 }}>
+          {open ? '▴' : '▾'}
+        </span>
       </button>
       {open && (
         <div role="menu" style={menu}>
