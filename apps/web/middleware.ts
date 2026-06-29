@@ -37,9 +37,6 @@ async function runAuthFlow(request: NextRequest): Promise<NextResponse> {
   // restructure can land before Supabase Auth is wired in Phase 2.
   if (!authEnabled) return NextResponse.next();
 
-  // Only gate (app) paths. Marketing, auth, and static routes are public.
-  if (!isAppPath(request.nextUrl.pathname)) return NextResponse.next();
-
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseAnon) return NextResponse.next();
@@ -63,11 +60,23 @@ async function runAuthFlow(request: NextRequest): Promise<NextResponse> {
     },
   });
 
+  // Refresh the session on EVERY matched route — not only gated (app) paths.
+  // Supabase ROTATES the refresh token on refresh, and ONLY middleware can
+  // persist the rotated cookie: server components use a no-op cookie writer
+  // (getServerSupabase in lib/auth/session). So if a non-app page that reads
+  // the session — COMM (/me, /radar, /leaderboard, /rooms, /spaces, /messages,
+  // /u/<handle>), NOTIF (/notif), or /pricing — is the first to call getUser()
+  // after the access token expired, the rotation is lost and the NEXT request
+  // is silently logged out. Running getUser() here persists the rotation for
+  // the whole authenticated surface, fixing that logout.
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
+  // Gate only the protected (app) surfaces. Other pages are public (/u, /pricing)
+  // or self-gate in-page (the COMM/NOTIF pages redirect to signin themselves) —
+  // all still benefit from the cookie refresh above.
+  if (!user && isAppPath(request.nextUrl.pathname)) {
     // Build the redirect against NEXT_PUBLIC_APP_URL, not a clone of
     // request.nextUrl — the web service binds to 0.0.0.0:3000 and that leaks
     // into request-derived origins on Railway, producing redirects the
