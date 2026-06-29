@@ -32,12 +32,25 @@ export interface PublicProfile {
 
 export interface ProfilePrediction {
   public_id: string | null;
-  statement: string | null;
-  predicted_mean: number | null;
+  statement: string | null; // masked (null) while a call is sealed to non-owners
+  predicted_mean: number | null; // masked (null) while sealed to non-owners
   observed_value: number | null;
   brier: number | null;
+  brierSkill: number | null; // per-call skill vs baseline (resolved only)
   resolves_at: string | null;
-  status: 'resolved' | 'open';
+  horizonHours: number | null;
+  baseline: number | null;
+  commitHash: string | null; // shown only for sealed calls (the integrity seal)
+  status: 'resolved' | 'sealed' | 'open';
+}
+
+export interface ProfileSpace {
+  spaceId: string;
+  title: string | null;
+  blurb: string | null;
+  status: string; // 'live' | 'paused'
+  priceUsdc: number | null;
+  cadence: string | null;
 }
 
 export interface WallPost {
@@ -60,6 +73,7 @@ export interface ProfileData {
   wall: WallPost[];
   followers: number;
   following: number;
+  spaces: ProfileSpace[];
   reputation: ReputationData | null;
   reputationNote: ReputationNoteSummary | null;
 }
@@ -97,11 +111,15 @@ interface PredictionRow {
   public_id: string | null;
   statement: string | null;
   predicted_distribution: Record<string, unknown> | null;
+  visibility: string | null;
+  commit_hash: string | null;
+  target_window_hours: number | null;
+  baseline_mean: number | null;
   resolves_at: string | null;
   prediction_outcomes: OutcomeRow[] | OutcomeRow | null;
 }
 
-export async function loadProfile(param: string): Promise<ProfileData | null> {
+export async function loadProfile(param: string, viewerId?: string): Promise<ProfileData | null> {
   if (!isValidProfileParam(param)) return null;
   const supabase = createServerSupabase();
 
@@ -124,35 +142,46 @@ export async function loadProfile(param: string): Promise<ProfileData | null> {
   }
   if (!row) return null;
 
+  const isOwnerView = !!viewerId && viewerId === row.id;
   const { data: predData } = await supabase
     .from('predictions_register')
     .select(
-      'public_id, statement, predicted_distribution, resolves_at, prediction_outcomes(observed_value, brier)',
+      'public_id, statement, predicted_distribution, visibility, commit_hash, target_window_hours, baseline_mean, resolves_at, prediction_outcomes(observed_value, brier)',
     )
     .eq('author_id', row.id)
     .order('resolves_at', { ascending: false })
     .limit(50);
 
-  const predictions: ProfilePrediction[] = ((predData as PredictionRow[] | null) ?? []).map(
-    (pr) => {
-      const outcome = Array.isArray(pr.prediction_outcomes)
-        ? pr.prediction_outcomes[0]
-        : pr.prediction_outcomes;
-      const meanRaw = pr.predicted_distribution?.mean;
-      return {
-        public_id: pr.public_id,
-        statement: pr.statement,
-        predicted_mean: meanRaw == null ? null : toNum(meanRaw),
-        observed_value: outcome ? toNum(outcome.observed_value) : null,
-        brier: outcome ? toNum(outcome.brier) : null,
-        resolves_at: pr.resolves_at,
-        status: outcome ? 'resolved' : 'open',
-      };
-    },
-  );
+  const predictions: ProfilePrediction[] = ((predData as PredictionRow[] | null) ?? []).map((pr) => {
+    const outcome = Array.isArray(pr.prediction_outcomes) ? pr.prediction_outcomes[0] : pr.prediction_outcomes;
+    const resolved = !!outcome && outcome.brier != null && outcome.observed_value != null;
+    // A still-'committed' call withholds its plaintext (statement, mean) from
+    // anyone but the author — mirrors the predictions_public view's seal.
+    const sealed = !resolved && pr.visibility === 'committed';
+    const masked = sealed && !isOwnerView;
+    const meanRaw = pr.predicted_distribution?.mean;
+    const predicted_mean = masked || meanRaw == null ? null : toNum(meanRaw);
+    const observed_value = outcome ? toNum(outcome.observed_value) : null;
+    const brier = outcome ? toNum(outcome.brier) : null;
+    const baseline = pr.baseline_mean == null ? null : toNum(pr.baseline_mean);
+    return {
+      public_id: pr.public_id,
+      statement: masked ? null : pr.statement,
+      predicted_mean,
+      observed_value,
+      brier,
+      brierSkill: resolved ? perCallSkill(brier, baseline, observed_value) : null,
+      resolves_at: pr.resolves_at,
+      horizonHours: pr.target_window_hours == null ? null : Number(pr.target_window_hours),
+      baseline,
+      commitHash: sealed ? pr.commit_hash : null,
+      status: resolved ? 'resolved' : sealed ? 'sealed' : 'open',
+    };
+  });
 
   const wall = await loadWall(supabase, row.id);
   const [followers, following] = await loadFollowCounts(supabase, row.id);
+  const spaces = await loadSpaces(supabase, row.id);
   const reputation = await loadReputation(supabase, row.id);
   const reputationNote = await loadReputationNote(supabase, row.id);
 
@@ -175,6 +204,7 @@ export async function loadProfile(param: string): Promise<ProfileData | null> {
     wall,
     followers,
     following,
+    spaces,
     reputation,
     reputationNote,
   };
@@ -227,6 +257,58 @@ async function loadFollowCounts(
   } catch {
     return [0, 0];
   }
+}
+
+// Public spaces this analyst runs (Profile §3.1 — the Spaces tab + the
+// four-stat strip count). Live + paused only (drafts/archived aren't public).
+// Title lives on the backing comm_rooms row. Fail-soft → [] so a missing
+// table never regresses the page.
+async function loadSpaces(
+  supabase: ReturnType<typeof createServerSupabase>,
+  creatorId: string,
+): Promise<ProfileSpace[]> {
+  try {
+    const { data, error } = await supabase
+      .from('comm_spaces')
+      .select('space_id, blurb, status, price_usdc, cadence')
+      .eq('creator_id', creatorId)
+      .in('status', ['live', 'paused']);
+    if (error || !data || data.length === 0) return [];
+    const rows = data as {
+      space_id: string;
+      blurb: string | null;
+      status: string;
+      price_usdc: number | null;
+      cadence: string | null;
+    }[];
+    const { data: roomData } = await supabase
+      .from('comm_rooms')
+      .select('id, title')
+      .in('id', rows.map((r) => r.space_id));
+    const titles = new Map(
+      ((roomData as { id: string; title: string | null }[] | null) ?? []).map((r) => [r.id, r.title]),
+    );
+    return rows.map((s) => ({
+      spaceId: s.space_id,
+      title: titles.get(s.space_id) ?? null,
+      blurb: s.blurb,
+      status: s.status,
+      priceUsdc: s.price_usdc == null ? null : Number(s.price_usdc),
+      cadence: s.cadence,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// Per-call brier-skill = 1 − brier / brier(baseline), bounded to [-1, 1]; null
+// unless fully resolved. Mirrors the cron's per-call skill (lib reputationNote).
+function perCallSkill(brier: number | null, baseline: number | null, observed: number | null): number | null {
+  if (brier == null || baseline == null || observed == null) return null;
+  const baseBrier = (baseline - observed) ** 2;
+  if (baseBrier <= 1e-9) return brier <= 1e-9 ? 0 : -1;
+  const skill = 1 - brier / baseBrier;
+  return Math.round(Math.max(-1, Math.min(1, skill)) * 1000) / 1000;
 }
 
 // Owner reputation for the Calibration Passport (§9 A2). Respects
