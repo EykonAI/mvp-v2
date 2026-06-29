@@ -3,7 +3,13 @@ import type { CSSProperties, ReactNode } from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { commProfilesEnabled } from '@/lib/flags';
-import { loadProfile, isFollowing, type ProfilePrediction, type ProfileLink } from '@/lib/comm/profile';
+import {
+  loadProfile,
+  isFollowing,
+  type ProfilePrediction,
+  type ProfileLink,
+  type ProfileSpace,
+} from '@/lib/comm/profile';
 import { isBlockedByMe } from '@/lib/comm/moderation';
 import { personaLabel } from '@/lib/intelligence-analyst/personas';
 import { ReputationPassport } from '@/components/profile/ReputationPassport';
@@ -63,12 +69,12 @@ export default async function ProfilePage({
   searchParams?: SearchParams;
 }) {
   if (!commProfilesEnabled()) notFound();
-  const data = await loadProfile(params.handle);
+  const viewer = await getCurrentUser();
+  const data = await loadProfile(params.handle, viewer?.id);
   if (!data) notFound();
 
   const p = data.profile;
   const slug = p.handle ?? p.public_id ?? params.handle;
-  const viewer = await getCurrentUser();
   const isOwner = !!viewer && viewer.id === p.id;
   const initialFollowing = viewer && !isOwner ? await isFollowing(viewer.id, p.id) : false;
   const viewerBlocked = viewer && !isOwner ? await isBlockedByMe(viewer.id, p.id) : false;
@@ -79,25 +85,37 @@ export default async function ProfilePage({
 
   return (
     <article style={{ maxWidth: 980, margin: '0 auto', padding: '36px 24px 72px' }}>
-      {p.cover_url && (
+      {/* Cover strip — a subtle teal-tinted default when none is set (§3.1). */}
+      <div
+        style={{
+          height: 140,
+          borderRadius: 10,
+          background: p.cover_url
+            ? `center/cover no-repeat url("${p.cover_url}")`
+            : 'linear-gradient(118deg, var(--teal-glow), var(--bg-panel) 72%)',
+          border: '1px solid var(--rule)',
+        }}
+      />
+      <header
+        style={{
+          display: 'flex',
+          gap: 20,
+          alignItems: 'flex-start',
+          flexWrap: 'wrap',
+          marginTop: 16,
+          paddingLeft: 4,
+        }}
+      >
+        {/* Framed avatar, lifted to overlap the cover's bottom edge. */}
         <div
           style={{
-            height: 132,
-            borderRadius: 10,
-            marginBottom: 20,
-            background: `center/cover no-repeat url("${p.cover_url}")`,
-            border: '1px solid var(--rule)',
-          }}
-        />
-      )}
-      <header style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-        <div
-          style={{
-            width: 76,
-            height: 76,
+            width: 84,
+            height: 84,
             borderRadius: '50%',
             flexShrink: 0,
-            border: '1px solid var(--rule)',
+            marginTop: -56,
+            border: '3px solid var(--bg-void)',
+            boxShadow: '0 0 0 1px var(--rule)',
             background: p.avatar_url
               ? `center/cover no-repeat url("${p.avatar_url}")`
               : 'var(--bg-raised)',
@@ -106,7 +124,7 @@ export default async function ProfilePage({
             justifyContent: 'center',
             color: 'var(--ink-faint)',
             fontFamily: 'var(--f-display)',
-            fontSize: 26,
+            fontSize: 28,
           }}
         >
           {p.avatar_url ? '' : initials}
@@ -132,6 +150,7 @@ export default async function ProfilePage({
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
             <Pill>{personaLabel(p.preferred_persona ?? 'analyst')}</Pill>
             {p.is_founding_analyst && <Pill tone="teal">Founding Analyst</Pill>}
+            {data.spaces.length > 0 && <Pill tone="teal">Creator</Pill>}
             {joined && (
               <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--ink-faint)' }}>
                 joined {joined}
@@ -157,9 +176,19 @@ export default async function ProfilePage({
         </div>
       </header>
 
+      {/* Four-stat strip (§3.1). */}
+      <StatStrip
+        stats={[
+          { label: 'Followers', value: fmtCount(data.followers) },
+          { label: 'Following', value: fmtCount(data.following) },
+          { label: 'Spaces', value: String(data.spaces.length) },
+          { label: 'Resolved', value: String(data.resolvedCount) },
+        ]}
+      />
+
       {/* Dominant Reputation Note band — the first credibility signal a
           visitor reads, directly under the identity hero (UX Uplift §3.1). */}
-      <div style={{ marginTop: 20 }}>
+      <div style={{ marginTop: 18 }}>
         <ReputationNote
           size="hero"
           note={data.reputationNote?.note ?? null}
@@ -172,14 +201,6 @@ export default async function ProfilePage({
       <div style={{ display: 'flex', gap: 28, marginTop: 28, flexWrap: 'wrap' }}>
         <aside style={{ width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <ReputationPassport resolvedCount={data.resolvedCount} reputation={data.reputation} />
-          <div style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--ink-dim)', lineHeight: 1.8 }}>
-            <span style={{ color: 'var(--ink)' }}>{fmtCount(data.followers)}</span> followers ·{' '}
-            <span style={{ color: 'var(--ink)' }}>{fmtCount(data.following)}</span> following
-            <br />
-            {data.resolvedCount} resolved · {data.predictions.length} call
-            {data.predictions.length === 1 ? '' : 's'}
-            {joined ? ` · joined ${joined}` : ''}
-          </div>
         </aside>
 
         <main style={{ flex: 1, minWidth: 280 }}>
@@ -218,12 +239,7 @@ export default async function ProfilePage({
               </>
             )}
             {tab === 'wall' && <Wall initialPosts={data.wall} isOwner={isOwner} />}
-            {tab === 'spaces' && (
-              <ComingSoon
-                title="Spaces"
-                note="Free & paid spaces this analyst runs — arriving with the COMM rollout."
-              />
-            )}
+            {tab === 'spaces' && <SpacesTab spaces={data.spaces} isOwner={isOwner} />}
             {tab === 'about' && (
               <AboutTab
                 bio={p.bio}
@@ -293,32 +309,6 @@ function SoonChip({ children }: { children: ReactNode }) {
   );
 }
 
-function ComingSoon({ title, note }: { title: string; note: string }) {
-  return (
-    <div
-      style={{
-        padding: '28px 20px',
-        textAlign: 'center',
-        border: '1px dashed var(--rule)',
-        borderRadius: 6,
-        color: 'var(--ink-faint)',
-      }}
-    >
-      <div
-        style={{
-          fontFamily: 'var(--f-display)',
-          fontSize: 15,
-          color: 'var(--ink-dim)',
-          marginBottom: 6,
-        }}
-      >
-        {title}
-      </div>
-      <div style={{ fontSize: 12 }}>{note}</div>
-    </div>
-  );
-}
-
 function AboutTab({
   bio,
   links,
@@ -373,20 +363,20 @@ function AboutTab({
   );
 }
 
+const emptyBox: CSSProperties = {
+  padding: '28px 20px',
+  textAlign: 'center',
+  border: '1px dashed var(--rule)',
+  borderRadius: 6,
+  color: 'var(--ink-faint)',
+  fontSize: 12.5,
+  lineHeight: 1.6,
+};
+
 function PredictionsTab({ predictions }: { predictions: ProfilePrediction[] }) {
   if (predictions.length === 0) {
     return (
-      <div
-        style={{
-          padding: '28px 20px',
-          textAlign: 'center',
-          border: '1px dashed var(--rule)',
-          borderRadius: 6,
-          color: 'var(--ink-faint)',
-          fontSize: 12.5,
-          lineHeight: 1.6,
-        }}
-      >
+      <div style={emptyBox}>
         No published predictions yet. When this analyst makes a call it’s sealed, auto-resolved
         against live data, and scored here.
       </div>
@@ -394,23 +384,6 @@ function PredictionsTab({ predictions }: { predictions: ProfilePrediction[] }) {
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      <div
-        style={{
-          display: 'flex',
-          fontFamily: 'var(--f-mono)',
-          fontSize: 10,
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
-          color: 'var(--ink-faint)',
-          paddingBottom: 8,
-          borderBottom: '1px solid var(--rule)',
-        }}
-      >
-        <span style={{ flex: 1 }}>Prediction</span>
-        <span style={{ width: 48, textAlign: 'right' }}>p</span>
-        <span style={{ width: 92, textAlign: 'right' }}>Outcome</span>
-        <span style={{ width: 64, textAlign: 'right' }}>Brier</span>
-      </div>
       {predictions.map((pr, i) => (
         <PredictionRowView key={pr.public_id ?? i} p={pr} />
       ))}
@@ -418,58 +391,179 @@ function PredictionsTab({ predictions }: { predictions: ProfilePrediction[] }) {
   );
 }
 
+// A prediction row across its three states: a resolved call shows the
+// outcome + per-call brier-skill; a sealed (commit-reveal) call shows only
+// the hash + resolve date (plaintext withheld); an open call shows its
+// forecast and resolve date. Provable, not performative.
 function PredictionRowView({ p }: { p: ProfilePrediction }) {
-  const resolved = p.status === 'resolved' && p.observed_value != null && p.predicted_mean != null;
-  const correct = resolved
-    ? Math.abs((p.predicted_mean as number) - (p.observed_value as number)) <
-      Math.abs(1 - (p.predicted_mean as number) - (p.observed_value as number))
-    : false;
-  const dot = !resolved ? 'var(--ink-faint)' : correct ? 'var(--green)' : 'var(--red)';
-  const label = !resolved ? 'OPEN' : correct ? 'WIN' : 'MISS';
-  const color = !resolved ? 'var(--ink-faint)' : correct ? 'var(--green)' : 'var(--red)';
+  const win = p.status === 'resolved' && isWin(p);
+  const chip =
+    p.status === 'resolved'
+      ? { label: win ? 'WIN' : 'MISS', color: win ? 'var(--green)' : 'var(--red)' }
+      : p.status === 'sealed'
+        ? { label: 'SEALED', color: 'var(--amber)' }
+        : { label: 'OPEN', color: 'var(--ink-dim)' };
+
+  const meta: string[] = [];
+  if (p.horizonHours != null) meta.push(`${fmtHorizon(p.horizonHours)} horizon`);
+  if (p.status === 'sealed') {
+    if (p.commitHash) meta.push(`commit ${p.commitHash.slice(0, 10)}…`);
+    if (p.resolves_at) meta.push(`resolves ${fmtDate(p.resolves_at)}`);
+  } else {
+    if (p.predicted_mean != null) meta.push(`p ${p.predicted_mean.toFixed(2)}`);
+    if (p.baseline != null) meta.push(`base ${p.baseline.toFixed(2)}`);
+    if (p.status === 'resolved') {
+      if (p.observed_value != null) meta.push(`obs ${p.observed_value.toFixed(2)}`);
+      if (p.brierSkill != null) meta.push(`skill ${fmtSkill(p.brierSkill)}`);
+    } else if (p.resolves_at) {
+      meta.push(`resolves ${fmtDate(p.resolves_at)}`);
+    }
+  }
+
+  const sealedNoText = p.status === 'sealed' && !p.statement;
+  return (
+    <div style={{ padding: '12px 0', borderBottom: '1px solid var(--rule-soft)' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+        <span
+          style={{
+            flex: 1,
+            fontSize: 13,
+            lineHeight: 1.45,
+            color: sealedNoText ? 'var(--ink-dim)' : 'var(--ink)',
+            fontStyle: sealedNoText ? 'italic' : 'normal',
+          }}
+        >
+          {p.status === 'sealed' && <span style={{ marginRight: 6 }}>🔒</span>}
+          {sealedNoText ? 'Sealed call — plaintext revealed on resolution' : p.statement ?? '—'}
+        </span>
+        <span
+          style={{
+            fontFamily: 'var(--f-mono)',
+            fontSize: 10,
+            letterSpacing: '0.08em',
+            color: chip.color,
+            border: `1px solid ${chip.color}`,
+            borderRadius: 999,
+            padding: '2px 8px',
+            flexShrink: 0,
+          }}
+        >
+          {chip.label}
+        </span>
+      </div>
+      {meta.length > 0 && (
+        <div
+          style={{
+            fontFamily: 'var(--f-mono)',
+            fontSize: 10.5,
+            color: 'var(--ink-faint)',
+            marginTop: 5,
+            letterSpacing: '0.02em',
+          }}
+        >
+          {meta.join('  ·  ')}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A resolved call "wins" if it beat the baseline (skill > 0); fall back to a
+// closer-than-the-complement check when no baseline skill is available.
+function isWin(p: ProfilePrediction): boolean {
+  if (p.brierSkill != null) return p.brierSkill > 0;
+  if (p.predicted_mean == null || p.observed_value == null) return false;
+  return Math.abs(p.predicted_mean - p.observed_value) < Math.abs(1 - p.predicted_mean - p.observed_value);
+}
+
+function SpacesTab({ spaces, isOwner }: { spaces: ProfileSpace[]; isOwner: boolean }) {
+  if (spaces.length === 0) {
+    return (
+      <div style={emptyBox}>
+        {isOwner
+          ? 'You don’t run any public spaces yet — create one from COMM ▸ Spaces.'
+          : 'This analyst doesn’t run any public spaces yet.'}
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {spaces.map((s) => (
+        <Link
+          key={s.spaceId}
+          href={`/spaces/${s.spaceId}`}
+          prefetch={false}
+          style={{
+            display: 'block',
+            textDecoration: 'none',
+            background: 'var(--bg-panel)',
+            border: '1px solid var(--rule)',
+            borderRadius: 8,
+            padding: '14px 16px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+            <span style={{ flex: 1, fontFamily: 'var(--f-display)', fontSize: 15, color: 'var(--ink)' }}>
+              {s.title ?? 'Untitled space'}
+            </span>
+            {s.status === 'paused' && (
+              <span
+                style={{
+                  fontFamily: 'var(--f-mono)',
+                  fontSize: 9.5,
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                  color: 'var(--amber)',
+                  border: '1px solid var(--amber)',
+                  borderRadius: 999,
+                  padding: '2px 7px',
+                }}
+              >
+                Paused
+              </span>
+            )}
+          </div>
+          {s.blurb && (
+            <p style={{ fontSize: 12.5, color: 'var(--ink-dim)', margin: '6px 0 0', lineHeight: 1.5 }}>{s.blurb}</p>
+          )}
+          <div style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--teal)', marginTop: 8 }}>
+            {s.priceUsdc != null && s.priceUsdc > 0 ? `$${fmtUsdc(s.priceUsdc)} USDC / ${s.cadence ?? 'month'}` : 'Free'}
+          </div>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+function StatStrip({ stats }: { stats: { label: string; value: string }[] }) {
   return (
     <div
       style={{
         display: 'flex',
-        alignItems: 'center',
-        padding: '11px 0',
-        borderBottom: '1px solid var(--rule-soft)',
-        fontSize: 12.5,
-        color: 'var(--ink)',
+        marginTop: 18,
+        border: '1px solid var(--rule)',
+        borderRadius: 8,
+        overflow: 'hidden',
+        background: 'var(--bg-panel)',
       }}
     >
-      <span style={{ flex: 1, paddingRight: 10 }}>{p.statement ?? '—'}</span>
-      <span
-        style={{ width: 48, textAlign: 'right', fontFamily: 'var(--f-mono)', color: 'var(--ink-dim)' }}
-      >
-        {p.predicted_mean == null ? '—' : p.predicted_mean.toFixed(2)}
-      </span>
-      <span
-        style={{
-          width: 92,
-          textAlign: 'right',
-          fontFamily: 'var(--f-mono)',
-          fontSize: 11,
-          color,
-        }}
-      >
-        <span
-          style={{
-            display: 'inline-block',
-            width: 7,
-            height: 7,
-            borderRadius: '50%',
-            background: dot,
-            marginRight: 6,
-          }}
-        />
-        {label}
-      </span>
-      <span
-        style={{ width: 64, textAlign: 'right', fontFamily: 'var(--f-mono)', color: 'var(--ink-dim)' }}
-      >
-        {p.brier == null ? '—' : p.brier.toFixed(3)}
-      </span>
+      {stats.map((s, i) => (
+        <div key={s.label} style={{ flex: 1, padding: '12px 16px', borderLeft: i ? '1px solid var(--rule)' : undefined }}>
+          <div style={{ fontFamily: 'var(--f-display)', fontSize: 19, color: 'var(--ink)' }}>{s.value}</div>
+          <div
+            style={{
+              fontFamily: 'var(--f-mono)',
+              fontSize: 9.5,
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-dim)',
+              marginTop: 3,
+            }}
+          >
+            {s.label}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -477,4 +571,21 @@ function PredictionRowView({ p }: { p: ProfilePrediction }) {
 function fmtCount(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`;
   return String(n);
+}
+
+function fmtUsdc(n: number): string {
+  return n % 1 === 0 ? String(n) : n.toFixed(2);
+}
+
+function fmtHorizon(hours: number): string {
+  if (hours < 48) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
+function fmtSkill(v: number): string {
+  return `${v > 0 ? '+' : ''}${v.toFixed(2)}`;
+}
+
+function fmtDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
