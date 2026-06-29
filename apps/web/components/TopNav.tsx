@@ -8,6 +8,7 @@ import ConvergenceBadge from '@/components/ConvergenceBadge';
 import LogoutButton from '@/components/LogoutButton';
 import CommMenu from '@/components/CommMenu';
 import AccountMenu from '@/components/AccountMenu';
+import { TAB_BASE_STYLE, activeStyle } from '@/components/navTabStyles';
 
 interface TopNavProps {
   chatOpen?: boolean;
@@ -17,16 +18,17 @@ interface TopNavProps {
 /**
  * Global top bar. Brief §3.1 split the bar into two zones:
  *   • Left: brand mark, "Geopolitical Intelligence" tagline,
- *           WELCOME greeting, LIVE pill.
- *   • Right: four-tab cluster (GLOBE, INTEL, NOTIF, AI CHAT) plus
- *           a bell glyph. The cluster occupies a column whose width
- *           equals the AI Chat panel — driven off
- *           --chat-panel-width in globals.css — so the GLOBE tab's
- *           left edge sits vertically above the panel's left edge.
+ *           WELCOME greeting, LIVE pill, trust badges.
+ *   • Right: the five-pillar cluster — COMM ▾ · GLOBE · INTEL · NOTIF ·
+ *           AI ANALYST — plus a bell glyph. COMM (a dropdown) sits just
+ *           left of a fixed-width inner cluster whose width equals the
+ *           AI Chat panel (--chat-panel-width in globals.css), so the
+ *           GLOBE tab's left edge stays vertically above the panel's
+ *           left edge even with COMM prepended (COMM UX Uplift brief §2.1a).
  *
- * The first three tabs are <Link>s; AI CHAT is a <button> that
- * toggles the side panel via the parent-supplied callback. All four
- * share visual treatment so the cluster reads as one unit.
+ * GLOBE/INTEL/NOTIF are <Link>s; AI ANALYST is a <button> toggling the
+ * side panel; COMM is a dropdown styled as a peer tab. All share
+ * TAB_BASE_STYLE (navTabStyles.ts) so the cluster reads as one unit.
  */
 export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
   const pathname = usePathname();
@@ -107,7 +109,6 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
       </span>
 
       <WelcomeGreeting />
-      <CommMenu />
       <AccountMenu />
       <LogoutButton />
 
@@ -144,64 +145,46 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
       <CalibrationBadge />
       <ConvergenceBadge />
 
-      {/* Right-side tab cluster — width matches the AI Chat panel
-          column so GLOBE's left edge sits directly above the panel's
-          left edge. */}
+      {/* Five-pillar cluster. COMM ▾ sits immediately left of the
+          fixed-width inner cluster so all five pillars read as one set,
+          while the inner cluster keeps its --chat-panel-width alignment
+          (GLOBE's left edge stays above the chat panel). */}
       <div
         style={{
           marginLeft: 'auto',
-          width: 'var(--chat-panel-width)',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
           gap: 6,
-          paddingLeft: 8,
-          paddingRight: 16,
         }}
       >
-        <TabLink href="/app" label="Globe" active={isGlobe} />
-        <TabLink href="/intel" label="Intel" active={isIntel} />
-        <TabLink href="/notif" label="Notif" active={isNotif} />
-        <NotificationBell />
-        <TabButton
-          label="AI Chat"
-          active={!!chatOpen}
-          onClick={onChatToggle}
-          disabled={!onChatToggle}
-        />
+        <CommMenu />
+        {/* Inner cluster — width matches the AI Chat panel column so
+            GLOBE's left edge sits directly above the panel's left edge. */}
+        <div
+          style={{
+            width: 'var(--chat-panel-width)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 6,
+            paddingLeft: 8,
+            paddingRight: 16,
+          }}
+        >
+          <TabLink href="/app" label="Globe" active={isGlobe} />
+          <TabLink href="/intel" label="Intel" active={isIntel} />
+          <TabLink href="/notif" label="Notif" active={isNotif} />
+          <NotificationBell />
+          <TabButton
+            label="AI Analyst"
+            active={!!chatOpen}
+            onClick={onChatToggle}
+            disabled={!onChatToggle}
+          />
+        </div>
       </div>
     </nav>
   );
-}
-
-const TAB_BASE_STYLE: React.CSSProperties = {
-  fontFamily: 'var(--f-mono)',
-  fontSize: 11,
-  letterSpacing: '0.14em',
-  textTransform: 'uppercase',
-  padding: '6px 14px',
-  borderRadius: 2,
-  border: '1px solid transparent',
-  background: 'transparent',
-  textDecoration: 'none',
-  cursor: 'pointer',
-  flex: '0 1 auto',
-};
-
-function activeStyle(active: boolean): React.CSSProperties {
-  return active
-    ? {
-        color: 'var(--bg-void)',
-        background: 'var(--teal)',
-        borderColor: 'var(--teal)',
-        fontWeight: 500,
-      }
-    : {
-        color: 'var(--ink-dim)',
-        background: 'transparent',
-        borderColor: 'var(--rule-strong)',
-        fontWeight: 400,
-      };
 }
 
 function TabLink({ href, label, active }: { href: string; label: string; active: boolean }) {
