@@ -7,6 +7,7 @@ import CalibrationBadge from '@/components/CalibrationBadge';
 import ConvergenceBadge from '@/components/ConvergenceBadge';
 import LogoutButton from '@/components/LogoutButton';
 import CommMenu from '@/components/CommMenu';
+import BriefsMenu from '@/components/BriefsMenu';
 import AccountMenu from '@/components/AccountMenu';
 import { TAB_BASE_STYLE, activeStyle } from '@/components/navTabStyles';
 
@@ -166,6 +167,7 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
         }}
       >
         <CommMenu />
+        <BriefsMenu />
         {/* Inner cluster — width matches the AI Chat panel column so
             GLOBE's left edge sits directly above the panel's left edge. */}
         <div
