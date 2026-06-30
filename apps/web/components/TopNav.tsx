@@ -21,12 +21,10 @@ interface TopNavProps {
  *   • Left: brand mark, "Geopolitical Intelligence" tagline, WELCOME
  *           greeting, a stacked Account/Log-out control, LIVE pill, the
  *           Calibration + Convergence trust badges, and the notification bell.
- *   • Right: the five-pillar cluster — COMM ▾ · GLOBE · INTEL · NOTIF ·
- *           AI ANALYST (the bell now lives by the trust badges so these read
- *           as five homogeneous tabs). COMM (a dropdown) sits just left of a
- *           fixed-width inner cluster whose width equals the AI Chat panel
- *           (--chat-panel-width in globals.css), so the GLOBE tab's left edge
- *           stays vertically above the panel's left edge (UX Uplift §2.1a).
+ *   • Right: the six-pillar cluster — COMM ▾ · BRIEFS ▾ · GLOBE · INTEL ·
+ *           NOTIF · AI ANALYST (the bell lives by the trust badges so these
+ *           read as six homogeneous tabs). All six sit in one flex with a
+ *           single uniform gap, so the spacing between pillars is even.
  *
  * GLOBE/INTEL/NOTIF are <Link>s; AI ANALYST is a <button> toggling the
  * side panel; COMM is a dropdown styled as a peer tab. All share
@@ -150,47 +148,35 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
       <CalibrationBadge />
       <ConvergenceBadge />
       {/* Notification bell — sits with the trust badges (between Convergence
-          and the COMM pillar) so the right cluster reads as five homogeneous
-          pillar tabs, not four-plus-a-glyph. */}
+          and the COMM pillar) so the right cluster reads as six homogeneous
+          pillar tabs, not a row-plus-a-glyph. */}
       <NotificationBell />
 
-      {/* Five-pillar cluster. COMM ▾ sits immediately left of the
-          fixed-width inner cluster so all five pillars read as one set,
-          while the inner cluster keeps its --chat-panel-width alignment
-          (GLOBE's left edge stays above the chat panel). */}
+      {/* Six-pillar cluster — COMM ▾ · BRIEFS ▾ · GLOBE · INTEL · NOTIF ·
+          AI ANALYST. One flex with a single uniform gap so the spacing
+          between every pillar is even; paddingRight keeps AI ANALYST clear of
+          the window edge (it was clipped/stretched under the old fixed-width
+          inner cluster + space-between). */}
       <div
         style={{
           marginLeft: 'auto',
           display: 'flex',
           alignItems: 'center',
-          gap: 6,
+          gap: 10,
+          paddingRight: 20,
         }}
       >
         <CommMenu />
         <BriefsMenu />
-        {/* Inner cluster — width matches the AI Chat panel column so
-            GLOBE's left edge sits directly above the panel's left edge. */}
-        <div
-          style={{
-            width: 'var(--chat-panel-width)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 6,
-            paddingLeft: 8,
-            paddingRight: 16,
-          }}
-        >
-          <TabLink href="/app" label="Globe" active={isGlobe} />
-          <TabLink href="/intel" label="Intel" active={isIntel} />
-          <TabLink href="/notif" label="Notif" active={isNotif} />
-          <TabButton
-            label="AI Analyst"
-            active={!!chatOpen}
-            onClick={onChatToggle}
-            disabled={!onChatToggle}
-          />
-        </div>
+        <TabLink href="/app" label="Globe" active={isGlobe} />
+        <TabLink href="/intel" label="Intel" active={isIntel} />
+        <TabLink href="/notif" label="Notif" active={isNotif} />
+        <TabButton
+          label="AI Analyst"
+          active={!!chatOpen}
+          onClick={onChatToggle}
+          disabled={!onChatToggle}
+        />
       </div>
     </nav>
   );

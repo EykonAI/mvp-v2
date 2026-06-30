@@ -106,8 +106,7 @@ const groupHeading: CSSProperties = {
   fontSize: 9.5,
   letterSpacing: '0.18em',
   textTransform: 'uppercase',
-  color: 'var(--ink-dim)',
-  opacity: 0.65,
+  color: 'var(--teal)',
   padding: '8px 10px 4px',
 };
 const badge: CSSProperties = {
