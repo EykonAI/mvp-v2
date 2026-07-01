@@ -87,3 +87,96 @@ export async function loadForecasts(limit = 40): Promise<ForecastBoard> {
     return board;
   }
 }
+
+// ── Per-item detail (the /briefs/forecasts/[id] drill-down) ──────────────────
+
+export interface ForecastDetail {
+  id: string;
+  feature: string;
+  statement: string;
+  predictedMean: number | null;
+  baselineMean: number | null;
+  targetObservable: string | null;
+  targetWindowHours: number | null;
+  issuedAt: string;
+  resolvesAt: string | null;
+  persona: string | null;
+  hash: string | null;
+  publicId: string | null;
+  resolved: boolean;
+  observedValue: number | null;
+  observedAt: string | null;
+  brier: number | null;
+  logLoss: number | null;
+  resolutionSourceUrl: string | null;
+}
+
+interface PredDetailRow {
+  id: string;
+  feature: string;
+  statement: string | null;
+  predicted_distribution: { mean?: number } | null;
+  baseline_mean: number | string | null;
+  target_observable: string | null;
+  target_window_hours: number | null;
+  issued_at: string;
+  resolves_at: string | null;
+  persona: string | null;
+  hash: string | null;
+  public_id: string | null;
+}
+interface OutDetailRow {
+  observed_value: number | string | null;
+  observed_at: string | null;
+  brier: number | string | null;
+  log_loss: number | string | null;
+  resolution_source_url: string | null;
+}
+
+function toNum(v: number | string | null | undefined): number | null {
+  return v != null && v !== '' ? Number(v) : null;
+}
+
+export async function loadForecast(id: string): Promise<ForecastDetail | null> {
+  try {
+    const supabase = createServerSupabase();
+    const { data: p } = await supabase
+      .from('predictions_register')
+      .select('id, feature, statement, predicted_distribution, baseline_mean, target_observable, target_window_hours, issued_at, resolves_at, persona, hash, public_id')
+      .eq('id', id)
+      .in('feature', EYKON_FORECAST_FEATURES)
+      .maybeSingle();
+    if (!p) return null;
+    const pr = p as unknown as PredDetailRow;
+
+    const { data: o } = await supabase
+      .from('prediction_outcomes')
+      .select('observed_value, observed_at, brier, log_loss, resolution_source_url')
+      .eq('prediction_id', id)
+      .maybeSingle();
+    const out = (o ?? null) as unknown as OutDetailRow | null;
+
+    return {
+      id: pr.id,
+      feature: pr.feature,
+      statement: pr.statement ?? '',
+      predictedMean: pr.predicted_distribution && typeof pr.predicted_distribution.mean === 'number' ? pr.predicted_distribution.mean : null,
+      baselineMean: toNum(pr.baseline_mean),
+      targetObservable: pr.target_observable,
+      targetWindowHours: pr.target_window_hours,
+      issuedAt: pr.issued_at,
+      resolvesAt: pr.resolves_at,
+      persona: pr.persona,
+      hash: pr.hash,
+      publicId: pr.public_id,
+      resolved: !!out,
+      observedValue: out ? toNum(out.observed_value) : null,
+      observedAt: out ? out.observed_at : null,
+      brier: out ? toNum(out.brier) : null,
+      logLoss: out ? toNum(out.log_loss) : null,
+      resolutionSourceUrl: out ? out.resolution_source_url : null,
+    };
+  } catch {
+    return null;
+  }
+}

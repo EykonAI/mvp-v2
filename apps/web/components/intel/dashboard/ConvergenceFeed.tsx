@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 
 interface Convergence {
   id: string;
@@ -44,7 +45,9 @@ const DEMO: Convergence[] = [
   },
 ];
 
-export default function ConvergenceFeed() {
+// linkBase — the per-event detail route base; each real card links to
+// `${linkBase}/${id}` (demo/cold-start cards link to the wire itself).
+export default function ConvergenceFeed({ linkBase = '/briefs/convergence' }: { linkBase?: string } = {}) {
   const [data, setData] = useState<Payload | null>(null);
 
   useEffect(() => {
@@ -95,8 +98,13 @@ export default function ConvergenceFeed() {
         </p>
       )}
       {events.map(c => (
-        <article
+        <Link
           key={c.id}
+          href={degraded ? linkBase : `${linkBase}/${c.id}`}
+          prefetch={false}
+          style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}
+        >
+        <article
           style={{
             padding: 10,
             background: 'var(--bg-panel)',
@@ -164,6 +172,7 @@ export default function ConvergenceFeed() {
             })}
           </div>
         </article>
+        </Link>
       ))}
     </div>
   );
