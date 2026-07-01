@@ -5,7 +5,7 @@ import { useState } from 'react';
 // Founder review actions for one newsjack draft. Posts to
 // /api/admin/newsjack/[id]; refreshes the row's visible state on success.
 
-export default function NewsjackActions({ draftId, posts }: { draftId: string; posts: string[] }) {
+export default function NewsjackActions({ draftId, posts, channel }: { draftId: string; posts: string[]; channel: string }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -19,12 +19,13 @@ export default function NewsjackActions({ draftId, posts }: { draftId: string; p
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ action }),
       });
-      const j = (await r.json()) as { error?: string; published?: boolean; detail?: string };
+      const j = (await r.json()) as { error?: string; published?: boolean; mode?: string; url?: string; detail?: string };
       if (!r.ok) {
         setMsg(j.error ?? 'error');
       } else if (action === 'approve') {
         setDone('approved');
-        setMsg(j.published ? 'approved + sent to publish webhook' : `approved — ${j.detail ?? 'post manually'}`);
+        if (j.published) setMsg(j.url ? `approved + posted: ${j.url}` : `approved + published (${j.mode ?? 'ok'})`);
+        else setMsg(`approved — ${j.detail ?? 'post manually'}`);
       } else {
         setDone('rejected');
         setMsg('rejected');
@@ -56,13 +57,13 @@ export default function NewsjackActions({ draftId, posts }: { draftId: string; p
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
       <button style={{ ...btn, borderColor: 'var(--teal)', color: 'var(--teal)' }} disabled={busy || !!done} onClick={() => act('approve')}>
-        Approve + publish
+        {channel === 'x' ? 'Approve + publish' : 'Approve'}
       </button>
       <button style={{ ...btn, borderColor: 'var(--amber)', color: 'var(--amber)' }} disabled={busy || !!done} onClick={() => act('reject')}>
         Reject
       </button>
       <button style={btn} disabled={busy} onClick={copyThread}>
-        Copy thread
+        Copy
       </button>
       {msg && <span style={{ fontSize: 12, color: 'var(--ink-dim)' }}>{msg}</span>}
     </div>
