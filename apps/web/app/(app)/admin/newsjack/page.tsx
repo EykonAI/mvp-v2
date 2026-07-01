@@ -63,6 +63,7 @@ function DraftCard({ d }: { d: ReviewDraft }) {
     <div style={{ border: '1px solid var(--rule)', borderRadius: 10, padding: '16px 18px', background: 'var(--surface, transparent)' }}>
       <div style={{ display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 10 }}>
         <span style={{ ...meta, color: STATUS_COLOR[d.event_status] ?? 'var(--ink-faint)' }}>{d.event_status}</span>
+        <span style={{ ...meta, color: 'var(--ink-dim)' }}>{d.channel}</span>
         <span style={meta}>{d.severity ?? '?'} · {d.domain ?? '?'}</span>
         <span style={meta}>{d.region ?? 'unknown region'}</span>
         {!d.covered && <span style={{ ...meta, color: 'var(--amber)' }}>analytical (not live-covered)</span>}
@@ -85,7 +86,7 @@ function DraftCard({ d }: { d: ReviewDraft }) {
       )}
 
       {isPending ? (
-        <NewsjackActions draftId={d.draft_id} posts={d.posts} />
+        <NewsjackActions draftId={d.draft_id} posts={d.posts} channel={d.channel} />
       ) : (
         <div style={{ ...meta, marginTop: 10 }}>{d.status}</div>
       )}
