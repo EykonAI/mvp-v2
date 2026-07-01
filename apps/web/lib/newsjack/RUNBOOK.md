@@ -40,7 +40,12 @@ Human-in-the-loop: nothing publishes without a founder approval in `/admin/newsj
 | `X_API_KEY` / `X_API_SECRET` / `X_ACCESS_TOKEN` / `X_ACCESS_SECRET` | native X API v2 posting (OAuth 1.0a, app→own account) | optional (else webhook/manual) |
 | `NEWSJACK_PUBLISH_WEBHOOK` | automation URL that posts the thread to X (fallback if no X keys) | optional |
 | `NEWSJACK_DIGEST_WEBHOOK` | where the weekly digest goes (falls back to alert webhook) | optional |
+| `NEWSJACK_ANOMALY_SOURCE` | opt in single anomalies as a source (`on`); OFF by default because anomalies have no public landing page | optional |
 | `FOUNDER_EMAILS` | existing founder allowlist for `/admin/newsjack` | yes (already set) |
+
+## Landing pages (where a post's link sends the reader)
+- **Convergence events → `/c/[id]`** — a PUBLIC, no-login page (map, p-value, synthesis, contributing detectors + a signup CTA). This is the default/only source, so every post links here. "Give before you ask."
+- Anomaly events → the (gated) globe `/app` — which is why anomalies are OFF by default (see `NEWSJACK_ANOMALY_SOURCE`). Re-enable only once anomalies get their own public artifact.
 
 ## Ops
 - **Crons**: `POST /api/cron/newsjack-detect` hourly; `POST /api/cron/newsjack-digest`
