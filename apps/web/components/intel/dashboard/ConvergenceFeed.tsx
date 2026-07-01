@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 
 interface Convergence {
   id: string;
@@ -44,7 +45,9 @@ const DEMO: Convergence[] = [
   },
 ];
 
-export default function ConvergenceFeed() {
+// href — where a card navigates (default: the Intelligence Center convergence
+// feed, matching the TopNav ConvergenceBadge). Overridable per surface.
+export default function ConvergenceFeed({ href = '/intel' }: { href?: string } = {}) {
   const [data, setData] = useState<Payload | null>(null);
 
   useEffect(() => {
@@ -95,8 +98,13 @@ export default function ConvergenceFeed() {
         </p>
       )}
       {events.map(c => (
-        <article
+        <Link
           key={c.id}
+          href={href}
+          prefetch={false}
+          style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}
+        >
+        <article
           style={{
             padding: 10,
             background: 'var(--bg-panel)',
@@ -164,6 +172,7 @@ export default function ConvergenceFeed() {
             })}
           </div>
         </article>
+        </Link>
       ))}
     </div>
   );

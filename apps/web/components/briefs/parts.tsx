@@ -40,14 +40,20 @@ export function ForecastList({ rows }: { rows: ForecastRow[] }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {rows.map((r) => (
-        <article
+        <Link
           key={r.id}
+          href="/intel/calibration"
+          prefetch={false}
+          style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}
+        >
+        <article
           style={{
             padding: '11px 13px',
             background: 'var(--bg-panel)',
             border: '1px solid var(--rule-soft)',
             borderLeft: `2px solid ${r.resolved ? 'var(--teal)' : 'var(--amber)'}`,
             borderRadius: 2,
+            cursor: 'pointer',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginBottom: 4 }}>
@@ -66,6 +72,7 @@ export function ForecastList({ rows }: { rows: ForecastRow[] }) {
             {!r.resolved && r.resolvesAt && <span> · Resolves {r.resolvesAt.slice(0, 10)}</span>}
           </div>
         </article>
+        </Link>
       ))}
     </div>
   );
