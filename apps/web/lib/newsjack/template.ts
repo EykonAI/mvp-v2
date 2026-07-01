@@ -43,3 +43,40 @@ export function renderXThread(ev: Evidence): { posts: string[]; refUrl: string }
 export function threadToBody(posts: string[]): string {
   return posts.join('\n\n—\n\n');
 }
+
+// Channel → canonical PAMS utm_source. Substack maps to the owned 'newsletter'
+// tag (there is no 'substack' channel in the taxonomy).
+const CHANNEL_UTM: Record<'x' | 'linkedin' | 'substack', string> = {
+  x: 'x',
+  linkedin: 'linkedin',
+  substack: 'newsletter',
+};
+
+// LinkedIn variant — same evidence, a corporate-risk framing, one post. These
+// are draft-only (LinkedIn/Substack have no practical auto-post): the founder
+// copies and posts. Same voice + coverage rules apply, so they are linted too.
+export function renderLinkedIn(ev: Evidence): { body: string; refUrl: string } {
+  const refUrl = withChannel(ev.replayUrl, CHANNEL_UTM.linkedin, { campaign: 'newsjack', medium: 'social' });
+  const verb = ev.framing === 'live' ? 'Live on eYKON' : 'Analysis on eYKON';
+  const src = ev.sources.length ? `Sources: ${ev.sources.slice(0, 4).join(', ')}.` : '';
+  return {
+    body: [ev.headline, '', `${verb}: ${ev.analystLine}`, src, '', `The operational view: ${refUrl}`]
+      .filter((l) => l !== '')
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n'),
+    refUrl,
+  };
+}
+
+// Substack variant — an opening lede that leads into the resolving call.
+export function renderSubstack(ev: Evidence): { body: string; refUrl: string } {
+  const refUrl = withChannel(ev.replayUrl, CHANNEL_UTM.substack, { campaign: 'newsjack', medium: 'email' });
+  const src = ev.sources.length ? `Sourced from ${ev.sources.slice(0, 5).join(', ')}.` : '';
+  return {
+    body: [ev.headline, '', ev.analystLine, src, '', `Follow the live view and the resolving call: ${refUrl}`]
+      .filter((l) => l !== '')
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n'),
+    refUrl,
+  };
+}

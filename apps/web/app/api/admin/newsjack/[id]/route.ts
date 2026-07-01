@@ -35,9 +35,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     case 'approve': {
       const ok = await approveDraft(supabase, params.id);
       if (!ok) return NextResponse.json({ error: 'update_failed' }, { status: 500 });
-      const pub = await publishThread(draft.posts);
-      if (pub.ok) await markPublished(supabase, params.id, null);
-      return NextResponse.json({ ok: true, published: pub.ok, mode: pub.mode, detail: pub.detail, posts: draft.posts });
+      // Only the X thread auto-publishes; LinkedIn/Substack are copy-to-post.
+      if (draft.channel === 'x') {
+        const pub = await publishThread(draft.posts);
+        if (pub.ok) await markPublished(supabase, params.id, pub.url ?? null);
+        return NextResponse.json({ ok: true, channel: draft.channel, published: pub.ok, mode: pub.mode, url: pub.url, detail: pub.detail, posts: draft.posts });
+      }
+      return NextResponse.json({ ok: true, channel: draft.channel, published: false, mode: 'manual', detail: 'approved — copy and post on this channel', posts: draft.posts });
     }
     case 'reject': {
       const ok = await rejectDraft(supabase, params.id);
