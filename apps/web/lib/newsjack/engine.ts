@@ -17,11 +17,19 @@ type SB = ReturnType<typeof createServerSupabase>;
 
 const ANOMALY_FRESH_HOURS = 6; // anomalies are hourly — newsjacking is about NOW
 const CONVERGENCE_FRESH_HOURS = 48; // convergences are computed nightly
-const CONVERGENCE_MAX_P = 0.05; // only statistically strong convergences
+const CONVERGENCE_MAX_P = 0.2; // surface real convergences (the Gulf-of-Guinea p≈0.15 was excluded at 0.05)
 const MAX_PER_TICK = 3; // analyst calls are costly; cap events per run
 const SCAN_LIMIT = 25;
 const SEVERITY_OK = new Set(['medium', 'high']);
 const PUBLIC_BASE = (process.env.NEXT_PUBLIC_SITE_URL || 'https://eykon.ai').replace(/\/+$/, '');
+
+// Anomalies are opt-in as a newsjack source (default off) — see the candidates
+// note in runDetectTick. Convergence is the default source because it has a
+// public landing page.
+function anomalySourceEnabled(): boolean {
+  const v = (process.env.NEWSJACK_ANOMALY_SOURCE ?? '').toLowerCase();
+  return v === 'on' || v === 'true' || v === '1';
+}
 
 interface Candidate {
   source: 'anomaly_flag' | 'convergence_event';
@@ -46,10 +54,14 @@ export interface TickResult {
 export async function runDetectTick(supabase: SB): Promise<TickResult> {
   const res: TickResult = { scanned: 0, drafted: 0, blocked: 0, skipped: 0, details: [] };
 
-  // Convergences first (richer, multi-domain), then single-domain anomalies.
+  // Convergence-only by default: convergences are multi-domain, higher-signal,
+  // and have a PUBLIC landing page (/c/[id]) that gives a cold reader real value.
+  // A single anomaly has no public page (only the gated globe), so newsjacking one
+  // would post a link that dead-ends at the login wall. Anomalies are opt-in via
+  // NEWSJACK_ANOMALY_SOURCE, until they get a public artifact of their own.
   const candidates = [
     ...(await collectConvergences(supabase)),
-    ...(await collectAnomalies(supabase)),
+    ...(anomalySourceEnabled() ? await collectAnomalies(supabase) : []),
   ];
 
   for (const cand of candidates) {
@@ -297,9 +309,13 @@ function buildHeadline(cand: Candidate): string {
   return `A ${cand.severity ?? ''} ${dom} anomaly is unfolding near ${where}.`.replace(/\s+/g, ' ').trim();
 }
 
-// Live-view URL: the globe focused on the incident point. Honest — the live
-// operational surface, not an invented /replay route.
+// Live-view URL. Convergences have a PUBLIC, focused, sourced landing page
+// (/c/[id]) — the ideal artifact for a cold reader, with no login wall. Anomalies
+// have no public page yet, so they fall back to the (gated) globe.
 function buildReplayUrl(cand: Candidate): string {
+  if (cand.source === 'convergence_event') {
+    return `${PUBLIC_BASE}/c/${cand.sourceRef}`;
+  }
   if (cand.lat != null && cand.lon != null) {
     return `${PUBLIC_BASE}/app?lat=${cand.lat.toFixed(3)}&lon=${cand.lon.toFixed(3)}`;
   }
