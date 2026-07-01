@@ -141,6 +141,7 @@ export async function listDrafts(supabase: SB, limit = 50): Promise<ReviewDraft[
 export interface DraftRow {
   id: string;
   event_id: string;
+  channel: string;
   posts: string[];
   status: string;
 }
@@ -148,12 +149,12 @@ export interface DraftRow {
 export async function getDraft(supabase: SB, draftId: string): Promise<DraftRow | null> {
   const { data } = await supabase
     .from('newsjack_drafts')
-    .select('id, event_id, posts, status')
+    .select('id, event_id, channel, posts, status')
     .eq('id', draftId)
     .maybeSingle();
   if (!data) return null;
-  const d = data as { id: string; event_id: string; posts: unknown; status: string };
-  return { id: d.id, event_id: d.event_id, posts: Array.isArray(d.posts) ? (d.posts as string[]) : [], status: d.status };
+  const d = data as { id: string; event_id: string; channel: string; posts: unknown; status: string };
+  return { id: d.id, event_id: d.event_id, channel: d.channel, posts: Array.isArray(d.posts) ? (d.posts as string[]) : [], status: d.status };
 }
 
 async function setEventStatus(supabase: SB, eventId: string, status: string): Promise<void> {
