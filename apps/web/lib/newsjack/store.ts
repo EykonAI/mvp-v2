@@ -7,7 +7,7 @@ type SB = ReturnType<typeof createServerSupabase>;
 
 export interface NewsjackEventInput {
   source: string;
-  source_ref: string;
+  source_ref: string | null;
   event_key: string;
   domain: string | null;
   region: string | null;
