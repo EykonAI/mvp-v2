@@ -114,12 +114,16 @@ function clip(s: string, n = MAX_POST): string {
   return t.length <= n ? t : `${t.slice(0, n - 1).trimEnd()}…`;
 }
 
-// Lead with the sourced answer (punchy), then sources, then the engagement hook
-// + the public /q link. The full question+answer lives on the /q page.
+// Lead with the sourced answer (punchy), then sources, then the engagement hook,
+// then the public /q link. The full question+answer lives on the /q page.
+// The URL sits on its OWN post and is never clip()ed: combining it with a long
+// hook and clipping to MAX_POST truncated the UUID, and /q/[id] 404s on a
+// non-36-char id ("that coordinate doesn't resolve").
 function renderThread(body: string, hook: string, sources: string[], qUrl: string): string[] {
   const posts: string[] = [clip(body)];
   if (sources.length) posts.push(clip(`Sources: ${sources.slice(0, 3).join(' · ')}`));
-  posts.push(clip(`${hook ? `${hook} ` : ''}Full read: ${qUrl}`));
+  if (hook) posts.push(clip(hook));
+  posts.push(`Full read: ${qUrl}`);
   return posts;
 }
 
