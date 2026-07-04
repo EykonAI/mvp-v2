@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import type { ForecastRow } from '@/lib/briefs/forecasts';
+import type { DailyBriefRow } from '@/lib/briefs/dailyBrief';
 
 // Presentational BRIEFS building blocks (no client state — usable from server
 // and client components alike). The interactive Open/Resolved tabs live in
@@ -20,6 +21,52 @@ export function SectionHeading({ title, href, cta }: { title: string; href?: str
         </Link>
       )}
     </div>
+  );
+}
+
+export function DailyBriefCard({ brief }: { brief: DailyBriefRow }) {
+  return (
+    <article
+      style={{
+        padding: '16px 18px',
+        background: 'var(--bg-panel)',
+        border: '1px solid var(--rule-soft)',
+        borderLeft: '2px solid var(--teal)',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          gap: 10,
+          marginBottom: 10,
+          fontFamily: 'var(--f-mono)',
+          fontSize: 9,
+          letterSpacing: '0.1em',
+          textTransform: 'uppercase',
+        }}
+      >
+        <span style={{ color: 'var(--ink-faint)' }}>
+          Issued {brief.briefDate} · {brief.generatedAt.slice(11, 16)} UTC
+        </span>
+        <span style={{ color: brief.isToday ? 'var(--teal)' : 'var(--amber)', whiteSpace: 'nowrap' }}>
+          {brief.isToday ? (brief.isQuiet ? 'Quiet period' : 'Current') : 'Latest available'}
+        </span>
+      </div>
+      <div
+        className="chat-content"
+        style={{
+          fontFamily: 'var(--f-body)',
+          fontSize: 13,
+          lineHeight: 1.6,
+          color: 'var(--ink)',
+          whiteSpace: 'pre-wrap',
+        }}
+      >
+        {brief.content}
+      </div>
+    </article>
   );
 }
 
