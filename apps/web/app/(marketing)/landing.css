@@ -499,11 +499,11 @@
 
 /* ───── Pricing grid ───── */
 .eykon-landing .pricing-grid {
-  max-width: 1280px; margin: 0 auto;
+  max-width: 1440px; margin: 0 auto;
   padding: 0 32px 40px;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
 }
 .eykon-landing .tier-card {
   position: relative;
@@ -1034,10 +1034,11 @@
   .eykon-landing .pricing-grid {
     grid-template-columns: 1fr 1fr;
     grid-template-areas:
-      "citizen citizen"
+      "citizen member"
       "pro enterprise";
   }
   .eykon-landing .tier-card.t-citizen { grid-area: citizen; }
+  .eykon-landing .tier-card.t-member { grid-area: member; }
   .eykon-landing .tier-card.t-pro { grid-area: pro; }
   .eykon-landing .tier-card.t-enterprise { grid-area: enterprise; }
   .eykon-landing .crypto-box { flex-direction: column; align-items: flex-start; }
@@ -1054,6 +1055,7 @@
 @media (max-width: 640px) {
   .eykon-landing .pricing-grid { grid-template-columns: 1fr; grid-template-areas: none; }
   .eykon-landing .tier-card.t-citizen,
+  .eykon-landing .tier-card.t-member,
   .eykon-landing .tier-card.t-pro,
   .eykon-landing .tier-card.t-enterprise { grid-area: auto; }
   .eykon-landing h1.hero-title { font-size: 36px; }

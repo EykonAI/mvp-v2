@@ -18,8 +18,10 @@ import type { Tier } from '@/lib/auth/session';
 // applied by the cron *before* the fire happens — see
 // findRecentFireCount() below.
 
+// Member stays email-only like Citizen (participate-not-analyse).
 export const SMS_WA_MONTHLY_CAPS: Record<Tier, number> = {
   citizen: 0,
+  member: 0,
   pro: 50,
   desk: 200,
   enterprise: 1000,

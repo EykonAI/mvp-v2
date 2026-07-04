@@ -13,7 +13,7 @@ export const FOUNDING_CRYPTO_DISCOUNT = 0.30; // founding crypto: 30% off foundi
 export const STANDARD_CRYPTO_DISCOUNT = 0.15; // standard crypto: 15% off standard annual fiat
 export const ENTERPRISE_MIN_SEATS = 3;
 
-export type Tier = 'citizen' | 'pro' | 'desk' | 'enterprise';
+export type Tier = 'citizen' | 'member' | 'pro' | 'desk' | 'enterprise';
 export type BillingCycle = 'monthly' | 'annual' | 'lifetime';
 
 // Client-safe tier label map. Lives here (not in lib/subscription.ts) so
@@ -21,6 +21,7 @@ export type BillingCycle = 'monthly' | 'annual' | 'lifetime';
 // Supabase SSR helpers via lib/auth/session.
 export const TIER_LABELS: Record<Tier, string> = {
   citizen: 'Citizen',
+  member: 'Member',
   pro: 'Pro',
   desk: 'Desk',
   enterprise: 'Enterprise',
@@ -29,6 +30,7 @@ export const TIER_LABELS: Record<Tier, string> = {
 // Variant id format: <tier>_<founding|standard>_<cycle>
 // Crypto is annual-only, so only the four _annual variants are crypto-eligible.
 export type CryptoVariantId =
+  | 'member_standard_annual'
   | 'pro_founding_annual'
   | 'pro_standard_annual'
   | 'enterprise_founding_annual'
@@ -51,12 +53,27 @@ export type CryptoVariant = {
 const round = (x: number) => Math.round(x);
 
 // Pricing source of truth (founding crypto −30%, standard crypto −15%):
+// Member standard      = $12/mo   → annual $99   → crypto $84.15   (= $99 × 0.85)
 // Pro founding monthly = $29/mo   → annual $348  → crypto $243.60  (= $348 × 0.70)
 // Pro standard monthly = $99/mo   → annual $1188 → crypto $1009.80 (= $1188 × 0.85)
 // Enterprise founding  = $99/seat/mo  → annual $1188/seat → crypto $831.60/seat  → total $2494.80 for 3 seats
 // Enterprise standard  = $199/seat/mo → annual $2388/seat → crypto $2029.80/seat → total $6089.40 for 3 seats
 
 export const CRYPTO_VARIANTS: Record<CryptoVariantId, CryptoVariant> = {
+  // Member has no founding cohort — the "first 1,000 · locked for life"
+  // deal stays unique to Pro. $12/mo headline → annual $99 (a deliberate
+  // ~2-months-free anchor vs 12×$12), standard crypto −15% → $84.15.
+  member_standard_annual: {
+    id: 'member_standard_annual',
+    tier: 'member',
+    billing_cycle: 'annual',
+    is_founding: false,
+    seats: 1,
+    label: 'Member · Annual (crypto)',
+    fiat_per_seat_annual_usd_cents: 9_900,
+    crypto_total_usd_cents: round(9_900 * (1 - STANDARD_CRYPTO_DISCOUNT)), // 8415 → $84.15
+    crypto_price_currency: 'usd',
+  },
   pro_founding_annual: {
     id: 'pro_founding_annual',
     tier: 'pro',

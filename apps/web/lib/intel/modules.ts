@@ -78,9 +78,10 @@ export function modulesByTier(tier: ModuleTier): ModuleSlug[] {
 
 const TIER_ORDER: Record<Tier, number> = {
   citizen: 0,
-  pro: 1,
-  desk: 2,
-  enterprise: 3,
+  member: 1,
+  pro: 2,
+  desk: 3,
+  enterprise: 4,
 };
 
 export function tierMeetsRequirement(userTier: Tier, requirement: Tier): boolean {
@@ -96,9 +97,12 @@ export function canAccessModule(userTier: Tier, slug: ModuleSlug): boolean {
 // to feel the analyst's quality on a real question, low enough that
 // freeloader scraping is cost-prohibitive. Citizen queries are also
 // constrained to the "cheap" tool subset — see CITIZEN_AI_TOOLS in
-// lib/anthropic.ts. Pro+ get the full tool surface.
+// lib/anthropic.ts. Member = 25/month on the standard tool surface
+// (monetisation review §4.1: enough to check a Creator's claim, not
+// enough to do the Creator's job). Pro+ get the full tool surface.
 export const AI_QUERY_LIMITS: Record<Tier, number> = {
   citizen: 5,
+  member: 25,
   pro: 500,
   desk: 5_000,
   enterprise: 1_000_000,
@@ -106,6 +110,7 @@ export const AI_QUERY_LIMITS: Record<Tier, number> = {
 
 export const API_CALL_LIMITS: Record<Tier, number> = {
   citizen: 0,
+  member: 0,
   pro: 0,
   desk: 10_000,
   enterprise: 1_000_000,
@@ -113,6 +118,7 @@ export const API_CALL_LIMITS: Record<Tier, number> = {
 
 export const EXPORT_LIMITS: Record<Tier, number> = {
   citizen: 0,
+  member: 0,
   pro: 100,
   desk: 1_000,
   enterprise: 1_000_000,
@@ -120,9 +126,11 @@ export const EXPORT_LIMITS: Record<Tier, number> = {
 
 // Maximum concurrent watchlists per user, per tier. Citizen is capped at 1
 // to create real pressure on heavy free-tier users (Path 1 conversion in
-// the trial-mechanism brief §5.4). Pro/Desk/Enterprise are generous.
+// the trial-mechanism brief §5.4). Member gets a small allowance in the
+// participate-not-analyse spirit. Pro/Desk/Enterprise are generous.
 export const WATCHLIST_LIMITS: Record<Tier, number> = {
   citizen: 1,
+  member: 3,
   pro: 25,
   desk: 100,
   enterprise: 1_000_000,
@@ -136,6 +144,19 @@ export const WATCHLIST_LIMITS: Record<Tier, number> = {
 // table is upsert-keyed on icao24 with no historical time-series, so the
 // 24h-ago snapshot still isn't possible — the live exception stands.
 export const CITIZEN_FEED_DELAY_MS = 24 * 60 * 60 * 1000;
+
+// Member feed delay (monetisation review §4.1): recent enough to follow
+// a live discussion in a Space, delayed enough that professional
+// monitoring still requires Pro. Aircraft stay live for everyone (the
+// exemption above applies unchanged).
+export const MEMBER_FEED_DELAY_MS = 6 * 60 * 60 * 1000;
+
+// Per-tier feed delay for the delayed feeds (/api/vessels, /api/conflicts).
+export function feedDelayMsForTier(tier: Tier): number {
+  if (tier === 'citizen') return CITIZEN_FEED_DELAY_MS;
+  if (tier === 'member') return MEMBER_FEED_DELAY_MS;
+  return 0;
+}
 
 // ─── Citizen Intelligence Center access (trial-mechanism brief §5.2) ───
 // Citizens see one live workspace (Calibration Ledger, read-only) and

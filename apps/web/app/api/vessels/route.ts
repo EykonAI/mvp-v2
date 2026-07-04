@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { getCurrentTier } from '@/lib/subscription';
-import { tierMeetsRequirement, CITIZEN_FEED_DELAY_MS } from '@/lib/intel/modules';
+import { feedDelayMsForTier } from '@/lib/intel/modules';
 import type { Tier } from '@/lib/pricing';
 
 // Provider selection mirrors the conflicts pattern:
@@ -17,11 +17,13 @@ async function fetchFromSupabase(params: URLSearchParams, tier: Tier) {
 
   const limit = Math.min(parseInt(params.get('limit') || '5000'), 20000);
 
-  // Citizen tier sees the snapshot from 24h ago (a 1h window ending at
-  // NOW - 24h). Pro+ sees the most recent hour.
-  const isCitizen = !tierMeetsRequirement(tier, 'pro');
+  // Delayed feeds: Citizen sees the snapshot from 24h ago, Member from
+  // 6h ago (a 1h window ending at NOW - delay). Pro+ sees the most
+  // recent hour. Delay values live in lib/intel/modules.ts.
+  const delayMs = feedDelayMsForTier(tier);
+  const isDelayed = delayMs > 0;
   const now = Date.now();
-  const upperBoundMs = isCitizen ? now - CITIZEN_FEED_DELAY_MS : now;
+  const upperBoundMs = now - delayMs;
   const lowerBoundMs = upperBoundMs - FRESH_WINDOW_MS;
   const sinceISO = new Date(lowerBoundMs).toISOString();
 
@@ -31,7 +33,7 @@ async function fetchFromSupabase(params: URLSearchParams, tier: Tier) {
     .gte('updated_at', sinceISO)
     .order('updated_at', { ascending: false })
     .limit(limit);
-  if (isCitizen) {
+  if (isDelayed) {
     query = query.lte('updated_at', new Date(upperBoundMs).toISOString());
   }
 
