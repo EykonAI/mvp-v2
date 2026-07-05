@@ -5,6 +5,7 @@ import { CommChatShell } from '@/components/comm/CommChatShell';
 import { getCurrentUser } from '@/lib/auth/session';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { loadSpace, spacesCheckoutEnabled } from '@/lib/comm/spaces';
+import { getFoundingPartner } from '@/lib/comm/foundingPartner';
 import { getLinkedWallet } from '@/lib/comm/wallets';
 import { loadMessages, markRead } from '@/lib/comm/dm';
 import { Thread } from '@/components/comm/Thread';
@@ -31,6 +32,11 @@ export default async function SpacePage({ params }: { params: { id: string } }) 
   const checkout = spacesCheckoutEnabled();
   const linkedWallet = checkout ? await getLinkedWallet(supabase, user.id) : null;
   const platformWallet = process.env.UNLOCK_PLATFORM_WALLET ?? '';
+
+  // Founding Partner gating (mig 076): past the Note deadline, the
+  // space pauses for NEW subscribers only — members keep everything.
+  const creatorPartner = space.creator ? await getFoundingPartner(supabase, space.creator.id) : null;
+  const creatorGated = creatorPartner?.status === 'gated';
 
   return (
     <CommChatShell>
@@ -122,7 +128,12 @@ export default async function SpacePage({ params }: { params: { id: string } }) 
               a subscriber-only space. Subscribe to see the conversation and the in-room analyst.
             </p>
             <div style={{ marginTop: 14 }}>
-              {checkout && space.lock_address ? (
+              {creatorGated ? (
+                <p style={{ fontSize: 12.5, color: 'var(--ink-dim)', lineHeight: 1.6, border: '1px dashed var(--rule)', borderRadius: 6, padding: '12px 14px', margin: 0 }}>
+                  This creator is completing their calibration — subscriptions reopen when their
+                  Reputation Note is live. Existing members are unaffected.
+                </p>
+              ) : checkout && space.lock_address ? (
                 <SubscribePanel
                   spaceId={space.id}
                   lock={space.lock_address}
