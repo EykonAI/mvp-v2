@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -40,6 +40,18 @@ export function MakeACall() {
       setLoading(false);
     }
   }
+
+  // First Ten prefill (?call=<market_id> — set by FirstTenPanel links).
+  // Read via window.location rather than useSearchParams so this client
+  // component needs no Suspense boundary. Runs once on mount.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('call');
+    if (id) {
+      setMarketId(id);
+      void load();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const market = markets?.find((m) => m.market_id === marketId) ?? null;
   const baseline = market && outcome ? market.prices[outcome] : undefined;

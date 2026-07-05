@@ -27,6 +27,7 @@ export interface SpaceCreator {
   name: string;
   note: number | null; // creator Reputation Note (null while calibrating)
   nResolved: number; // resolved-call count behind the Note (drives the band)
+  is_founding_partner: boolean; // mig 076 — curatorial status, never a score
 }
 export interface SpaceSummary {
   id: string;
@@ -92,6 +93,7 @@ interface ProfRow {
 function creatorFrom(
   p: ProfRow | undefined | null,
   rep?: { note: number | null; nResolved: number },
+  isFoundingPartner = false,
 ): SpaceCreator | null {
   if (!p) return null;
   const slug = p.handle ?? p.public_id;
@@ -102,6 +104,7 @@ function creatorFrom(
     name: p.display_name || (p.handle ? `@${p.handle}` : slug),
     note: rep?.note ?? null,
     nResolved: rep?.nResolved ?? 0,
+    is_founding_partner: isFoundingPartner,
   };
 }
 
@@ -296,7 +299,7 @@ async function hydrateSummaries(supabase: SB, viewerId: string, rows: SpaceRow[]
   const spaceIds = rows.map((r) => r.space_id);
   const creatorIds = Array.from(new Set(rows.map((r) => r.creator_id)));
 
-  const [{ data: profs }, reps, { data: subs }] = await Promise.all([
+  const [{ data: profs }, reps, { data: subs }, { data: partnerRows }] = await Promise.all([
     supabase.from('user_profiles').select('id, handle, display_name, public_id').in('id', creatorIds),
     loadCreatorReps(supabase, creatorIds),
     supabase
@@ -304,7 +307,13 @@ async function hydrateSummaries(supabase: SB, viewerId: string, rows: SpaceRow[]
       .select('space_id, subscriber_id')
       .eq('status', 'active')
       .in('space_id', spaceIds),
+    // Founding Partner chips (mig 076): the status is permanent per the
+    // Terms, so any row counts — gating only affects Discover/subscribe.
+    supabase.from('founding_partners').select('user_id').in('user_id', creatorIds),
   ]);
+  const partnerSet = new Set(
+    ((partnerRows as { user_id: string }[] | null) ?? []).map((r) => r.user_id),
+  );
   const profById = new Map(((profs as ProfRow[] | null) ?? []).map((p) => [p.id, p]));
   const subRows = (subs as { space_id: string; subscriber_id: string }[] | null) ?? [];
   const countBySpace = new Map<string, number>();
@@ -323,7 +332,7 @@ async function hydrateSummaries(supabase: SB, viewerId: string, rows: SpaceRow[]
     status: r.status ?? 'live',
     lock_status: r.lock_status ?? null,
     accent_color: r.accent_color ?? null,
-    creator: creatorFrom(profById.get(r.creator_id), reps.get(r.creator_id)),
+    creator: creatorFrom(profById.get(r.creator_id), reps.get(r.creator_id), partnerSet.has(r.creator_id)),
     subscriber_count: countBySpace.get(r.space_id) ?? 0,
     is_creator: r.creator_id === viewerId,
     is_subscribed: viewerSubbed.has(r.space_id),

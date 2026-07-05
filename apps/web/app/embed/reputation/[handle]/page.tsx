@@ -4,6 +4,8 @@ import { loadProfile } from '@/lib/comm/profile';
 import { commProfilesEnabled } from '@/lib/flags';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { isCreatorPro } from '@/lib/comm/creatorPro';
+import { getFoundingPartner } from '@/lib/comm/foundingPartner';
+import { FoundingPartnerChip } from '@/components/profile/FoundingPartnerEmblem';
 import { ReputationNote } from '@/components/profile/ReputationNote';
 
 // Embeddable reputation card (monetisation review §4.3) — a PUBLIC,
@@ -38,7 +40,10 @@ export default async function ReputationEmbedPage({
   const slug = p.handle ?? p.public_id ?? params.handle;
   const name = p.display_name || (p.handle ? `@${p.handle}` : 'Analyst');
   const admin = createServerSupabase();
-  const pro = await isCreatorPro(admin, p.id);
+  const [pro, partner] = await Promise.all([
+    isCreatorPro(admin, p.id),
+    getFoundingPartner(admin, p.id),
+  ]);
 
   const wrap: React.CSSProperties = {
     fontFamily: 'var(--f-body, system-ui)',
@@ -84,7 +89,10 @@ export default async function ReputationEmbedPage({
     <div style={wrap}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 600 }}>{name}</div>
+          <div style={{ fontSize: 15, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {name}
+            {partner && <FoundingPartnerChip />}
+          </div>
           <div style={{ fontFamily: 'var(--f-mono, monospace)', fontSize: 10.5, color: 'var(--ink-faint, #5c6f77)', marginTop: 2 }}>
             @{slug} · {data.resolvedCount} resolved call{data.resolvedCount === 1 ? '' : 's'}
           </div>

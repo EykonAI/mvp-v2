@@ -72,6 +72,7 @@ async function handle(req: NextRequest) {
     active: m.active,
     closed: m.closed,
     closed_at: m.closed_at,
+    end_date: m.end_date,
     last_seen_at: now,
     // first_seen_at omitted on purpose — DEFAULT NOW() fires only on
     // INSERT, and supabase-js's upsert doesn't add omitted columns to

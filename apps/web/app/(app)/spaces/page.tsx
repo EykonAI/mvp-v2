@@ -15,6 +15,7 @@ import {
 import { CreateSpace } from '@/components/comm/CreateSpace';
 import { ManageSpaces } from '@/components/comm/ManageSpaces';
 import { ReputationNote } from '@/components/profile/ReputationNote';
+import { FoundingPartnerChip } from '@/components/profile/FoundingPartnerEmblem';
 import { loadCreatorEarnings, getBountyRateBps, type CreatorEarnings } from '@/lib/comm/bounty';
 
 export const metadata: Metadata = { title: 'Spaces — eYKON.ai', robots: { index: false, follow: false } };
@@ -153,6 +154,7 @@ function SpaceCard({ s }: { s: SpaceSummary }) {
         ) : (
           <span style={{ color: 'var(--ink-faint)', fontFamily: 'var(--f-mono)', fontSize: 11 }}>—</span>
         )}
+        {s.creator?.is_founding_partner && <FoundingPartnerChip />}
         {s.creator && <ReputationNote size="badge" note={s.creator.note} nResolved={s.creator.nResolved} />}
       </div>
 
