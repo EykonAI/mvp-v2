@@ -111,9 +111,16 @@ export default async function PublicConvergencePage({ params }: { params: { id: 
           <p style={{ fontSize: 13.5, color: 'var(--ink-dim)', lineHeight: 1.6, margin: '0 0 14px' }}>
             This is one live signal from eYKON — maritime, aviation, conflict and energy feeds fused on a single globe, with an AI analyst that cites its sources and a calibration ledger that scores its own predictions. Convergences like this fire automatically when independent domains move together in the same place.
           </p>
-          <Link href={SIGNUP(c.id)} prefetch={false} style={{ display: 'inline-block', fontFamily: 'var(--f-mono)', fontSize: 11.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--bg-void, #0a0e12)', background: 'var(--teal)', borderRadius: 4, padding: '10px 18px', textDecoration: 'none', fontWeight: 600 }}>
-            Explore the live view — free
-          </Link>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Link href={SIGNUP(c.id)} prefetch={false} style={{ display: 'inline-block', fontFamily: 'var(--f-mono)', fontSize: 11.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--bg-void, #0a0e12)', background: 'var(--teal)', borderRadius: 4, padding: '10px 18px', textDecoration: 'none', fontWeight: 600 }}>
+              Explore the live view — free
+            </Link>
+            {/* Week Pass (mig 075): the impulse exit while an event is
+                live — full Pro for 7 days, one-off, expires on its own. */}
+            <Link href="/pricing?plan=week_pass" prefetch={false} style={{ display: 'inline-block', fontFamily: 'var(--f-mono)', fontSize: 11.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--teal)', border: '1px solid var(--teal)', borderRadius: 4, padding: '9px 18px', textDecoration: 'none' }}>
+              Follow this event with full access — 7-day pass $9
+            </Link>
+          </div>
         </div>
 
         <p style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--ink-faint)', marginTop: 22, lineHeight: 1.6 }}>

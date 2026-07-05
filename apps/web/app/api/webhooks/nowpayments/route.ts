@@ -11,6 +11,7 @@ import {
   extractCryptoTxHash,
 } from '@/lib/payments/nowpayments';
 import { recordConversionBounty } from '@/lib/comm/bounty';
+import { completePassPurchase } from '@/lib/payments/passes';
 import { captureServer } from '@/lib/analytics/server';
 
 export const dynamic = 'force-dynamic';
@@ -94,6 +95,38 @@ export async function POST(request: NextRequest) {
       // 0.012 BTC). Multiplying a crypto amount by 100 would record nonsense
       // cents on the purchase row.
       const amountUsdCents = Math.round(payload.price_amount * 100);
+
+      // One-off passes & packs (mig 075) complete via app code, not the
+      // tier-granting RPC — route by purchases.kind before anything else.
+      const { data: purchaseRow } = await admin
+        .from('purchases')
+        .select('id, user_id, variant_id, kind, status')
+        .eq('id', payload.order_id)
+        .maybeSingle();
+      if (purchaseRow && (purchaseRow.kind === 'week_pass' || purchaseRow.kind === 'query_pack')) {
+        const result = await completePassPurchase(admin, purchaseRow, {
+          externalOrderId: String(payload.payment_id),
+          payCurrency: payload.pay_currency,
+          txHash: extractCryptoTxHash(payload),
+          amountUsdCents,
+        });
+        if (!result.ok) {
+          await markWebhookFailed(admin, webhookRowId, result.error ?? 'pass completion failed');
+          return NextResponse.json({ error: result.error }, { status: 500 });
+        }
+        await markWebhookProcessed(admin, webhookRowId);
+        if (!result.replay) {
+          void captureServer(purchaseRow.user_id, {
+            event: 'checkout_succeeded',
+            plan: purchaseRow.variant_id,
+            payment_method: 'crypto',
+            amount_usd_cents: amountUsdCents,
+            founding_locked: false,
+          });
+        }
+        return NextResponse.json({ status: 'completed', kind: purchaseRow.kind });
+      }
+
       const { data, error } = await admin.rpc('complete_crypto_purchase', {
         p_purchase_id: payload.order_id,
         p_external_order_id: String(payload.payment_id),

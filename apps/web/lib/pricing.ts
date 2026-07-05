@@ -129,6 +129,47 @@ export function getCryptoVariant(id: string): CryptoVariant | null {
   return map[id] ?? null;
 }
 
+// ─── One-off passes & packs (monetisation review §4.4, mig 075) ───
+// Single NOWPayments purchases, not subscriptions: no tier CHECK, no
+// founding logic, no renewal. The webhook routes these by
+// purchases.kind to lib/payments/passes.ts instead of the
+// complete_crypto_purchase RPC.
+export type PassProductId = 'week_pass' | 'query_pack_25';
+
+export type PassProduct = {
+  id: PassProductId;
+  kind: 'week_pass' | 'query_pack';
+  label: string;
+  usd_cents: number;
+  // week_pass grants a 7-day 'pro' tier override; query_pack grants a
+  // current-month counter bonus.
+  grants:
+    | { type: 'tier_override'; tier: 'pro'; days: number }
+    | { type: 'usage_bonus'; counter: 'ai_queries'; bonus: number };
+};
+
+export const PASS_PRODUCTS: Record<PassProductId, PassProduct> = {
+  week_pass: {
+    id: 'week_pass',
+    kind: 'week_pass',
+    label: 'Week Pass · 7 days of Pro (crypto)',
+    usd_cents: 900,
+    grants: { type: 'tier_override', tier: 'pro', days: 7 },
+  },
+  query_pack_25: {
+    id: 'query_pack_25',
+    kind: 'query_pack',
+    label: 'Query Pack · +25 AI Analyst queries this month (crypto)',
+    usd_cents: 500,
+    grants: { type: 'usage_bonus', counter: 'ai_queries', bonus: 25 },
+  },
+};
+
+export function getPassProduct(id: string): PassProduct | null {
+  const map = PASS_PRODUCTS as Record<string, PassProduct>;
+  return map[id] ?? null;
+}
+
 export function formatUsd(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
 }

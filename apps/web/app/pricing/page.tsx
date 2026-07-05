@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth/session';
-import { getCryptoVariant } from '@/lib/pricing';
+import { getCryptoVariant, getPassProduct } from '@/lib/pricing';
 import { CheckoutLauncher } from './CheckoutLauncher';
 
 export const dynamic = 'force-dynamic';
@@ -29,13 +29,18 @@ export default async function PricingPage({
 
   if (!plan) redirect('/#pricing');
 
+  // Subscriptions AND one-off passes/packs (mig 075) both route through
+  // here — the checkout API branches on the id.
   const variant = getCryptoVariant(plan);
-  if (!variant) redirect('/#pricing');
+  const pass = variant ? null : getPassProduct(plan);
+  if (!variant && !pass) redirect('/#pricing');
 
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/auth/signup?plan=${encodeURIComponent(plan)}`);
   }
 
-  return <CheckoutLauncher variantId={variant.id} variantLabel={variant.label} />;
+  const id = variant?.id ?? pass!.id;
+  const label = variant?.label ?? pass!.label;
+  return <CheckoutLauncher variantId={id} variantLabel={label} />;
 }
