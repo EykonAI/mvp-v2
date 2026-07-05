@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { getCurrentUser } from '@/lib/auth/session';
 import { updateSpace, setSpaceStatus, type ManageResult } from '@/lib/comm/spaces';
+import { isCreatorPro } from '@/lib/comm/creatorPro';
 
 // Creator-only management for a paid space (COMM UX Uplift §4.2): edit fields,
 // pause/resume, or archive (the honest "delete"). Ownership is enforced in the
@@ -33,7 +34,15 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const spaceId = params.id;
   if (!UUID_RE.test(spaceId)) return NextResponse.json({ error: 'invalid_id' }, { status: 400 });
 
-  let body: { action?: unknown; title?: unknown; blurb?: unknown; price_usdc?: unknown; cadence?: unknown };
+  let body: {
+    action?: unknown;
+    title?: unknown;
+    blurb?: unknown;
+    price_usdc?: unknown;
+    cadence?: unknown;
+    accent_color?: unknown;
+    banner_url?: unknown;
+  };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -44,7 +53,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   let result: ManageResult;
   if (action === 'edit') {
-    const patch: { title?: string; blurb?: string | null; priceUsdc?: number; cadence?: 'monthly' | 'annual' } = {};
+    const patch: {
+      title?: string;
+      blurb?: string | null;
+      priceUsdc?: number;
+      cadence?: 'monthly' | 'annual';
+      accentColor?: string | null;
+      bannerUrl?: string | null;
+    } = {};
     if (typeof body.title === 'string') patch.title = body.title;
     if (body.blurb === null || typeof body.blurb === 'string') patch.blurb = body.blurb as string | null;
     if (body.price_usdc != null) {
@@ -55,6 +71,19 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       patch.priceUsdc = p;
     }
     if (body.cadence === 'monthly' || body.cadence === 'annual') patch.cadence = body.cadence;
+    // Space branding is a Creator Pro feature (mig 074): forward the
+    // fields only for an active grant; silently drop them otherwise so
+    // a plain edit from a non-Pro creator still succeeds.
+    if (body.accent_color !== undefined || body.banner_url !== undefined) {
+      if (await isCreatorPro(supabase, user.id)) {
+        if (body.accent_color === null || typeof body.accent_color === 'string') {
+          patch.accentColor = body.accent_color as string | null;
+        }
+        if (body.banner_url === null || typeof body.banner_url === 'string') {
+          patch.bannerUrl = body.banner_url as string | null;
+        }
+      }
+    }
     result = await updateSpace(supabase, spaceId, user.id, patch);
   } else if (action === 'pause') {
     result = await setSpaceStatus(supabase, spaceId, user.id, 'paused');

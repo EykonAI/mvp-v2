@@ -132,7 +132,16 @@ function CardList({ spaces }: { spaces: SpaceSummary[] }) {
 function SpaceCard({ s }: { s: SpaceSummary }) {
   const ready = s.lock_status === 'ready';
   return (
-    <div style={{ border: '1px solid var(--rule-soft)', borderRadius: 8, background: 'var(--bg-panel)', padding: '13px 15px' }}>
+    <div
+      style={{
+        border: '1px solid var(--rule-soft)',
+        // Creator Pro branding (mig 074): accent stripe when set.
+        borderLeft: s.accent_color ? `3px solid ${s.accent_color}` : '1px solid var(--rule-soft)',
+        borderRadius: 8,
+        background: 'var(--bg-panel)',
+        padding: '13px 15px',
+      }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
         {s.creator ? (
           <Link
