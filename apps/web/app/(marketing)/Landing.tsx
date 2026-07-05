@@ -75,6 +75,37 @@ const ENTERPRISE_CTA: Record<Cycle, CtaAction> = {
   },
 };
 
+// Member (monetisation review §4.1): the community rung between Citizen
+// and Pro. No founding cohort, no strike-through story — one honest
+// price. Fiat cycles still route to the crypto annual checkout (Member
+// is deliberately NOT on the fiat waitlist — migration 072 note);
+// monthly $12 arrives with fiat billing.
+const MEMBER_PRICES: Record<Cycle, { amt: string; per: string; note: string }> = {
+  monthly: {
+    amt: '$12',
+    per: '/ month',
+    note: 'Monthly opens with fiat billing · pay $84.15/yr in crypto today',
+  },
+  annual: {
+    amt: '$99',
+    per: '/ year',
+    note: 'Fiat annual opens soon · pay $84.15/yr in crypto today',
+  },
+  'annual-crypto': {
+    amt: '$84.15',
+    per: '/ year in crypto',
+    note: '−15% crypto rate on the $99 annual price',
+  },
+};
+
+const MEMBER_CTA: Record<Cycle, CtaAction> = {
+  // Crypto is the only rail that can transact today (see DEFAULT_CYCLE);
+  // all three cycles route to the auth-aware checkout router.
+  monthly: { kind: 'crypto', href: '/pricing?plan=member_standard_annual', label: 'Join as Member (crypto annual) →' },
+  annual: { kind: 'crypto', href: '/pricing?plan=member_standard_annual', label: 'Join as Member (crypto annual) →' },
+  'annual-crypto': { kind: 'crypto', href: '/pricing?plan=member_standard_annual', label: 'Join as Member →' },
+};
+
 const NAV_ANCHORS = ['top', 'platform', 'intelligence', 'pricing', 'faq'] as const;
 
 export function Landing() {
@@ -167,8 +198,10 @@ export function Landing() {
 
   const pro = PRO_PRICES[cycle];
   const ent = ENTERPRISE_PRICES[cycle];
+  const member = MEMBER_PRICES[cycle];
   const proCta = PRO_CTA[cycle];
   const entCta = ENTERPRISE_CTA[cycle];
+  const memberCta = MEMBER_CTA[cycle];
 
   return (
     <div className="eykon-landing">
@@ -467,7 +500,7 @@ export function Landing() {
                 Operational <strong>Globe</strong> with all map layers
               </li>
               <li>
-                1 <strong>watchlist</strong> · 24h-delayed feeds
+                <strong>Live feeds</strong> — AIS, ADS-B, conflicts · 1 <strong>watchlist</strong>
               </li>
               <li>
                 Daily personalised <strong>briefing</strong> on the home screen
@@ -487,9 +520,40 @@ export function Landing() {
             </ul>
           </div>
 
+          {/* Member */}
+          <div className="tier-card t-member">
+            <div className="tier-code">T-01 · MEMBER</div>
+            <div className="tier-name">Member</div>
+            <div className="tier-tag">
+              For the community. Full standing in COMM, Spaces and your track record.
+            </div>
+            <div className="price-original">&nbsp;</div>
+            <div className="price-block">
+              <span className="price-amt">{member.amt}</span>
+              <span className="price-per">{member.per}</span>
+            </div>
+            <div className="price-note dim">{member.note}</div>
+            <CtaButton cta={memberCta} onWaitlist={openWaitlist} />
+            <div className="tier-section-label">Everything in Citizen, plus</div>
+            <ul className="tier-features">
+              <li>
+                <strong>25 AI Analyst</strong> queries / month · full tool surface
+              </li>
+              <li>
+                Persisted <strong>query history</strong> — pick any thread back up
+              </li>
+              <li>
+                5 live <strong>notification rules</strong> · email
+              </li>
+              <li>
+                3 <strong>watchlists</strong>
+              </li>
+            </ul>
+          </div>
+
           {/* Pro */}
           <div className="tier-card highlight t-pro">
-            <div className="tier-code">T-01 · PRO</div>
+            <div className="tier-code">T-02 · PRO</div>
             <div className="tier-name">Pro</div>
             <div className="tier-tag">
               For OSINT analysts and day-traders. Full platform, single seat.
@@ -510,7 +574,7 @@ export function Landing() {
                 <strong>All 25+ Intelligence Menu</strong> modules (IM-01 → IM-27)
               </li>
               <li>
-                <strong>Real-time</strong> feeds: AIS, ADS-B, ACLED
+                <strong>SMS + WhatsApp</strong> alert delivery
               </li>
               <li>
                 <strong>IM-13 Asset Impact Lens</strong> +{' '}
@@ -529,7 +593,7 @@ export function Landing() {
 
           {/* Enterprise */}
           <div className="tier-card t-enterprise">
-            <div className="tier-code">T-02 · TEAM</div>
+            <div className="tier-code">T-03 · TEAM</div>
             <div className="tier-name">Enterprise</div>
             <div className="tier-tag">
               For trading desks and small newsrooms. Team workspace, shared watchlists, API
@@ -693,10 +757,11 @@ export function Landing() {
           <code>IM-14 Crypto Flow Monitor</code> modules are purpose-built for this loop.
         </Faq>
         <Faq q="How fresh is the data?">
-          Pro and Enterprise receive real-time feeds: <code>ADS-B ~15s</code>,{' '}
+          Every plan — including Citizen — receives real-time feeds: <code>ADS-B ~15s</code>,{' '}
           <code>AIS ~60s</code>, <code>ACLED hourly</code>, static infrastructure daily.
-          Citizen tier feeds are delayed by 24 hours. Every data point carries its source,
-          license, and ingestion timestamp.
+          Paid tiers differ on the intelligence layer — AI Analyst budget, the nine INTEL
+          workspaces, alerts and exports — never on the rawness of the map. Every data
+          point carries its source, license, and ingestion timestamp.
         </Faq>
         <Faq q="How does the crypto discount work in practice?">
           Select Annual billing, then toggle &quot;Annual + Crypto −30%&quot;. At checkout,

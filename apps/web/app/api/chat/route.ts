@@ -91,12 +91,16 @@ export async function POST(req: NextRequest) {
       const row = Array.isArray(data) ? data[0] : data;
       if (!row?.allowed) {
         // Citizen → /pricing?from=ai_cap (the trial-mechanism funnel hook).
+        // Member → /pricing?from=ai_cap_member (the next-rung upsell to
+        // Pro; distinct from= so PAMS can split the two cohorts).
         // Pro → /pricing?plan=desk_founding_annual (the upsell to Desk).
         // Desk/Enterprise hit cap → no upgrade_url, the operator handles
         // it out-of-band.
         const upgrade_url =
           tier === 'citizen'
             ? '/pricing?from=ai_cap'
+            : tier === 'member'
+            ? '/pricing?from=ai_cap_member'
             : tier === 'pro'
             ? '/pricing?plan=desk_founding_annual'
             : undefined;
@@ -129,7 +133,10 @@ export async function POST(req: NextRequest) {
       .map((m: any) => ({ role: m.role, content: m.content }));
 
     // Tier-aware tool surface. Citizens get the "cheap" single-source
-    // subset per the trial-mechanism brief §5.1; Pro+ get the full set.
+    // subset per the trial-mechanism brief §5.1; Member and above get
+    // the full set (monetisation review §4.1: Member's 25/month budget
+    // is the constraint, not the tool surface — enough to check a
+    // Creator's claim properly).
     const tools = toolsForTier(tier);
 
     let response = await anthropic.messages.create({

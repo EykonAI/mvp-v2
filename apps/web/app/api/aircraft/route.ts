@@ -9,15 +9,15 @@ import { createServerSupabase } from '@/lib/supabase-server';
 //   default / "supabase"      -> read aircraft_positions from Supabase,
 //                                populated by services/adsb-ingest (ADSBexchange).
 //
-// Citizen 24h feed-delay (trial-mechanism brief §5.4): aircraft_positions is
-// upsert-keyed on icao24, so it holds only each aircraft's LATEST position —
-// there is no historical time-series to snapshot from 24h ago the way
-// /api/vessels and /api/conflicts do. Citizens therefore continue to see live
-// aircraft as the documented exception, now sourced from our own fresh table
-// instead of a blocked third-party proxy. Removing the per-request live call
-// also makes the Globe's Aircraft layer reliable (same model as Vessels) and
-// degrades honestly: when the table is empty the layer is simply empty rather
-// than erroring.
+// Live for every tier. Historically aircraft was the documented exception
+// to the Citizen 24h feed-delay (aircraft_positions is upsert-keyed on
+// icao24 — no historical time-series to snapshot from). As of 2026-07-04
+// ALL raw feeds are live for all tiers (vessel_positions has the same
+// single-row-per-vessel structure, so its "delay" was never a real
+// snapshot either) — paid differentiation lives in the intelligence
+// layer. See lib/intel/modules.ts. Reading our own fresh table keeps the
+// Globe's Aircraft layer reliable and degrades honestly: when the table
+// is empty the layer is simply empty rather than erroring.
 
 const PROVIDER = (process.env.AIRCRAFT_PROVIDER || 'supabase').toLowerCase();
 const FRESH_WINDOW_MS = 60 * 60 * 1000; // only return aircraft seen in the last hour

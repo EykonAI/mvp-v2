@@ -4,7 +4,8 @@ import type { User, SupabaseClient } from '@supabase/supabase-js';
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
-export type Tier = 'citizen' | 'pro' | 'desk' | 'enterprise';
+// Keep in sync with the client-safe union in lib/pricing.ts.
+export type Tier = 'citizen' | 'member' | 'pro' | 'desk' | 'enterprise';
 export type BillingCycle = 'monthly' | 'annual' | 'lifetime';
 export type VerifiedDiscount = 'journalist' | 'nonprofit' | 'academic';
 export type AdvocateState = 'none' | 'invited' | 'active' | 'paused' | 'terminated';

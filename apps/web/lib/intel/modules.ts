@@ -78,9 +78,10 @@ export function modulesByTier(tier: ModuleTier): ModuleSlug[] {
 
 const TIER_ORDER: Record<Tier, number> = {
   citizen: 0,
-  pro: 1,
-  desk: 2,
-  enterprise: 3,
+  member: 1,
+  pro: 2,
+  desk: 3,
+  enterprise: 4,
 };
 
 export function tierMeetsRequirement(userTier: Tier, requirement: Tier): boolean {
@@ -96,9 +97,12 @@ export function canAccessModule(userTier: Tier, slug: ModuleSlug): boolean {
 // to feel the analyst's quality on a real question, low enough that
 // freeloader scraping is cost-prohibitive. Citizen queries are also
 // constrained to the "cheap" tool subset — see CITIZEN_AI_TOOLS in
-// lib/anthropic.ts. Pro+ get the full tool surface.
+// lib/anthropic.ts. Member = 25/month on the standard tool surface
+// (monetisation review §4.1: enough to check a Creator's claim, not
+// enough to do the Creator's job). Pro+ get the full tool surface.
 export const AI_QUERY_LIMITS: Record<Tier, number> = {
   citizen: 5,
+  member: 25,
   pro: 500,
   desk: 5_000,
   enterprise: 1_000_000,
@@ -106,6 +110,7 @@ export const AI_QUERY_LIMITS: Record<Tier, number> = {
 
 export const API_CALL_LIMITS: Record<Tier, number> = {
   citizen: 0,
+  member: 0,
   pro: 0,
   desk: 10_000,
   enterprise: 1_000_000,
@@ -113,6 +118,7 @@ export const API_CALL_LIMITS: Record<Tier, number> = {
 
 export const EXPORT_LIMITS: Record<Tier, number> = {
   citizen: 0,
+  member: 0,
   pro: 100,
   desk: 1_000,
   enterprise: 1_000_000,
@@ -120,22 +126,27 @@ export const EXPORT_LIMITS: Record<Tier, number> = {
 
 // Maximum concurrent watchlists per user, per tier. Citizen is capped at 1
 // to create real pressure on heavy free-tier users (Path 1 conversion in
-// the trial-mechanism brief §5.4). Pro/Desk/Enterprise are generous.
+// the trial-mechanism brief §5.4). Member gets a small allowance in the
+// participate-not-analyse spirit. Pro/Desk/Enterprise are generous.
 export const WATCHLIST_LIMITS: Record<Tier, number> = {
   citizen: 1,
+  member: 3,
   pro: 25,
   desk: 100,
   enterprise: 1_000_000,
 };
 
-// Citizen feed delay in milliseconds. Reads of /api/vessels and
-// /api/conflicts return data as-of NOW - this offset for Citizen tier.
-// /api/aircraft is exempted in code — Citizens see live aircraft data,
-// the trade-off is documented in the trial-mechanism brief §5.4. It now
-// reads the aircraft_positions table (services/adsb-ingest), but that
-// table is upsert-keyed on icao24 with no historical time-series, so the
-// 24h-ago snapshot still isn't possible — the live exception stands.
-export const CITIZEN_FEED_DELAY_MS = 24 * 60 * 60 * 1000;
+// Feed delay: NONE, for every tier — decided 2026-07-04. The old
+// Citizen 24h "delay" on /api/vessels could never return a true
+// delayed snapshot: vessel_positions is upsert-keyed on mmsi
+// (migration 012, one row per vessel refreshed in place), so the
+// delayed-window query returned only vessels that went dark N hours
+// ago — a ghost fleet (~310 stale vessels vs ~21k live, measured on
+// prod 2026-07-04) — the same structural reason /api/aircraft was
+// always exempted. Rather than build a snapshot time-series to make
+// the delay real, all raw feeds are live for all tiers; the paid
+// differentiation is the intelligence layer (AI-query budgets, INTEL
+// workspaces, alerts, exports) — see the tier limit maps above.
 
 // ─── Citizen Intelligence Center access (trial-mechanism brief §5.2) ───
 // Citizens see one live workspace (Calibration Ledger, read-only) and

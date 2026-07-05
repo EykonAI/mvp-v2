@@ -7,8 +7,10 @@ import type { Tier } from '@/lib/auth/session';
 // watch it fire over weeks. This is the single most powerful conversion
 // mechanic for Path-1 (heavy free-tier self-conversion). Pro+ stay at
 // the §10 brief levels (Pro 10, Desk 30, Enterprise 100).
+// Member = 5 per the monetisation review §4.1 (participate fully).
 export const ACTIVE_RULE_LIMITS: Record<Tier, number> = {
   citizen: 1,
+  member: 5,
   pro: 10,
   desk: 30,
   enterprise: 100,
