@@ -25,6 +25,8 @@ export const CHANNELS = [
   'youtube', // video                       (social)
   'discord', // community                   (community)
   'telegram', // community                  (social)
+  'repcard', // embeddable Creator Pro reputation card (utm_content=<handle>)
+  'space_embed', // in-Space artifact-card CTA (monetisation §4.2)
   'direct', // fallback: no tag
   'organic', // fallback: untagged organic
 ] as const;

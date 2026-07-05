@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
   const tier = await getCurrentTier();
   const cta =
     tier === 'citizen'
-      ? { href: '/pricing?from=space_embed', label: 'Track this yourself →' }
+      ? { href: '/pricing?ch=space_embed&from=space_embed', label: 'Track this yourself →' }
       : null;
 
   if (kind === 'c') {

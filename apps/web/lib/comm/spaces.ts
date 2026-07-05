@@ -35,6 +35,7 @@ export interface SpaceSummary {
   cadence: string;
   status: string; // 'draft' | 'live' | 'paused' | 'archived'
   lock_status: string | null; // null | 'working' | 'ready' | 'failed' — buyable only when 'ready'
+  accent_color: string | null; // Creator Pro branding (mig 074), '#rrggbb' or null
   creator: SpaceCreator | null;
   subscriber_count: number;
   is_creator: boolean;
@@ -77,6 +78,7 @@ interface SpaceRow {
   created_at?: string;
   lock_address?: string | null;
   lock_status?: string | null;
+  accent_color?: string | null;
   comm_rooms: { title: string | null } | { title: string | null }[] | null;
 }
 interface ProfRow {
@@ -198,7 +200,7 @@ export async function createSpace(
   return spaceId;
 }
 
-const SUMMARY_COLS = 'space_id, creator_id, price_usdc, cadence, blurb, status, lock_status, created_at, comm_rooms!inner(title)';
+const SUMMARY_COLS = 'space_id, creator_id, price_usdc, cadence, blurb, status, lock_status, accent_color, created_at, comm_rooms!inner(title)';
 
 export async function listSpaces(supabase: SB, viewerId: string): Promise<SpaceSummary[]> {
   const { data } = await supabase
@@ -207,7 +209,31 @@ export async function listSpaces(supabase: SB, viewerId: string): Promise<SpaceS
     .eq('status', 'live')
     .order('created_at', { ascending: false })
     .limit(100);
-  return hydrateSummaries(supabase, viewerId, (data as SpaceRow[] | null) ?? []);
+  const rows = (data as SpaceRow[] | null) ?? [];
+
+  // Creator Pro Discover boost (monetisation review §4.3): Pro
+  // creators' spaces sort first, newest-first within each group — a
+  // boost term, not an exclusive section; Discover stays honest and
+  // every live space remains listed.
+  const creatorIds = Array.from(new Set(rows.map((r) => r.creator_id)));
+  const proCreators = new Set<string>();
+  if (creatorIds.length > 0) {
+    const { data: grants } = await supabase
+      .from('creator_pro_grants')
+      .select('user_id, lifetime_free, expires_at')
+      .in('user_id', creatorIds);
+    for (const g of (grants as { user_id: string; lifetime_free: boolean; expires_at: string | null }[] | null) ?? []) {
+      if (g.lifetime_free || (g.expires_at && new Date(g.expires_at).getTime() > Date.now())) {
+        proCreators.add(g.user_id);
+      }
+    }
+  }
+  const sorted = [...rows].sort((a, b) => {
+    const boost = Number(proCreators.has(b.creator_id)) - Number(proCreators.has(a.creator_id));
+    if (boost !== 0) return boost;
+    return (b.created_at ?? '').localeCompare(a.created_at ?? '');
+  });
+  return hydrateSummaries(supabase, viewerId, sorted);
 }
 
 // Spaces the viewer actively subscribes to (§4.1 — the "My subscriptions" tab).
@@ -261,6 +287,7 @@ async function hydrateSummaries(supabase: SB, viewerId: string, rows: SpaceRow[]
     cadence: r.cadence,
     status: r.status ?? 'live',
     lock_status: r.lock_status ?? null,
+    accent_color: r.accent_color ?? null,
     creator: creatorFrom(profById.get(r.creator_id), reps.get(r.creator_id)),
     subscriber_count: countBySpace.get(r.space_id) ?? 0,
     is_creator: r.creator_id === viewerId,
@@ -467,7 +494,16 @@ export async function updateSpace(
   supabase: SB,
   spaceId: string,
   creatorId: string,
-  patch: { title?: string; blurb?: string | null; priceUsdc?: number; cadence?: 'monthly' | 'annual' },
+  patch: {
+    title?: string;
+    blurb?: string | null;
+    priceUsdc?: number;
+    cadence?: 'monthly' | 'annual';
+    // Creator Pro branding (mig 074) — the API route only forwards
+    // these for active Creator Pro grants.
+    accentColor?: string | null;
+    bannerUrl?: string | null;
+  },
 ): Promise<ManageResult> {
   const { data: sp } = await supabase
     .from('comm_spaces')
@@ -497,6 +533,18 @@ export async function updateSpace(
     upd.price_usdc = patch.priceUsdc;
   }
   if (patch.cadence != null) upd.cadence = patch.cadence === 'annual' ? 'annual' : 'monthly';
+  if (patch.accentColor !== undefined) {
+    if (patch.accentColor !== null && !/^#[0-9a-fA-F]{6}$/.test(patch.accentColor)) {
+      return { ok: false, error: 'invalid_accent' };
+    }
+    upd.accent_color = patch.accentColor;
+  }
+  if (patch.bannerUrl !== undefined) {
+    if (patch.bannerUrl !== null && !/^https:\/\/\S{1,500}$/.test(patch.bannerUrl)) {
+      return { ok: false, error: 'invalid_banner' };
+    }
+    upd.banner_url = patch.bannerUrl;
+  }
   if (Object.keys(upd).length > 0) {
     const { error } = await supabase.from('comm_spaces').update(upd).eq('space_id', spaceId);
     if (error) return { ok: false, error: 'update_failed' };
