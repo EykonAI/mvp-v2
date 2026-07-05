@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
-import { getCurrentTier } from '@/lib/subscription';
-import { feedDelayMsForTier } from '@/lib/intel/modules';
-import type { Tier } from '@/lib/pricing';
 
 // Provider selection:
 //   CONFLICT_PROVIDER=acled   -> live proxy to ACLED (requires paid license)
@@ -131,7 +128,7 @@ async function fetchFromAcled(params: URLSearchParams) {
 }
 
 // ─── Supabase read (default — serves GDELT-ingested rows) ────────────────────
-async function fetchFromSupabase(params: URLSearchParams, tier: Tier) {
+async function fetchFromSupabase(params: URLSearchParams) {
   const country = params.get('country');
   const days = parseInt(params.get('days') || '30');
   const eventType = params.get('event_type');
@@ -147,18 +144,7 @@ async function fetchFromSupabase(params: URLSearchParams, tier: Tier) {
     .order('event_date', { ascending: false })
     .limit(limit);
 
-  // Delayed feeds: Citizen sees events dated <= NOW - 24h, Member
-  // <= NOW - 6h (event_date is a DATE column; the comparison is at
-  // calendar-day granularity, so the Member delay only bites around
-  // midnight UTC — acceptable for a daily-grain feed).
-  const delayMs = feedDelayMsForTier(tier);
-  if (delayMs > 0) {
-    const until = new Date(Date.now() - delayMs)
-      .toISOString()
-      .split('T')[0];
-    query = query.lte('event_date', until);
-  }
-
+  // Live for every tier (decided 2026-07-04) — see lib/intel/modules.ts.
   if (country) query = query.eq('country', country);
   if (eventType) query = query.eq('event_type', eventType);
 
@@ -187,11 +173,8 @@ async function fetchFromSupabase(params: URLSearchParams, tier: Tier) {
 export async function GET(req: NextRequest) {
   try {
     const params = req.nextUrl.searchParams;
-    // ACLED live proxy is paid-license-only and does not currently honour
-    // the Citizen delay (the live API has its own access controls).
     if (PROVIDER === 'acled') return await fetchFromAcled(params);
-    const tier = await getCurrentTier();
-    return await fetchFromSupabase(params, tier);
+    return await fetchFromSupabase(params);
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

@@ -136,27 +136,17 @@ export const WATCHLIST_LIMITS: Record<Tier, number> = {
   enterprise: 1_000_000,
 };
 
-// Citizen feed delay in milliseconds. Reads of /api/vessels and
-// /api/conflicts return data as-of NOW - this offset for Citizen tier.
-// /api/aircraft is exempted in code — Citizens see live aircraft data,
-// the trade-off is documented in the trial-mechanism brief §5.4. It now
-// reads the aircraft_positions table (services/adsb-ingest), but that
-// table is upsert-keyed on icao24 with no historical time-series, so the
-// 24h-ago snapshot still isn't possible — the live exception stands.
-export const CITIZEN_FEED_DELAY_MS = 24 * 60 * 60 * 1000;
-
-// Member feed delay (monetisation review §4.1): recent enough to follow
-// a live discussion in a Space, delayed enough that professional
-// monitoring still requires Pro. Aircraft stay live for everyone (the
-// exemption above applies unchanged).
-export const MEMBER_FEED_DELAY_MS = 6 * 60 * 60 * 1000;
-
-// Per-tier feed delay for the delayed feeds (/api/vessels, /api/conflicts).
-export function feedDelayMsForTier(tier: Tier): number {
-  if (tier === 'citizen') return CITIZEN_FEED_DELAY_MS;
-  if (tier === 'member') return MEMBER_FEED_DELAY_MS;
-  return 0;
-}
+// Feed delay: NONE, for every tier — decided 2026-07-04. The old
+// Citizen 24h "delay" on /api/vessels could never return a true
+// delayed snapshot: vessel_positions is upsert-keyed on mmsi
+// (migration 012, one row per vessel refreshed in place), so the
+// delayed-window query returned only vessels that went dark N hours
+// ago — a ghost fleet (~310 stale vessels vs ~21k live, measured on
+// prod 2026-07-04) — the same structural reason /api/aircraft was
+// always exempted. Rather than build a snapshot time-series to make
+// the delay real, all raw feeds are live for all tiers; the paid
+// differentiation is the intelligence layer (AI-query budgets, INTEL
+// workspaces, alerts, exports) — see the tier limit maps above.
 
 // ─── Citizen Intelligence Center access (trial-mechanism brief §5.2) ───
 // Citizens see one live workspace (Calibration Ledger, read-only) and

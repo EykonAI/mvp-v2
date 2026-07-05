@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
-import { getCurrentTier } from '@/lib/subscription';
-import { feedDelayMsForTier } from '@/lib/intel/modules';
-import type { Tier } from '@/lib/pricing';
 
 // Provider selection mirrors the conflicts pattern:
 //   VESSEL_PROVIDER=aishub    -> live proxy to AIS Hub (requires feeder station)
@@ -12,20 +9,17 @@ const PROVIDER = (process.env.VESSEL_PROVIDER || 'supabase').toLowerCase();
 
 const FRESH_WINDOW_MS = 60 * 60 * 1000; // only return vessels seen in last hour
 
-async function fetchFromSupabase(params: URLSearchParams, tier: Tier) {
+async function fetchFromSupabase(params: URLSearchParams) {
   const supabase = createServerSupabase();
 
   const limit = Math.min(parseInt(params.get('limit') || '5000'), 20000);
 
-  // Delayed feeds: Citizen sees the snapshot from 24h ago, Member from
-  // 6h ago (a 1h window ending at NOW - delay). Pro+ sees the most
-  // recent hour. Delay values live in lib/intel/modules.ts.
-  const delayMs = feedDelayMsForTier(tier);
-  const isDelayed = delayMs > 0;
-  const now = Date.now();
-  const upperBoundMs = now - delayMs;
-  const lowerBoundMs = upperBoundMs - FRESH_WINDOW_MS;
-  const sinceISO = new Date(lowerBoundMs).toISOString();
+  // Live for every tier (decided 2026-07-04): vessel_positions is
+  // upsert-keyed on mmsi with no historical time-series, so a "delayed"
+  // window could only ever show vessels that went dark N hours ago —
+  // not a delayed snapshot. Paid differentiation lives in the
+  // intelligence layer, not the raw feeds. See lib/intel/modules.ts.
+  const sinceISO = new Date(Date.now() - FRESH_WINDOW_MS).toISOString();
 
   let query = supabase
     .from('vessel_positions')
@@ -33,9 +27,6 @@ async function fetchFromSupabase(params: URLSearchParams, tier: Tier) {
     .gte('updated_at', sinceISO)
     .order('updated_at', { ascending: false })
     .limit(limit);
-  if (isDelayed) {
-    query = query.lte('updated_at', new Date(upperBoundMs).toISOString());
-  }
 
   const latmin = params.get('latmin');
   if (latmin) {
@@ -125,12 +116,8 @@ async function fetchFromAishub(params: URLSearchParams) {
 export async function GET(req: NextRequest) {
   try {
     const params = req.nextUrl.searchParams;
-    // AIS Hub live proxy is preserved for feeder-station setups and does
-    // not currently honour the Citizen delay (no historical window
-    // available from that provider). Default Supabase path applies it.
     if (PROVIDER === 'aishub') return await fetchFromAishub(params);
-    const tier = await getCurrentTier();
-    return await fetchFromSupabase(params, tier);
+    return await fetchFromSupabase(params);
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

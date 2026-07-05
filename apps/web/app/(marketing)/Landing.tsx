@@ -500,7 +500,7 @@ export function Landing() {
                 Operational <strong>Globe</strong> with all map layers
               </li>
               <li>
-                1 <strong>watchlist</strong> · 24h-delayed feeds
+                <strong>Live feeds</strong> — AIS, ADS-B, conflicts · 1 <strong>watchlist</strong>
               </li>
               <li>
                 Daily personalised <strong>briefing</strong> on the home screen
@@ -537,16 +537,10 @@ export function Landing() {
             <div className="tier-section-label">Everything in Citizen, plus</div>
             <ul className="tier-features">
               <li>
-                Full <strong>community standing</strong> — Member badge in Spaces & rooms
-              </li>
-              <li>
                 <strong>25 AI Analyst</strong> queries / month · full tool surface
               </li>
               <li>
                 Persisted <strong>query history</strong> — pick any thread back up
-              </li>
-              <li>
-                <strong>6h-delayed feeds</strong> (vs 24h) · aircraft stay live
               </li>
               <li>
                 5 live <strong>notification rules</strong> · email
@@ -580,7 +574,7 @@ export function Landing() {
                 <strong>All 25+ Intelligence Menu</strong> modules (IM-01 → IM-27)
               </li>
               <li>
-                <strong>Real-time</strong> feeds: AIS, ADS-B, ACLED
+                <strong>SMS + WhatsApp</strong> alert delivery
               </li>
               <li>
                 <strong>IM-13 Asset Impact Lens</strong> +{' '}
@@ -763,10 +757,11 @@ export function Landing() {
           <code>IM-14 Crypto Flow Monitor</code> modules are purpose-built for this loop.
         </Faq>
         <Faq q="How fresh is the data?">
-          Pro and Enterprise receive real-time feeds: <code>ADS-B ~15s</code>,{' '}
+          Every plan — including Citizen — receives real-time feeds: <code>ADS-B ~15s</code>,{' '}
           <code>AIS ~60s</code>, <code>ACLED hourly</code>, static infrastructure daily.
-          Citizen tier feeds are delayed by 24 hours. Every data point carries its source,
-          license, and ingestion timestamp.
+          Paid tiers differ on the intelligence layer — AI Analyst budget, the nine INTEL
+          workspaces, alerts and exports — never on the rawness of the map. Every data
+          point carries its source, license, and ingestion timestamp.
         </Faq>
         <Faq q="How does the crypto discount work in practice?">
           Select Annual billing, then toggle &quot;Annual + Crypto −30%&quot;. At checkout,

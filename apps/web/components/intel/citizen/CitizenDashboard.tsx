@@ -82,7 +82,7 @@ export default function CitizenDashboard() {
               marginBottom: 8,
             }}
           >
-            Read-only preview · 24h-delayed snapshot
+            Read-only preview
           </div>
           <div
             style={{

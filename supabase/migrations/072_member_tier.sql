@@ -4,8 +4,10 @@
 -- Adds 'member' (~$12/mo headline, $99/yr; crypto annual $84.15)
 -- between citizen and pro, per the 2026-07-04 Monetisation Strategy
 -- Review §4.1. Member = participate fully (COMM standing, persisted
--- chats, 25 AI queries/mo, 5 rules, 6h feed delay); Pro = analyse
--- professionally (INTEL workspaces stay pro+, as do exports/API).
+-- chats, 25 AI queries/mo, 5 rules); Pro = analyse professionally
+-- (INTEL workspaces stay pro+, as do exports/API). Raw feeds are live
+-- for ALL tiers (decided 2026-07-04) — differentiation is the
+-- intelligence layer, not the map.
 --
 -- Only the two tier CHECK constraints change; no new tables. The
 -- inline column CHECKs from 007 (user_profiles) and 008
