@@ -15,6 +15,7 @@ import {
 import { CreateSpace } from '@/components/comm/CreateSpace';
 import { ManageSpaces } from '@/components/comm/ManageSpaces';
 import { ReputationNote } from '@/components/profile/ReputationNote';
+import { loadCreatorEarnings, getBountyRateBps, type CreatorEarnings } from '@/lib/comm/bounty';
 
 export const metadata: Metadata = { title: 'Spaces — eYKON.ai', robots: { index: false, follow: false } };
 export const dynamic = 'force-dynamic';
@@ -37,11 +38,12 @@ export default async function SpacesPage({
   const tab = pickTab(searchParams?.tab);
 
   const supabase = createServerSupabase();
-  const [discover, mySubs, manage, gate] = await Promise.all([
+  const [discover, mySubs, manage, gate, earnings] = await Promise.all([
     listSpaces(supabase, user.id),
     listMySubscriptions(supabase, user.id),
     listManageSpaces(supabase, user.id),
     canCreateSpace(supabase, user),
+    loadCreatorEarnings(supabase, user.id),
   ]);
 
   return (
@@ -105,6 +107,9 @@ export default async function SpacesPage({
               </div>
             )}
             <ManageSpaces spaces={manage} />
+            {(manage.length > 0 || earnings.rows.length > 0) && (
+              <EarningsPanel earnings={earnings} />
+            )}
           </div>
         )}
       </section>
@@ -156,6 +161,39 @@ function SpaceCard({ s }: { s: SpaceSummary }) {
           {ready ? ' · ● live' : ' · setup pending'}
         </div>
       </Link>
+    </div>
+  );
+}
+
+// Conversion earnings (mig 073): visible to EVERY creator, not gated —
+// the bounty only motivates if creators can see it accrue. Server-
+// rendered from the service-role read (creator_bounties is RLS-no-policy).
+function EarningsPanel({ earnings }: { earnings: CreatorEarnings }) {
+  const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+  return (
+    <div style={{ border: '1px solid var(--rule)', borderRadius: 8, padding: '14px 16px', background: 'var(--bg-panel)' }}>
+      <div style={{ fontFamily: 'var(--f-mono)', fontSize: 10.5, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--teal)', marginBottom: 8 }}>
+        Conversion earnings
+      </div>
+      <p style={{ fontSize: 12.5, color: 'var(--ink-dim)', margin: '0 0 10px', lineHeight: 1.5 }}>
+        When a member of your Space upgrades to an eYKON plan, you earn{' '}
+        {getBountyRateBps() / 100}% of their first-year subscription — on top of your Space
+        revenue. Paid monthly in USDC.
+      </p>
+      <div style={{ fontFamily: 'var(--f-mono)', fontSize: 12, color: 'var(--ink)' }}>
+        Accrued: <strong style={{ color: 'var(--teal)' }}>{usd(earnings.pendingUsdCents)}</strong>
+        {' · '}Paid out: <strong>{usd(earnings.paidUsdCents)}</strong>
+        {' · '}{earnings.rows.length} conversion{earnings.rows.length === 1 ? '' : 's'}
+      </div>
+      {earnings.rows.length > 0 && (
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {earnings.rows.slice(0, 5).map(r => (
+            <div key={r.id} style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--ink-faint)' }}>
+              {new Date(r.created_at).toISOString().slice(0, 10)} · {usd(r.bounty_usd_cents)} · {r.plan_variant} · {r.status}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

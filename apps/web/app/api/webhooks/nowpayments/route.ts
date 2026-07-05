@@ -10,6 +10,7 @@ import {
   type NowpaymentsIpnPayload,
   extractCryptoTxHash,
 } from '@/lib/payments/nowpayments';
+import { recordConversionBounty } from '@/lib/comm/bounty';
 import { captureServer } from '@/lib/analytics/server';
 
 export const dynamic = 'force-dynamic';
@@ -118,6 +119,21 @@ export async function POST(request: NextRequest) {
           amount_usd_cents: amountUsdCents,
           founding_locked: completion.granted_founding === true,
         });
+
+        // Creator conversion bounty (mig 073): if this user came in
+        // through a paid Space, its creator earns a share of this
+        // revenue. Awaited (not fire-and-forget) so a webhook retry
+        // can't race the UNIQUE constraint, but recordConversionBounty
+        // never throws — the payment result above is already final.
+        // Idempotent replays are skipped: the first delivery recorded
+        // whatever there was to record.
+        if (completion.is_idempotent_replay !== true) {
+          await recordConversionBounty(admin, {
+            convertedUserId: completion.user_id,
+            planVariant: completion.variant_id ?? 'unknown',
+            baseAmountUsdCents: amountUsdCents,
+          });
+        }
       }
 
       return NextResponse.json({ status: 'completed', result: data });

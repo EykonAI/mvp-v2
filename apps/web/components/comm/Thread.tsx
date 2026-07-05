@@ -2,6 +2,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { DmMessage } from '@/lib/comm/dm';
+import { extractArtifactRefs } from '@/lib/comm/embeds';
+import { ArtifactCard } from '@/components/comm/ArtifactCard';
 
 // DM thread view (COMM B1). Renders the message list + composer and
 // polls for new messages every 4s (Supabase Realtime is a later
@@ -105,6 +107,12 @@ export function Thread({
                 >
                   {m.body}
                 </div>
+                {/* Artifact embeds (§4.2): /c and /q URLs in a message
+                    render as cards. The raw URL stays in the body above,
+                    so a failed preview degrades to a plain link. */}
+                {extractArtifactRefs(m.body).map((ref) => (
+                  <ArtifactCard key={`${ref.kind}:${ref.id}`} artifactRef={ref} />
+                ))}
                 <div style={{ fontFamily: 'var(--f-mono)', fontSize: 9.5, color: 'var(--ink-faint)', marginTop: 3, textAlign: mine ? 'right' : 'left' }}>
                   {timeShort(m.created_at)}
                 </div>
