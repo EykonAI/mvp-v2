@@ -20,6 +20,11 @@ import { ShareButton } from '@/components/profile/ShareButton';
 import { MakeACall } from '@/components/profile/MakeACall';
 import { MessageButton } from '@/components/profile/MessageButton';
 import { ProfileModeration } from '@/components/profile/ProfileModeration';
+import { FoundingPartnerEmblem, FoundingPartnerChip } from '@/components/profile/FoundingPartnerEmblem';
+import { FirstTenPanel } from '@/components/profile/FirstTenPanel';
+import { getFoundingPartner } from '@/lib/comm/foundingPartner';
+import { loadFastClosingMarkets, type FastMarket } from '@/lib/comm/firstTen';
+import { createServerSupabase } from '@/lib/supabase-server';
 import { getCurrentUser } from '@/lib/auth/session';
 
 // /u/<handle> — public, read-only COMM profile (Phase 1 of the COMM
@@ -82,6 +87,15 @@ export default async function ProfilePage({
   const tab = pickTab(searchParams?.tab);
   const joined = p.created_at ? new Date(p.created_at).getUTCFullYear() : null;
   const initials = name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || 'EY';
+
+  // Founding Partner status (mig 076) + First Ten data. The emblem is
+  // public; the First Ten panel is owner-only and only while the Note
+  // is not yet shown.
+  const admin = createServerSupabase();
+  const partner = await getFoundingPartner(admin, p.id);
+  const noteShown = (data.reputationNote?.note ?? null) !== null;
+  const fastMarkets: FastMarket[] =
+    isOwner && !noteShown ? await loadFastClosingMarkets(admin) : [];
 
   return (
     <article style={{ maxWidth: 980, margin: '0 auto', padding: '36px 24px 72px' }}>
@@ -149,6 +163,7 @@ export default async function ProfilePage({
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
             <Pill>{personaLabel(p.preferred_persona ?? 'analyst')}</Pill>
+            {partner && <FoundingPartnerChip />}
             {p.is_founding_analyst && <Pill tone="teal">Founding Analyst</Pill>}
             {data.spaces.length > 0 && <Pill tone="teal">Creator</Pill>}
             {joined && (
@@ -187,16 +202,41 @@ export default async function ProfilePage({
       />
 
       {/* Dominant Reputation Note band — the first credibility signal a
-          visitor reads, directly under the identity hero (UX Uplift §3.1). */}
-      <div style={{ marginTop: 18 }}>
-        <ReputationNote
-          size="hero"
-          note={data.reputationNote?.note ?? null}
-          nResolved={data.reputationNote?.nResolved ?? data.resolvedCount}
-          percentile={data.reputationNote?.percentile ?? null}
-          coverage={data.reputationNote?.coverage ?? null}
-        />
+          visitor reads, directly under the identity hero (UX Uplift §3.1).
+          Two-sided since the Founding Partner programme (cosmetic spec
+          2026-07-05): Note LEFT (earned, epistemic), Founding Partner
+          emblem RIGHT (vetted, curatorial), same geometry. Non-partners
+          see the single-sided band — never an empty placeholder. */}
+      <div style={{ display: 'flex', gap: 14, marginTop: 18, flexWrap: 'wrap', alignItems: 'stretch' }}>
+        <div style={{ flex: '2 1 380px', minWidth: 300 }}>
+          <ReputationNote
+            size="hero"
+            note={data.reputationNote?.note ?? null}
+            nResolved={data.reputationNote?.nResolved ?? data.resolvedCount}
+            percentile={data.reputationNote?.percentile ?? null}
+            coverage={data.reputationNote?.coverage ?? null}
+          />
+        </div>
+        {partner && (
+          <div style={{ flex: '1 1 300px', minWidth: 280 }}>
+            <FoundingPartnerEmblem grantedYear={new Date(partner.granted_at).getUTCFullYear()} />
+          </div>
+        )}
       </div>
+
+      {/* The First Ten — own-profile onboarding sprint to the shown
+          Note (Founding Partner build-prompt §7). Fast-closing REAL
+          Polymarket markets; a call from here is an ordinary sealed
+          prediction. Partners also see their deadline countdown. */}
+      {isOwner && (data.reputationNote?.note ?? null) === null && (
+        <div style={{ marginTop: 14 }}>
+          <FirstTenPanel
+            resolvedCount={data.reputationNote?.nResolved ?? data.resolvedCount}
+            markets={fastMarkets}
+            deadline={partner && partner.status !== 'graduated' ? partner.note_deadline : null}
+          />
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 28, marginTop: 28, flexWrap: 'wrap' }}>
         <aside style={{ width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>

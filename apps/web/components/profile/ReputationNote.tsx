@@ -74,18 +74,21 @@ export function ReputationNote({ note, nResolved, percentile = null, coverage = 
     );
   }
 
-  // hero
+  // hero — the visual anchor of the profile (founder cosmetic spec,
+  // 2026-07-05): enlarged ring (~1.5×), and when calibrating the word
+  // itself renders SMALLER, subordinate to the ring and the progress
+  // line. Presence changed; semantics untouched.
   return (
     <section
       aria-label="Reputation Note"
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 20,
+        gap: 24,
         background: 'var(--bg-panel)',
         border: '1px solid var(--rule)',
         borderRadius: 8,
-        padding: '18px 22px',
+        padding: '22px 26px',
       }}
     >
       <ScoreRing note={shown ? note! : null} color={band.color} />
@@ -96,7 +99,7 @@ export function ReputationNote({ note, nResolved, percentile = null, coverage = 
         <div
           style={{
             fontFamily: 'var(--f-display)',
-            fontSize: 26,
+            fontSize: calibrating ? 15 : 30,
             color: shown ? 'var(--ink)' : 'var(--ink-dim)',
             marginTop: 6,
             display: 'flex',
@@ -131,8 +134,11 @@ export function ReputationNote({ note, nResolved, percentile = null, coverage = 
 // Circular score ring. The arc length encodes note/100 in the band colour; the
 // centre shows the number, or a faint "—" while calibrating.
 function ScoreRing({ note, color }: { note: number | null; color: string }) {
-  const size = 76;
-  const stroke = 6;
+  // 1.5× the original 76px (founder cosmetic spec 2026-07-05) — the
+  // Note is the profile's visual anchor. The Founding Partner emblem
+  // (FoundingPartnerEmblem) mirrors this exact geometry.
+  const size = 114;
+  const stroke = 9;
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const pct = note == null ? 0 : Math.max(0, Math.min(100, note)) / 100;
@@ -157,7 +163,7 @@ function ScoreRing({ note, color }: { note: number | null; color: string }) {
         y="50%"
         dominantBaseline="central"
         textAnchor="middle"
-        style={{ fontFamily: 'var(--f-display)', fontSize: 22, fill: note == null ? 'var(--ink-ghost)' : 'var(--ink)' }}
+        style={{ fontFamily: 'var(--f-display)', fontSize: 33, fill: note == null ? 'var(--ink-ghost)' : 'var(--ink)' }}
       >
         {note == null ? '—' : note}
       </text>

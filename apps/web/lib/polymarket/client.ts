@@ -31,6 +31,9 @@ export interface PolymarketMarket {
   active: boolean;
   closed: boolean;
   closed_at: string | null;
+  // Scheduled close from Gamma's endDate — the basis for "resolves
+  // soon" ranking in The First Ten (mig 077).
+  end_date: string | null;
 }
 
 function asArray(v: string | string[] | undefined): string[] | null {
@@ -68,6 +71,11 @@ export function parseGammaMarket(raw: GammaMarketRaw): PolymarketMarket | null {
         ? raw.endDate
         : null;
 
+  const endDate =
+    typeof raw.endDate === 'string' && raw.endDate && Number.isFinite(Date.parse(raw.endDate))
+      ? raw.endDate
+      : null;
+
   return {
     market_id: String(raw.id),
     question: String(raw.question),
@@ -77,6 +85,7 @@ export function parseGammaMarket(raw: GammaMarketRaw): PolymarketMarket | null {
     active: raw.active !== false,
     closed: raw.closed === true,
     closed_at: closedAt,
+    end_date: endDate,
   };
 }
 

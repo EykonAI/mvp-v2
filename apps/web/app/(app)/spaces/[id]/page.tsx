@@ -6,6 +6,7 @@ import { getCurrentUser } from '@/lib/auth/session';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { loadSpace, spacesCheckoutEnabled } from '@/lib/comm/spaces';
 import { getFoundingPartner } from '@/lib/comm/foundingPartner';
+import { FoundingPartnerChip } from '@/components/profile/FoundingPartnerEmblem';
 import { getLinkedWallet } from '@/lib/comm/wallets';
 import { loadMessages, markRead } from '@/lib/comm/dm';
 import { Thread } from '@/components/comm/Thread';
@@ -121,7 +122,13 @@ export default async function SpacePage({ params }: { params: { id: string } }) 
                   By{' '}
                   <Link href={`/u/${space.creator.slug}`} style={{ color: 'var(--teal)', textDecoration: 'none' }}>
                     {space.creator.name}
-                  </Link>{' '}
+                  </Link>
+                  {creatorPartner && (
+                    <>
+                      {' '}
+                      <FoundingPartnerChip style={{ verticalAlign: 'middle' }} />
+                    </>
+                  )}{' '}
                   —{' '}
                 </>
               )}
