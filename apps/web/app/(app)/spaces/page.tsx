@@ -96,6 +96,14 @@ export default async function SpacesPage({
 
         {tab === 'manage' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 16 }}>
+              <Link href="/creator/dashboard" style={{ fontFamily: 'var(--f-mono)', fontSize: 11.5, color: 'var(--teal)', textDecoration: 'none' }}>
+                Creator dashboard →
+              </Link>
+              <Link href="/creator-pro" style={{ fontFamily: 'var(--f-mono)', fontSize: 11.5, color: 'var(--teal)', textDecoration: 'none' }}>
+                Creator Pro →
+              </Link>
+            </div>
             {gate.ok ? (
               <CreateSpace />
             ) : (
@@ -195,6 +203,10 @@ function EarningsPanel({ earnings }: { earnings: CreatorEarnings }) {
         Accrued: <strong style={{ color: 'var(--teal)' }}>{usd(earnings.pendingUsdCents)}</strong>
         {' · '}Paid out: <strong>{usd(earnings.paidUsdCents)}</strong>
         {' · '}{earnings.rows.length} conversion{earnings.rows.length === 1 ? '' : 's'}
+        {' · '}
+        <Link href="/creator/dashboard" style={{ color: 'var(--teal)', textDecoration: 'none' }}>
+          Creator dashboard →
+        </Link>
       </div>
       {earnings.rows.length > 0 && (
         <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
