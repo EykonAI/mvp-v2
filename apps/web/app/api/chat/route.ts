@@ -104,6 +104,17 @@ export async function POST(req: NextRequest) {
             : tier === 'pro'
             ? '/pricing?plan=desk_founding_annual'
             : undefined;
+        // One-off exits from the cap (mig 075): a $5 query pack or the
+        // $9 Week Pass — lower-commitment than a subscription, right at
+        // the moment of demand. UI clients that predate this field
+        // simply ignore it.
+        const pass_offer =
+          tier === 'citizen' || tier === 'member'
+            ? {
+                query_pack: { href: '/pricing?plan=query_pack_25', label: '+25 queries this month · $5' },
+                week_pass: { href: '/pricing?plan=week_pass', label: '7 days of full Pro · $9' },
+              }
+            : undefined;
         return NextResponse.json(
           {
             error: `Monthly AI analyst limit reached (${limit} queries).`,
@@ -112,6 +123,7 @@ export async function POST(req: NextRequest) {
             period_start: row?.period_start,
             tier,
             upgrade_url,
+            pass_offer,
           },
           { status: 429 },
         );
