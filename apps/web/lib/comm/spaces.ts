@@ -1,6 +1,7 @@
 import { createServerSupabase } from '@/lib/supabase-server';
 import { isFounder } from '@/lib/admin/access';
 import { isMember } from '@/lib/comm/dm';
+import { getFoundingPartner, partnerBridgesGate, gatedPartnerIds } from '@/lib/comm/foundingPartner';
 
 // Paid spaces (COMM E1 — scaffold, no payments). A space is a comm_rooms
 // row with kind='space' plus comm_spaces metadata. Access = creator OR an
@@ -140,11 +141,26 @@ function roomTitle(row: SpaceRow): string | null {
 // Reputation gate: who may open a paid space. The founder is always
 // allowed (Phase-1 allowlist); otherwise the user needs a shown reputation
 // (n_resolved >= MIN_SAMPLE) that beats the crowd and sits in the top half.
+// The percentile term is only meaningful once the calibrated cohort is
+// big enough to rank against: "top half" of 2 people bars one of them
+// by pure math (founding-partner build-prompt §3.2). Below this cohort
+// size the gate is 10-resolved + skill ≥ 0 only.
+const MIN_COHORT_FOR_PERCENTILE = 20;
+
 export async function canCreateSpace(
   supabase: SB,
   user: { id: string; email?: string | null },
 ): Promise<{ ok: boolean; reason: string }> {
   if (isFounder(user)) return { ok: true, reason: 'founder' };
+
+  // Founding Partner bridge (mig 076): active/warned partners open paid
+  // Spaces immediately — the vetting is the founder's, the Reputation
+  // Note display stays honest ("Calibrating") until earned. Gated
+  // partners (deadline passed, no Note) cannot open additional spaces;
+  // graduated partners pass the normal calibrated path below.
+  const partner = await getFoundingPartner(supabase, user.id);
+  if (partnerBridgesGate(partner)) return { ok: true, reason: 'founding_partner' };
+
   try {
     const { data } = await supabase
       .from('user_reputation')
@@ -158,7 +174,19 @@ export async function canCreateSpace(
     }
     const skill = Number((data as { brier_skill: number | null }).brier_skill ?? -1);
     const pct = Number((data as { rank_percentile: number | null }).rank_percentile ?? 0);
-    if (skill >= 0 && pct >= MIN_PERCENTILE) return { ok: true, reason: 'calibrated' };
+    if (skill < 0) {
+      return { ok: false, reason: 'Your calibration is not yet high enough to open a paid space.' };
+    }
+    const { count } = await supabase
+      .from('user_reputation')
+      .select('author_id', { count: 'exact', head: true })
+      .eq('feature', '_all')
+      .eq('shown', true)
+      .gte('brier_skill', 0);
+    const cohort = count ?? 0;
+    if (cohort < MIN_COHORT_FOR_PERCENTILE || pct >= MIN_PERCENTILE) {
+      return { ok: true, reason: 'calibrated' };
+    }
     return { ok: false, reason: 'Your calibration is not yet high enough to open a paid space.' };
   } catch {
     return { ok: false, reason: 'Reputation check is unavailable right now.' };
@@ -209,7 +237,14 @@ export async function listSpaces(supabase: SB, viewerId: string): Promise<SpaceS
     .eq('status', 'live')
     .order('created_at', { ascending: false })
     .limit(100);
-  const rows = (data as SpaceRow[] | null) ?? [];
+  let rows = (data as SpaceRow[] | null) ?? [];
+
+  // Founding Partner gating (mig 076): a partner past their Note
+  // deadline drops out of Discover until the Note lands. Existing
+  // subscribers still reach the space via their Subscriptions tab —
+  // only discovery of NEW subscribers pauses.
+  const gated = await gatedPartnerIds(supabase);
+  if (gated.size > 0) rows = rows.filter((r) => !gated.has(r.creator_id));
 
   // Creator Pro Discover boost (monetisation review §4.3): Pro
   // creators' spaces sort first, newest-first within each group — a
