@@ -52,7 +52,7 @@ export function AnalystWithTools() {
         }}
       >
         Most &lsquo;AI + data&rsquo; products are chat panels with no access to the underlying
-        database. Our Chat is a Claude Opus 4.7 analyst with a catalog of 22 first-class Tools
+        database. Our Chat is a Fable 5 analyst with a catalog of 21 first-class Tools
         wired directly into the platform&rsquo;s proprietary derived datasets — convergence
         events, posture scores, precursor analogs, calibration metrics. When you ask a question,
         the analyst doesn&rsquo;t write SQL or guess from documentation. It calls the right tool,
@@ -71,7 +71,7 @@ export function AnalystWithTools() {
       >
         <FlowChip label="Question" tone="ink" />
         <FlowArrow />
-        <FlowChip label="Tool call · 1 of 22" tone="cyan" mono />
+        <FlowChip label="Tool call · 1 of 21" tone="cyan" mono />
         <FlowArrow />
         <FlowChip label="Structured answer" tone="ink" />
         <FlowArrow />
