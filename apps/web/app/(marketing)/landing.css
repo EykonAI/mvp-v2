@@ -1227,3 +1227,220 @@
   .eykon-landing .briefs-tiles { grid-template-columns: 1fr; }
   .eykon-landing .fp-band { padding: 24px 22px; }
 }
+
+/* ───── Landing update 2026-07-06 — carousels (workspaces + pricing) ─────
+   Both carousels are transform/opacity layers over cards that stay in the
+   DOM. Static grids are the SSR / no-JS / reduced-motion / narrow
+   rendering; the carousel class is applied client-side, desktop-only. */
+
+/* — Hero workspaces section (classes replace former inline styles) — */
+.eykon-landing .ws-showcase {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 32px 32px 24px;
+}
+.eykon-landing .ws-kicker {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin-bottom: 14px;
+  text-align: center;
+}
+.eykon-landing .ws-title {
+  font-family: 'Jura', sans-serif;
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.5px;
+  text-align: center;
+  margin-bottom: 14px;
+}
+.eykon-landing .ws-sub {
+  max-width: 720px;
+  margin: 0 auto 36px;
+  color: var(--text-secondary);
+  font-size: 15.5px;
+  line-height: 1.6;
+  text-align: center;
+}
+.eykon-landing .ws-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+.eykon-landing .ws-grid .ws-slot { display: contents; }
+.eykon-landing .ws-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px 24px;
+  background: var(--bg-panel, rgba(255,255,255,0.03));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  text-decoration: none;
+  color: var(--text-primary);
+  min-height: 180px;
+  transition: border-color 120ms, transform 120ms;
+}
+.eykon-landing .ws-card-kicker {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+.eykon-landing .ws-card-title {
+  font-family: 'Jura', sans-serif;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.eykon-landing .ws-card-body {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.eykon-landing .ws-card-open {
+  margin-top: auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+.eykon-landing .ws-footnote {
+  margin-top: 22px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* — Workspaces carousel mode — */
+.eykon-landing .ws-carousel {
+  display: grid;
+  padding: 16px 0;
+}
+.eykon-landing .ws-carousel .ws-slot {
+  grid-area: 1 / 1;
+  width: 42%;
+  justify-self: center;
+  display: flex;
+  transition: transform 0.5s ease, opacity 0.5s ease, visibility 0.5s;
+}
+.eykon-landing .ws-carousel .ws-card { flex: 1; }
+.eykon-landing .ws-carousel .ws-slot.pos-center {
+  transform: translateX(0) scale(1);
+  z-index: 3;
+}
+.eykon-landing .ws-carousel .ws-slot.pos-center .ws-card {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 1px var(--cyan), 0 20px 60px -20px rgba(25, 208, 184, 0.3);
+}
+.eykon-landing .ws-carousel .ws-slot.pos-left {
+  transform: translateX(-76%) scale(0.88);
+  opacity: 0.55;
+  z-index: 2;
+}
+.eykon-landing .ws-carousel .ws-slot.pos-right {
+  transform: translateX(76%) scale(0.88);
+  opacity: 0.55;
+  z-index: 2;
+}
+.eykon-landing .ws-carousel .ws-slot.pos-left .ws-card,
+.eykon-landing .ws-carousel .ws-slot.pos-right .ws-card { cursor: pointer; }
+.eykon-landing .ws-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+/* — Shared carousel controls — */
+.eykon-landing .lc-arrow {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 18px;
+  line-height: 1;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.eykon-landing .lc-arrow:hover { border-color: var(--cyan); color: var(--cyan); }
+.eykon-landing .lc-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1px solid var(--border-hi);
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.eykon-landing .lc-dot.active { background: var(--cyan); border-color: var(--cyan); }
+
+/* — Pricing carousel mode — */
+.eykon-landing .pricing-grid .tier-slot { display: contents; }
+.eykon-landing .pricing-carousel {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 36px 32px 44px;
+  display: grid;
+}
+.eykon-landing .pricing-carousel .tier-slot {
+  grid-area: 1 / 1;
+  width: 34%;
+  justify-self: center;
+  display: flex;
+  transition: transform 0.5s ease, opacity 0.5s ease, visibility 0.5s;
+}
+.eykon-landing .pricing-carousel .tier-slot .tier-card { flex: 1; }
+.eykon-landing .pricing-carousel .tier-slot.pos-center {
+  transform: translateX(0) scale(1.06);
+  z-index: 3;
+}
+.eykon-landing .pricing-carousel .tier-slot.pos-left {
+  transform: translateX(-92%) scale(0.94);
+  opacity: 0.7;
+  z-index: 2;
+}
+.eykon-landing .pricing-carousel .tier-slot.pos-right {
+  transform: translateX(92%) scale(0.94);
+  opacity: 0.7;
+  z-index: 2;
+}
+.eykon-landing .pricing-carousel .tier-slot.pos-off {
+  transform: translateX(0) scale(0.8);
+  opacity: 0;
+  visibility: hidden;
+  z-index: 1;
+  pointer-events: none;
+}
+.eykon-landing .pricing-carousel .tier-slot.pos-left .tier-card,
+.eykon-landing .pricing-carousel .tier-slot.pos-right .tier-card { cursor: pointer; }
+.eykon-landing .pr-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 4px 0 6px;
+}
+.eykon-landing .pr-compare-wrap { text-align: center; margin-bottom: 22px; }
+.eykon-landing .pr-compare {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.eykon-landing .pr-compare:hover { color: var(--cyan); }

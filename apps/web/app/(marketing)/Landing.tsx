@@ -110,6 +110,12 @@ const MEMBER_CTA: Record<Cycle, CtaAction> = {
 
 const NAV_ANCHORS = ['top', 'platform', 'intelligence', 'community', 'pricing', 'faq'] as const;
 
+// Pricing carousel (landing update 2026-07-06 §10). DOM order of the
+// tier cards; index 2 (Pro) is the default centre — it carries the
+// MOST POPULAR ribbon.
+const TIER_ORDER = ['citizen', 'member', 'pro', 'enterprise'] as const;
+const PRICING_ROTATE_MS = 8000;
+
 export function Landing() {
   const [cycle, setCycle] = useState<Cycle>(DEFAULT_CYCLE);
   const [modalOpen, setModalOpen] = useState(false);
@@ -134,6 +140,60 @@ export function Landing() {
     };
   }, []);
   const spotsDisplay = (spotsLeft ?? 847).toLocaleString('en-US');
+
+  // ── Pricing carousel state (§10). Static grid is the SSR / no-JS /
+  // reduced-motion / narrow-viewport / "compare all" rendering; the
+  // carousel switches on after mount, desktop-only.
+  const [prCenter, setPrCenter] = useState(2); // Pro
+  const [prCarousel, setPrCarousel] = useState(false);
+  const [prAuto, setPrAuto] = useState(true);
+  const [prPaused, setPrPaused] = useState(false);
+  const [compareAll, setCompareAll] = useState(false);
+
+  useEffect(() => {
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduced || window.innerWidth <= 1100) return;
+    // Deep links may centre a specific tier (e.g. /?focus=member#pricing)
+    // and suppress auto-rotation entirely.
+    const focus = new URLSearchParams(window.location.search).get('focus');
+    if (focus && (TIER_ORDER as readonly string[]).includes(focus)) {
+      setPrCenter((TIER_ORDER as readonly string[]).indexOf(focus));
+      setPrAuto(false);
+    }
+    setPrCarousel(true);
+  }, []);
+
+  useEffect(() => {
+    if (!prCarousel || !prAuto || prPaused || compareAll) return;
+    const t = setInterval(
+      () => setPrCenter(c => (c + 1) % TIER_ORDER.length),
+      PRICING_ROTATE_MS,
+    );
+    return () => clearInterval(t);
+  }, [prCarousel, prAuto, prPaused, compareAll]);
+
+  const showPricingCarousel = prCarousel && !compareAll;
+
+  function prGoTo(idx: number) {
+    setPrAuto(false);
+    setPrCenter((idx + TIER_ORDER.length) % TIER_ORDER.length);
+  }
+
+  function prSlotClass(idx: number): string {
+    if (!showPricingCarousel) return 'tier-slot';
+    const offset = (idx - prCenter + TIER_ORDER.length) % TIER_ORDER.length;
+    const pos =
+      offset === 0 ? 'pos-center' : offset === 1 ? 'pos-right' : offset === 2 ? 'pos-off' : 'pos-left';
+    return `tier-slot ${pos}`;
+  }
+
+  // Clicking the body of a side card centres it; links/buttons inside
+  // (CTAs) keep working with a single click.
+  function prSlotClick(idx: number, e: React.MouseEvent) {
+    if (!showPricingCarousel || idx === prCenter) return;
+    if ((e.target as HTMLElement).closest('a,button')) return;
+    prGoTo(idx);
+  }
 
   function openWaitlist(tier: 'pro' | 'enterprise') {
     setModalTier(tier);
@@ -450,7 +510,15 @@ export function Landing() {
       <BriefsShowcase />
 
       {/* ─── PRICING ─────────────────────────────────────────────── */}
-      <section id="pricing" style={{ paddingTop: 60 }}>
+      <section
+        id="pricing"
+        style={{ paddingTop: 60 }}
+        onPointerDownCapture={() => setPrAuto(false)}
+        onMouseEnter={() => setPrPaused(true)}
+        onMouseLeave={() => setPrPaused(false)}
+        onFocusCapture={() => setPrPaused(true)}
+        onBlurCapture={() => setPrPaused(false)}
+      >
         <div className="section-head" style={{ padding: '0 32px' }}>
           <div className="section-kicker">·· Pricing ··</div>
           <h2 className="section-title">
@@ -511,8 +579,13 @@ export function Landing() {
           </div>
         </div>
 
-        <div className="pricing-grid">
+        <div
+          className={showPricingCarousel ? 'pricing-carousel' : 'pricing-grid'}
+          aria-roledescription={showPricingCarousel ? 'carousel' : undefined}
+          aria-label="Pricing plans"
+        >
           {/* Citizen */}
+          <div className={prSlotClass(0)} onClickCapture={(e) => prSlotClick(0, e)}>
           <div className="tier-card muted t-citizen">
             <div className="tier-code">T-00 · OBSERVER</div>
             <div className="tier-name">Citizen</div>
@@ -552,8 +625,10 @@ export function Landing() {
               </li>
             </ul>
           </div>
+          </div>
 
           {/* Member */}
+          <div className={prSlotClass(1)} onClickCapture={(e) => prSlotClick(1, e)}>
           <div className="tier-card t-member">
             <div className="tier-code">T-01 · MEMBER</div>
             <div className="tier-name">Member</div>
@@ -583,8 +658,10 @@ export function Landing() {
               </li>
             </ul>
           </div>
+          </div>
 
           {/* Pro */}
+          <div className={prSlotClass(2)} onClickCapture={(e) => prSlotClick(2, e)}>
           <div className="tier-card highlight t-pro">
             <div className="tier-code">T-02 · PRO</div>
             <div className="tier-name">Pro</div>
@@ -623,8 +700,10 @@ export function Landing() {
               </li>
             </ul>
           </div>
+          </div>
 
           {/* Enterprise */}
+          <div className={prSlotClass(3)} onClickCapture={(e) => prSlotClick(3, e)}>
           <div className="tier-card t-enterprise">
             <div className="tier-code">T-03 · TEAM</div>
             <div className="tier-name">Enterprise</div>
@@ -665,7 +744,50 @@ export function Landing() {
               <li>Priority support · &lt; 4h response</li>
             </ul>
           </div>
+          </div>
         </div>
+
+        {showPricingCarousel && (
+          <div className="pr-controls">
+            <button
+              type="button"
+              className="lc-arrow"
+              aria-label="Previous plan"
+              onClick={() => prGoTo(prCenter - 1)}
+            >
+              ‹
+            </button>
+            {TIER_ORDER.map((id, idx) => (
+              <button
+                key={id}
+                type="button"
+                className={idx === prCenter ? 'lc-dot active' : 'lc-dot'}
+                aria-label={`Show ${id} plan`}
+                aria-pressed={idx === prCenter}
+                onClick={() => prGoTo(idx)}
+              />
+            ))}
+            <button
+              type="button"
+              className="lc-arrow"
+              aria-label="Next plan"
+              onClick={() => prGoTo(prCenter + 1)}
+            >
+              ›
+            </button>
+          </div>
+        )}
+        {prCarousel && (
+          <div className="pr-compare-wrap">
+            <button
+              type="button"
+              className="pr-compare"
+              onClick={() => setCompareAll(v => !v)}
+            >
+              {compareAll ? 'Back to the plan spotlight ↺' : 'Compare all plans side-by-side →'}
+            </button>
+          </div>
+        )}
 
         <div className="passes-strip">
           <div className="passes-strip-title">No subscription? Two honest one-offs.</div>
