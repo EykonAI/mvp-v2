@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
-import TopNav from '@/components/TopNav';
 import { getCurrentUser } from '@/lib/auth/session';
 import { isFounder } from '@/lib/admin/access';
 import { createServerSupabase } from '@/lib/supabase-server';
@@ -29,7 +28,6 @@ export default async function NewsjackReviewPage() {
 
   return (
     <>
-      <TopNav />
       <section style={{ maxWidth: 820, margin: '0 auto', padding: '40px 24px 80px', color: 'var(--ink)' }}>
         <div className="eyebrow" style={{ color: 'var(--teal)' }}>·· Admin · Newsjack review ··</div>
         <h1 style={{ fontFamily: 'var(--f-display)', fontSize: 28, marginTop: 8, marginBottom: 6 }}>
