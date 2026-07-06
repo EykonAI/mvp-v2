@@ -2,6 +2,10 @@
 // marketing page (landing update brief 2026-07-06 §6). Four tiles mirror
 // the product's four-item menu (Today · Briefings · Forecasts ·
 // Convergence). Rendered inside .eykon-landing, so landing.css applies.
+// Tiles rotate via TileCarousel (founder request 2026-07-06, same effect
+// as the workspace showcase; the 4th tile waits off-stage).
+
+import { TileCarousel } from './TileCarousel';
 
 const BRIEFS_TILES = [
   {
@@ -40,15 +44,11 @@ export function BriefsShowcase() {
         </p>
       </div>
 
-      <div className="briefs-tiles">
-        {BRIEFS_TILES.map(t => (
-          <div className="pillar" key={t.label}>
-            <div className="pillar-label">{t.label}</div>
-            <div className="pillar-title">{t.title}</div>
-            <p className="pillar-body">{t.body}</p>
-          </div>
-        ))}
-      </div>
+      <TileCarousel
+        items={BRIEFS_TILES}
+        staticClass="briefs-tiles"
+        ariaLabel="The BRIEFS reading room"
+      />
 
       <p className="integrity-line">
         The public track record, one item at a time. Don&apos;t trust us — audit us.
