@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import TopNav from '@/components/TopNav';
 import { getCurrentUser } from '@/lib/auth/session';
 import { isFounder } from '@/lib/admin/access';
 
@@ -95,7 +94,6 @@ export default async function AdminConsolePage() {
 
   return (
     <>
-      <TopNav />
       <style>{`.admin-tile{transition:border-color 120ms ease, background 120ms ease}
 .admin-tile:hover{border-color:var(--teal) !important;background:var(--bg-void)}`}</style>
       <section
@@ -140,7 +138,7 @@ export default async function AdminConsolePage() {
                 fontSize: 10.5,
                 letterSpacing: '0.16em',
                 textTransform: 'uppercase',
-                color: 'var(--ink-faint)',
+                color: 'var(--teal)',
                 margin: '0 0 12px',
               }}
             >
