@@ -8,6 +8,8 @@ import { HeroWorkspaceShowcase } from '@/components/landing/HeroWorkspaceShowcas
 import { NotificationCenterTease } from '@/components/landing/NotificationCenterTease';
 import { AdvancedScenariosBrief } from '@/components/landing/AdvancedScenariosBrief';
 import { CalibrationAnchor } from '@/components/landing/CalibrationAnchor';
+import { CommShowcase } from '@/components/landing/CommShowcase';
+import { BriefsShowcase } from '@/components/landing/BriefsShowcase';
 
 // Billing cycle state — drives prices and CTAs across the pricing grid.
 type Cycle = 'monthly' | 'annual' | 'annual-crypto';
@@ -106,7 +108,7 @@ const MEMBER_CTA: Record<Cycle, CtaAction> = {
   'annual-crypto': { kind: 'crypto', href: '/pricing?plan=member_standard_annual', label: 'Join as Member →' },
 };
 
-const NAV_ANCHORS = ['top', 'platform', 'intelligence', 'pricing', 'faq'] as const;
+const NAV_ANCHORS = ['top', 'platform', 'intelligence', 'community', 'pricing', 'faq'] as const;
 
 export function Landing() {
   const [cycle, setCycle] = useState<Cycle>(DEFAULT_CYCLE);
@@ -214,7 +216,7 @@ export function Landing() {
           </div>
         </a>
         <div className="links">
-          {(['platform', 'intelligence', 'pricing', 'faq'] as const).map((id) => (
+          {(['platform', 'intelligence', 'community', 'pricing', 'faq'] as const).map((id) => (
             <a
               key={id}
               href={`#${id}`}
@@ -263,6 +265,10 @@ export function Landing() {
           <span className="count">■ {spotsDisplay}</span> of <span className="count">1,000</span>{' '}
           founding seats remaining · USD pricing · Pay in fiat or crypto
         </p>
+        <p className="hero-meta">
+          Live feeds free on <span className="count">every tier</span> — you pay for
+          intelligence, never the map.
+        </p>
         <div className="hero-ctas">
           <a href="#pricing" className="btn-primary">
             Claim Founding Rate →
@@ -285,31 +291,47 @@ export function Landing() {
           <h2 className="section-title">
             The <span className="accent">platform</span>.
           </h2>
-          <p className="section-sub">Intelligence-grade data. Trader-grade latency.</p>
+          <p className="section-sub">
+            Six pillars. One platform. The map is free — the intelligence is the product.
+          </p>
         </div>
         <div className="pillars">
           <Pillar
-            label="P-01 · REAL-TIME"
-            title="A single screen for the state of the world."
-            body="Maritime traffic (AIS), flight paths (ADS-B), active conflicts (ACLED), energy infrastructure, and strategic chokepoints — all rendered on a 3D globe with sub-minute refresh. No tab-switching, no context loss."
+            label="P-01 · GLOBE"
+            title="The state of the world, on one screen — free for everyone."
+            body="Live vessels (AIS), aircraft (ADS-B), conflict events (GDELT 2.0) and weather, over the infrastructure that makes them interpretable: ~127,000 power-plant units, ~700 refineries, ~304,000 mineral deposits, ~3,800 seaports, ~7,500 airports, gas and oil pipelines, LNG terminals. Every layer carries its source and refresh timestamp inline. Live feeds are free on every tier — including free."
           />
           <Pillar
-            label="P-02 · DECISION LAYER"
-            title="From incident to position idea in seconds."
-            body="Every event carries a machine-readable impact score across equities, commodities, FX, and crypto. A chokepoint closure is never just news — it's a ranked list of assets that historically moved, with confidence bands."
+            label="P-02 · AI ANALYST"
+            title="Ask in plain English. It queries the database."
+            body="A Fable 5 analyst with a catalog of first-class tools wired directly into the live feeds and the platform's proprietary signal tables — no SQL, no guessing from documentation. Persona-aware: pick one of seven roles and the framing, tool selection and output density adapt. When the data can't support an answer, it says so."
           />
           <Pillar
-            label="P-03 · AI ANALYST"
-            title="Ask in plain English. Get analyst-grade answers."
-            body="The embedded analyst reads the same feeds you see, and answers questions like &quot;what's the base-rate for BTC moves on Strait of Hormuz incidents?&quot; with sourced, timestamped reasoning — never hallucinated."
+            label="P-03 · INTEL"
+            title="Nine workspaces where signals become decisions."
+            body="Calibration Ledger, Shadow Fleet, Regime Shifts, Chokepoint Simulator, Sanctions Wargame, Cascade Propagation, Precursor Analogs, Commodities, Critical Minerals — compound signals computed on eYKON infrastructure, with posture scores for five named theatres refreshed every 30 minutes."
           />
           <Pillar
-            label="P-04 · CALIBRATION"
-            title="Every data point carries its receipts."
-            body="Source, license, ingestion timestamp, and historical accuracy are attached to every signal. Export to GeoJSON or CSV for your own notebooks. Cite with confidence in your newsletter, research note, or trade journal."
+            label="P-04 · NOTIF"
+            title="Alerts that watch four different ways."
+            body="Single-event, multi-event, outcome-driven AI (&quot;anything that could move WTI by ≥$2/bbl in 24 hours&quot;), and cross-data convergence rules — evaluated on 15-minute and hourly cadences, delivered by email, SMS and WhatsApp, with a persona-tuned starter library so a working pipeline takes three clicks."
+          />
+          <Pillar
+            label="P-05 · COMM"
+            title="The network where being right is measurable."
+            body="Sealed, commit-reveal predictions scored against live outcomes; a leaderboard ranked by Brier-skill, not follower count; rooms, DMs, and an in-room analyst; paid Spaces in non-custodial USDC where calibrated analysts monetise their track record. Reputation earned by being right — wrong calls left standing."
+          />
+          <Pillar
+            label="P-06 · BRIEFS"
+            title="What eYKON publishes back."
+            body="A daily brief composed each morning from the live feeds, persona digests for seven roles, the convergence wire — and eYKON's own forecasts, sealed at issue and scored in public when they resolve. Reporting you can audit, not just read."
           />
         </div>
         <div className="stat-strip">
+          <div className="stat">
+            <span className="val">6</span> pillars
+          </div>
+          <div className="stat sep">·</div>
           <div className="stat">
             <span className="val">47</span> integrated feeds
           </div>
@@ -372,7 +394,7 @@ export function Landing() {
               ['IM-01', 'Operational Globe', 'The 3D Earth with all live layers: maritime, aviation, conflict, infrastructure.'],
               ['IM-02', 'Maritime Tracker', 'AIS vessel positions, vessel metadata, port-call history, shadow-fleet flags.'],
               ['IM-03', 'Aviation Tracker', 'ADS-B with military-adjacent callsign detection and squawk anomalies.'],
-              ['IM-04', 'Conflict Feed', 'ACLED events with escalation scoring and territorial-control deltas.'],
+              ['IM-04', 'Conflict Feed', 'GDELT 2.0 events with escalation scoring and territorial-control deltas.'],
               ['IM-05', 'Satellite Watch', 'Sentinel-2 imagery with change-detection pins over user watchlists.'],
               ['IM-06', 'Weather & Environmental Layer', 'Storm tracks, wildfires, and disruption overlays.'],
             ]}
@@ -421,6 +443,12 @@ export function Landing() {
       {/* ─── Calibration anchor (PARAGRAPH 2, prompt §6.2) ───────── */}
       <CalibrationAnchor />
 
+      {/* ─── COMM — community, reputation, creator economy ───────── */}
+      <CommShowcase />
+
+      {/* ─── BRIEFS — the reading room ────────────────────────────── */}
+      <BriefsShowcase />
+
       {/* ─── PRICING ─────────────────────────────────────────────── */}
       <section id="pricing" style={{ paddingTop: 60 }}>
         <div className="section-head" style={{ padding: '0 32px' }}>
@@ -429,8 +457,13 @@ export function Landing() {
             Founding rate, <span className="accent">locked for life</span>.
           </h2>
           <p className="section-sub">
-            Three lanes. US dollars. Fiat or crypto. No hidden seats, no hidden fees.
+            Four honest rungs. US dollars. Fiat or crypto. No hidden seats, no hidden fees.
           </p>
+        </div>
+
+        <div className="feeds-free-strip">
+          Live feeds are free for everyone. What you pay for on eYKON is{' '}
+          <strong>intelligence, never the map</strong>.
         </div>
 
         <div className="scarcity-strip">
@@ -633,6 +666,37 @@ export function Landing() {
             </ul>
           </div>
         </div>
+
+        <div className="passes-strip">
+          <div className="passes-strip-title">No subscription? Two honest one-offs.</div>
+          <div className="passes-grid">
+            <div className="pass-card">
+              <div className="pass-name">
+                Week Pass <span className="pass-price">$9</span>
+              </div>
+              <p className="pass-body">
+                Everything Pro for 7 days, while the event is live. No subscription, no
+                auto-renew — it simply expires.
+              </p>
+              <Link href="/pricing?plan=week_pass" className="tier-btn">
+                Get a Week Pass →
+              </Link>
+            </div>
+            <div className="pass-card">
+              <div className="pass-name">
+                Query Pack <span className="pass-price">$5</span>
+              </div>
+              <p className="pass-body">
+                25 extra AI Analyst queries added to your current month. Stackable, on any
+                plan.
+              </p>
+              <Link href="/pricing?plan=query_pack_25" className="tier-btn">
+                Add 25 queries →
+              </Link>
+            </div>
+          </div>
+        </div>
+
         <p className="refund-disclosure">
           <strong>14-day full refund.</strong> Single-click from billing. No questions.
           Crypto refunds settle in USDC.
@@ -758,7 +822,7 @@ export function Landing() {
         </Faq>
         <Faq q="How fresh is the data?">
           Every plan — including Citizen — receives real-time feeds: <code>ADS-B ~15s</code>,{' '}
-          <code>AIS ~60s</code>, <code>ACLED hourly</code>, static infrastructure daily.
+          <code>AIS ~60s</code>, <code>GDELT ~hourly</code>, static infrastructure daily.
           Paid tiers differ on the intelligence layer — AI Analyst budget, the nine INTEL
           workspaces, alerts and exports — never on the rawness of the map. Every data
           point carries its source, license, and ingestion timestamp.
@@ -793,8 +857,45 @@ export function Landing() {
         <Faq q={'What counts as an AI analyst "query"?'}>
           A single natural-language question to the analyst panel, or one automated
           compound-signal alert your watchlist fires. Context-retrieval, map interactions,
-          and feed browsing are <strong>free and unmetered</strong>. Pro = 500 queries/month,
-          Enterprise = 5,000 queries/month/seat. Unused queries do not roll over.
+          and feed browsing are <strong>free and unmetered</strong>. Citizen = 5
+          queries/month, Member = 25/month on the full tool surface, Pro = 500/month,
+          Enterprise = 5,000/month/seat. A <strong>Query Pack</strong> ($5) adds 25 queries
+          to any month. Unused queries do not roll over.
+        </Faq>
+        <Faq q="What is a Week Pass?">
+          $9 for <strong>everything Pro for 7 days</strong> — built for live events. No
+          subscription, no auto-renew; access simply expires. Its companion, the{' '}
+          <strong>Query Pack</strong> ($5), adds 25 AI Analyst queries to your current month
+          on any plan, including free.
+        </Faq>
+        <Faq q="What is the Reputation Note?">
+          The spine of COMM. Analysts seal predictions with a commit-reveal SHA-256 hash
+          before the outcome, reveal them after, and every call is scored against live
+          resolution — wrong calls stay on the record. Ten resolved predictions earn a public{' '}
+          <strong>Reputation Note</strong>: a Brier-skill score on your profile. The Note is{' '}
+          <strong>never for sale</strong> — no tier, no payment, no partnership changes it.
+        </Faq>
+        <Faq q="What is a paid Space, and who can run one?">
+          Paid Spaces are subscription communities run by calibrated analysts, settled in{' '}
+          <strong>USDC on Base</strong> through the creator&apos;s own Unlock lock —
+          non-custodial: your lock, your wallet, eYKON never holds your funds. Platform fee
+          is 15%, enforced on-chain. Creating a paid Space requires a shown Reputation Note —
+          or a <strong>Founding Partner</strong> seat. Creators also earn a{' '}
+          <strong>25% conversion bounty</strong> on the first-year subscription of any Space
+          member who upgrades to an eYKON plan, and <strong>Creator Pro</strong> ($20/month,
+          free for life for the first 50 creators) adds the dashboard, an embeddable
+          reputation card, Space branding, and Discover priority.
+        </Faq>
+        <Faq q="What is the Founding Partner programme?">
+          Twenty seats, ever. eYKON&apos;s rule is that you don&apos;t charge a community
+          until your track record is provable — ten resolved, sealed predictions, scored in
+          public. The Founding Partner programme is the bridge for analysts who arrive with
+          credibility earned elsewhere: vetted for tone, reach and credibility (never
+          self-serve), partners receive immediate paid-Space rights, Creator Pro for life,
+          and the Founding Partner emblem — in exchange for earning their Reputation Note
+          within six months, on the same commit-reveal rules as everyone else.{' '}
+          <strong>The first slot is taken. Nineteen remain.</strong> Introduce yourself at{' '}
+          <code>partners@eykon.ai</code>.
         </Faq>
         <Faq q="Can I cancel? Is there a refund?">
           Yes. Cancel anytime from the billing portal — you keep access until the end of your
@@ -869,6 +970,8 @@ export function Landing() {
             <ul>
               <li><a href="#platform">Platform</a></li>
               <li><a href="#intelligence">Intelligence Menu</a></li>
+              <li><a href="#community">Community (COMM)</a></li>
+              <li><a href="#briefs">BRIEFS</a></li>
               <li><a href="#pricing">Pricing</a></li>
               <li><a href="#faq">FAQ</a></li>
               <li><Link href="/grow">How eYKON grows</Link></li>

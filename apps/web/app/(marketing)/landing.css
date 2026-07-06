@@ -1083,3 +1083,147 @@
   .eykon-landing .billing-toggle { flex-direction: column; width: 100%; }
   .eykon-landing .billing-toggle button { width: 100%; }
 }
+
+/* ───── Landing update 2026-07-06 — COMM / BRIEFS / monetisation surface ───── */
+
+/* "never the map" strip under the pricing section head */
+.eykon-landing .feeds-free-strip {
+  max-width: 720px;
+  margin: 0 auto 24px;
+  padding: 14px 24px;
+  text-align: center;
+  background: var(--bg-panel-mute);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.eykon-landing .feeds-free-strip strong { color: var(--cyan); font-weight: 600; }
+
+/* one-off passes strip under the pricing grid */
+.eykon-landing .passes-strip {
+  max-width: 1440px;
+  margin: 8px auto 28px;
+  padding: 0 32px;
+}
+.eykon-landing .passes-strip-title {
+  text-align: center;
+  font-family: 'Jura', sans-serif;
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 18px;
+}
+.eykon-landing .passes-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 420px));
+  justify-content: center;
+  gap: 20px;
+}
+.eykon-landing .pass-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 24px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: all .25s;
+}
+.eykon-landing .pass-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--cyan);
+}
+.eykon-landing .pass-name {
+  font-family: 'Jura', sans-serif;
+  font-size: 19px;
+  font-weight: 600;
+}
+.eykon-landing .pass-price {
+  color: var(--cyan);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 17px;
+  margin-left: 8px;
+}
+.eykon-landing .pass-body {
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  line-height: 1.55;
+  flex: 1;
+}
+
+/* COMM section */
+.eykon-landing .comm-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+.eykon-landing .comm-subhead {
+  text-align: center;
+  font-family: 'Jura', sans-serif;
+  font-size: 24px;
+  font-weight: 600;
+  margin: 44px 0 24px;
+}
+.eykon-landing .fp-band {
+  margin-top: 44px;
+  padding: 32px 36px;
+  background: var(--bg-panel-hi);
+  border: 1px solid var(--cyan);
+  border-radius: 6px;
+  box-shadow: 0 20px 60px -30px rgba(25, 208, 184, 0.25);
+}
+.eykon-landing .fp-band-title {
+  font-family: 'Jura', sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 14px;
+}
+.eykon-landing .fp-band-body {
+  color: var(--text-secondary);
+  font-size: 14.5px;
+  line-height: 1.7;
+  margin-bottom: 14px;
+}
+.eykon-landing .fp-band-remaining {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.eykon-landing .fp-band-remaining strong { color: var(--cyan); }
+.eykon-landing .fp-band-cta {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+}
+.eykon-landing .fp-band-cta a { color: var(--cyan); text-decoration: none; }
+.eykon-landing .fp-band-cta a:hover { text-decoration: underline; }
+
+/* shared closing line for COMM / BRIEFS */
+.eykon-landing .integrity-line {
+  margin-top: 28px;
+  text-align: center;
+  font-style: italic;
+  font-size: 14px;
+  color: var(--text-tertiary);
+}
+
+/* BRIEFS section */
+.eykon-landing .briefs-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+}
+
+@media (max-width: 1100px) {
+  .eykon-landing .briefs-tiles { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 900px) {
+  .eykon-landing .comm-tiles { grid-template-columns: 1fr; }
+  .eykon-landing .passes-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .eykon-landing .briefs-tiles { grid-template-columns: 1fr; }
+  .eykon-landing .fp-band { padding: 24px 22px; }
+}
