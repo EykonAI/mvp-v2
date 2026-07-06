@@ -1444,3 +1444,59 @@
   transition: color 0.2s;
 }
 .eykon-landing .pr-compare:hover { color: var(--cyan); }
+
+/* ───── Landing update 2026-07-06 (follow-up) — COMM/BRIEFS tile carousels ─────
+   Same effect as the workspace showcase, applied to the COMM reputation
+   and creator tile groups and the BRIEFS surfaces. Static grids
+   (.comm-tiles / .briefs-tiles) remain the SSR / no-JS / reduced-motion /
+   narrow rendering; slots pass through them via display: contents. */
+
+.eykon-landing .comm-tiles .tc-slot,
+.eykon-landing .briefs-tiles .tc-slot { display: contents; }
+
+.eykon-landing .tile-carousel {
+  display: grid;
+  padding: 16px 0;
+}
+.eykon-landing .tile-carousel .tc-slot {
+  grid-area: 1 / 1;
+  width: 42%;
+  justify-self: center;
+  display: flex;
+  transition: transform 0.5s ease, opacity 0.5s ease, visibility 0.5s;
+}
+.eykon-landing .tile-carousel .tc-slot .pillar { flex: 1; }
+.eykon-landing .tile-carousel .tc-slot.pos-center {
+  transform: translateX(0) scale(1);
+  z-index: 3;
+}
+.eykon-landing .tile-carousel .tc-slot.pos-center .pillar {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 1px var(--cyan), 0 20px 60px -20px rgba(25, 208, 184, 0.3);
+}
+.eykon-landing .tile-carousel .tc-slot.pos-left {
+  transform: translateX(-76%) scale(0.88);
+  opacity: 0.55;
+  z-index: 2;
+}
+.eykon-landing .tile-carousel .tc-slot.pos-right {
+  transform: translateX(76%) scale(0.88);
+  opacity: 0.55;
+  z-index: 2;
+}
+.eykon-landing .tile-carousel .tc-slot.pos-off {
+  transform: translateX(0) scale(0.8);
+  opacity: 0;
+  visibility: hidden;
+  z-index: 1;
+  pointer-events: none;
+}
+.eykon-landing .tile-carousel .tc-slot.pos-left .pillar,
+.eykon-landing .tile-carousel .tc-slot.pos-right .pillar { cursor: pointer; }
+.eykon-landing .tc-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 18px;
+}

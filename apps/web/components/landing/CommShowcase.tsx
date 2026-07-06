@@ -4,6 +4,10 @@
 // the Reputation Note is NEVER framed as purchasable, and the Founding
 // Partner CTA is a quiet mailto — the programme is vetted, never
 // self-serve. Rendered inside .eykon-landing, so landing.css applies.
+// Both tile groups rotate via TileCarousel (founder request 2026-07-06,
+// same effect as the workspace showcase).
+
+import { TileCarousel } from './TileCarousel';
 
 const SPINE_TILES = [
   {
@@ -55,29 +59,21 @@ export function CommShowcase() {
         </p>
       </div>
 
-      <div className="comm-tiles">
-        {SPINE_TILES.map(t => (
-          <div className="pillar" key={t.label}>
-            <div className="pillar-label">{t.label}</div>
-            <div className="pillar-title">{t.title}</div>
-            <p className="pillar-body">{t.body}</p>
-          </div>
-        ))}
-      </div>
+      <TileCarousel
+        items={SPINE_TILES}
+        staticClass="comm-tiles"
+        ariaLabel="The reputation spine"
+      />
 
       <div className="comm-subhead">
         Calibrated analysts run paid Spaces — <span className="accent">and keep the keys</span>.
       </div>
 
-      <div className="comm-tiles">
-        {CREATOR_TILES.map(t => (
-          <div className="pillar" key={t.label}>
-            <div className="pillar-label">{t.label}</div>
-            <div className="pillar-title">{t.title}</div>
-            <p className="pillar-body">{t.body}</p>
-          </div>
-        ))}
-      </div>
+      <TileCarousel
+        items={CREATOR_TILES}
+        staticClass="comm-tiles"
+        ariaLabel="The creator economy"
+      />
 
       <div className="fp-band">
         <div className="fp-band-title">
