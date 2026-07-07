@@ -1,7 +1,33 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { usePersona } from '@/components/intel/shell/PersonaContext';
 import Sparkline from '@/components/intel/shared/Sparkline';
+
+// Live inputs (grounding audit P1): chokepoint transits + EIA inventory
+// from /api/intel/commodities/live. Sections render an honest
+// "unavailable" state when the feed is missing — never fixture numbers.
+interface LiveChokepoint {
+  chokepoint: string;
+  label: string;
+  latest_count: number;
+  latest_period: string;
+  window_hours: number;
+  trailing_avg: number | null;
+  delta_pct: number | null;
+}
+interface LiveEia {
+  series_id: string;
+  unit: string;
+  latest: { period: string; value: number };
+  prev: { period: string; value: number } | null;
+  weekly_delta_pct: number | null;
+  series: number[];
+  fetched_at: string;
+}
+interface LiveData {
+  chokepoints: LiveChokepoint[] | null;
+  eia: LiveEia | null;
+}
 
 const COMMODITIES = [
   { slug: 'wheat',   label: 'Wheat',        family: 'agri' },
