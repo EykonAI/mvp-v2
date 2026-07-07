@@ -1,7 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
 import ScoreBar from '@/components/intel/shared/ScoreBar';
-import Sparkline from '@/components/intel/shared/Sparkline';
 
 interface Lead {
   mmsi: string;
@@ -13,6 +12,39 @@ interface Lead {
   indicators: Record<string, number>;
   last_ais_at: string | null;
   last_dark_hours: number;
+}
+
+interface Evidence {
+  mmsi?: string;
+  identity?: {
+    name: string | null;
+    imo: string | null;
+    flag: string | null;
+    foc: boolean;
+    dwt: number | null;
+    built_year: number | null;
+  };
+  telemetry?: {
+    destination: string | null;
+    speed: number | null;
+    heading: number | null;
+    nav_status: number | null;
+    nav_status_label: string | null;
+    latitude: number | null;
+    longitude: number | null;
+  };
+  contact?: {
+    last_contact_at: string | null;
+    hours_since_contact: number | null;
+    dark_gap_open: boolean;
+    last_dark_at: string | null;
+    last_ais_at: string | null;
+  };
+  score?: {
+    composite_score: number | null;
+    indicators: Record<string, number> | null;
+  };
+  error?: string;
 }
 
 const COMMODITIES = ['oil', 'lng', 'grain'] as const;
@@ -163,11 +195,8 @@ export default function ShadowFleetWorkspace() {
 
         <Head accent="var(--red)" margin={14}>Cluster Membership</Head>
         <div className="flex flex-col" style={{ gap: 6, marginTop: 10 }}>
-          <div style={{ padding: 8, background: 'var(--bg-panel)', border: '1px solid var(--rule-soft)', fontSize: 11, color: 'var(--ink-dim)' }}>
-            Sibling vessels same operator · ETA synced
-          </div>
-          <div style={{ padding: 8, background: 'var(--bg-panel)', border: '1px solid var(--rule-soft)', fontSize: 11, color: 'var(--ink-dim)' }}>
-            Shared beneficial-owner shell · opaque registry
+          <div style={{ padding: 8, background: 'var(--bg-panel)', border: '1px dashed var(--rule)', fontSize: 11, color: 'var(--ink-faint)' }}>
+            Kinship clustering awaits entities / fleet_kinship_edges population — no linkages recorded yet.
           </div>
         </div>
 
@@ -184,6 +213,35 @@ export default function ShadowFleetWorkspace() {
 }
 
 function EvidenceViewer({ lead }: { lead: Lead }) {
+  const [evidence, setEvidence] = useState<Evidence | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setEvidence(null);
+    fetch(`/api/intel/shadow-fleet/evidence?mmsi=${encodeURIComponent(lead.mmsi)}`)
+      .then(r => r.json())
+      .then(j => {
+        if (cancelled) return;
+        setEvidence(j ?? { error: 'empty response' });
+        setLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setEvidence({ error: 'request failed' });
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [lead.mmsi]);
+
+  const identity = evidence?.identity;
+  const telemetry = evidence?.telemetry;
+  const contact = evidence?.contact;
+  const gapOpen = contact?.dark_gap_open ?? false;
+
   return (
     <div className="flex flex-col" style={{ gap: 16 }}>
       <header
@@ -197,8 +255,10 @@ function EvidenceViewer({ lead }: { lead: Lead }) {
           </div>
           <div style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--ink-dim)', marginTop: 4 }}>
             MMSI {lead.mmsi} · Flag {lead.flag}
+            {identity?.foc ? ' (FOC)' : ''}
             {lead.imo ? ` · IMO ${lead.imo}` : ''}
             {lead.dwt ? ` · DWT ${lead.dwt.toLocaleString()}` : ''}
+            {identity?.built_year ? ` · Built ${identity.built_year}` : ''}
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
@@ -212,58 +272,124 @@ function EvidenceViewer({ lead }: { lead: Lead }) {
               fontSize: 9.5,
               letterSpacing: '0.15em',
               textTransform: 'uppercase',
-              background: 'var(--red)',
-              color: 'var(--bg-void)',
+              background: gapOpen ? 'var(--red)' : 'var(--bg-navy)',
+              color: gapOpen ? 'var(--bg-void)' : 'var(--ink-dim)',
+              border: gapOpen ? 'none' : '1px solid var(--rule)',
               marginTop: 6,
             }}
           >
-            Dark · {lead.last_dark_hours}h gap
+            {gapOpen ? `Dark · ${lead.last_dark_hours}h gap` : 'AIS current'}
           </span>
         </div>
       </header>
 
       <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--rule-soft)', padding: 12 }}>
-        <div className="eyebrow" style={{ marginBottom: 8 }}>AIS Track · last 180 days</div>
-        <Sparkline
-          values={Array.from({ length: 60 }, (_, i) => 0.4 + 0.2 * Math.sin(i * 0.4) + (i > 45 ? 0 : 0.1))}
-          width={560}
-          height={120}
-          stroke="var(--red)"
-          fill="rgba(224, 93, 80, 0.12)"
-        />
-        <p style={{ marginTop: 8, fontSize: 11.5, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
-          Tracked 60 segmented positions; detected 3 gaps &gt; 6h; 1 gap &gt; 14h currently open.
-        </p>
+        <div className="eyebrow" style={{ marginBottom: 8 }}>Live Telemetry · current AIS snapshot</div>
+        {loading ? (
+          <p style={{ fontSize: 11.5, color: 'var(--ink-faint)', fontFamily: 'var(--f-mono)', letterSpacing: '0.08em' }}>
+            Fetching live vessel record…
+          </p>
+        ) : evidence?.error || !contact ? (
+          <p style={{ fontSize: 11.5, color: 'var(--ink-faint)', lineHeight: 1.5 }}>
+            Live telemetry unavailable{evidence?.error ? ` — ${evidence.error}` : ''}. No fabricated track is shown in its place.
+          </p>
+        ) : (
+          <>
+            <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 1, background: 'var(--rule-soft)', border: '1px solid var(--rule-soft)' }}>
+              <Fact
+                label="Last AIS contact"
+                value={
+                  contact.hours_since_contact !== null
+                    ? `${contact.hours_since_contact} h ago`
+                    : '—'
+                }
+                sub={contact.last_contact_at ? fmtUtc(contact.last_contact_at) : undefined}
+              />
+              <Fact
+                label="Dark-gap status"
+                value={gapOpen ? 'OPEN · > 6 h silent' : 'No open gap'}
+                accent={gapOpen}
+              />
+              <Fact
+                label="Last dark episode"
+                value={contact.last_dark_at ? fmtUtc(contact.last_dark_at) : 'None recorded'}
+              />
+              <Fact
+                label="Destination (self-reported)"
+                value={telemetry?.destination || '—'}
+              />
+              <Fact
+                label="Speed / Heading"
+                value={`${telemetry?.speed ?? '—'} kn · ${telemetry?.heading ?? '—'}°`}
+              />
+              <Fact
+                label="Nav status"
+                value={telemetry?.nav_status_label ?? '—'}
+              />
+              <Fact
+                label="Position"
+                value={
+                  telemetry?.latitude != null && telemetry?.longitude != null
+                    ? `${Number(telemetry.latitude).toFixed(3)}, ${Number(telemetry.longitude).toFixed(3)}`
+                    : '—'
+                }
+              />
+              <Fact
+                label="Registry"
+                value={identity?.flag ? `${identity.flag}${identity.foc ? ' · flag of convenience' : ''}` : '—'}
+              />
+            </div>
+            <p style={{ marginTop: 8, fontSize: 10.5, color: 'var(--ink-faint)', lineHeight: 1.5 }}>
+              Single current-position snapshot from the live AIS feed. Historical track reconstruction requires AIS retention, which is not yet stored.
+            </p>
+          </>
+        )}
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 1, background: 'var(--rule-soft)', border: '1px solid var(--rule-soft)' }}>
         <Box title="Flag & Owner History">
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 11.5, color: 'var(--ink-dim)' }}>
-            <li>• 2026-02 · Flag change: LBR → COK</li>
-            <li>• 2025-11 · BO chain terminated at shell</li>
-            <li>• 2024-06 · Operator change</li>
-          </ul>
+          <Pending>Registry history not yet integrated.</Pending>
         </Box>
         <Box title="Port Calls (last 12 mo)">
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 11.5, color: 'var(--ink-dim)' }}>
-            <li>• Kozmino · 4 calls</li>
-            <li>• Singapore OPL · 6 calls</li>
-            <li>• Fujairah OPL · 3 calls</li>
-          </ul>
+          <Pending>Port-call history requires AIS retention — not yet stored.</Pending>
         </Box>
         <Box title="Ownership Graph">
-          <p style={{ fontSize: 11.5, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
-            Registered owner: Unknown BVI shell. Operator connects to 7 siblings under the same BO chain.
-          </p>
+          <Pending>Ownership graph awaits entities / fleet_kinship_edges population.</Pending>
         </Box>
         <Box title="Sentinel Imagery">
-          <p style={{ fontSize: 11.5, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
-            4 tiles available (2024-09 to 2026-02). Imagery integration is out of v1 scope — tiles load from /public/intel/minerals/.
-          </p>
+          <Pending>Satellite imagery not yet integrated.</Pending>
         </Box>
       </div>
     </div>
   );
+}
+
+function Fact({ label, value, sub, accent = false }: { label: string; value: string; sub?: string; accent?: boolean }) {
+  return (
+    <div style={{ background: 'var(--bg-panel)', padding: '8px 10px' }}>
+      <div className="eyebrow" style={{ fontSize: 9 }}>{label}</div>
+      <div style={{ fontFamily: 'var(--f-mono)', fontSize: 12, marginTop: 2, color: accent ? 'var(--red)' : 'var(--ink)' }}>
+        {value}
+      </div>
+      {sub && (
+        <div style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--ink-faint)', marginTop: 2 }}>{sub}</div>
+      )}
+    </div>
+  );
+}
+
+function Pending({ children }: { children: React.ReactNode }) {
+  return (
+    <p style={{ fontSize: 11.5, color: 'var(--ink-faint)', lineHeight: 1.5, fontStyle: 'italic', margin: 0 }}>
+      {children}
+    </p>
+  );
+}
+
+function fmtUtc(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 }
 
 function Box({ title, children }: { title: string; children: React.ReactNode }) {
