@@ -47,6 +47,24 @@ const BASE_PRICE: Record<string, number> = {
 export default function CommoditiesWorkspace() {
   const { persona } = usePersona();
   const [selected, setSelected] = useState('wheat');
+  const [live, setLive] = useState<LiveData | null>(null);
+  const [liveError, setLiveError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/intel/commodities/live')
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data: LiveData) => {
+        if (!cancelled) setLive(data);
+      })
+      .catch(() => {
+        if (!cancelled) setLiveError(true);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const priceSeries = useMemo(() => {
     const base = BASE_PRICE[selected] ?? 100;
@@ -139,25 +157,49 @@ export default function CommoditiesWorkspace() {
           </div>
         </Panel>
 
-        <Panel title="03 · Chokepoint Exposure">
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontFamily: 'var(--f-mono)', fontSize: 11 }}>
-            <li className="flex items-center justify-between" style={{ padding: '4px 0', borderBottom: '1px solid var(--rule-soft)' }}>
-              <span style={{ color: 'var(--ink-dim)' }}>Hormuz</span>
-              <span style={{ color: 'var(--wheat)' }}>73%</span>
-            </li>
-            <li className="flex items-center justify-between" style={{ padding: '4px 0', borderBottom: '1px solid var(--rule-soft)' }}>
-              <span style={{ color: 'var(--ink-dim)' }}>Bab-el-Mandeb</span>
-              <span style={{ color: 'var(--wheat)' }}>24%</span>
-            </li>
-            <li className="flex items-center justify-between" style={{ padding: '4px 0', borderBottom: '1px solid var(--rule-soft)' }}>
-              <span style={{ color: 'var(--ink-dim)' }}>Malacca</span>
-              <span style={{ color: 'var(--wheat)' }}>41%</span>
-            </li>
-            <li className="flex items-center justify-between" style={{ padding: '4px 0', borderBottom: '1px solid var(--rule-soft)' }}>
-              <span style={{ color: 'var(--ink-dim)' }}>Suez</span>
-              <span style={{ color: 'var(--wheat)' }}>18%</span>
-            </li>
-          </ul>
+        <Panel title="03 · Chokepoint Transits · 24h">
+          {!liveError && live?.chokepoints?.length ? (
+            <>
+              <div className="eyebrow" style={{ marginBottom: 8 }}>
+                {live.chokepoints[0].latest_period}
+              </div>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontFamily: 'var(--f-mono)', fontSize: 11 }}>
+                {live.chokepoints.map(cp => (
+                  <li
+                    key={cp.chokepoint}
+                    className="flex items-center justify-between"
+                    style={{ gap: 8, padding: '4px 0', borderBottom: '1px solid var(--rule-soft)' }}
+                  >
+                    <span style={{ color: 'var(--ink-dim)' }}>{cp.label}</span>
+                    <span className="flex items-baseline" style={{ gap: 8 }}>
+                      {cp.delta_pct != null && (
+                        <span
+                          style={{
+                            fontSize: 9.5,
+                            color:
+                              Math.abs(cp.delta_pct) >= 25
+                                ? 'var(--red)'
+                                : Math.abs(cp.delta_pct) >= 10
+                                  ? 'var(--amber)'
+                                  : 'var(--ink-dim)',
+                          }}
+                        >
+                          {cp.delta_pct >= 0 ? '+' : '−'}{Math.abs(cp.delta_pct)}% vs 14d avg
+                        </span>
+                      )}
+                      <span className="num-lg" style={{ fontSize: 14, color: 'var(--wheat)' }}>
+                        {cp.latest_count}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
+              {!liveError && live === null ? 'Loading live transit feed…' : 'Live transit feed unavailable'}
+            </p>
+          )}
         </Panel>
 
         <Panel title="04 · Top Exporters & Sanction Risk">
@@ -209,14 +251,29 @@ export default function CommoditiesWorkspace() {
         </Panel>
 
         {isEnergy && (
-          <Panel title="06 · Energy Stress 72h">
-            <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
-              Cross-border flow stress for the selected energy commodity. Feature 6.
-            </p>
-            <div className="flex items-baseline" style={{ gap: 6, marginTop: 10 }}>
-              <span className="num-lg" style={{ fontSize: 28, color: 'var(--red)' }}>62%</span>
-              <span className="eyebrow">peak stress</span>
-            </div>
+          <Panel title="06 · Cushing Crude Stocks · EIA weekly">
+            {!liveError && live?.eia ? (
+              <>
+                <Sparkline values={live.eia.series} width={420} height={120} stroke="var(--wheat)" fill="rgba(212, 162, 76, 0.14)" />
+                <div className="flex items-baseline justify-between" style={{ marginTop: 8 }}>
+                  <span className="eyebrow">Week of {live.eia.latest.period}</span>
+                  <span className="flex items-baseline" style={{ gap: 8 }}>
+                    {live.eia.weekly_delta_pct != null && (
+                      <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10.5, color: 'var(--wheat)' }}>
+                        {live.eia.weekly_delta_pct >= 0 ? '+' : '−'}{Math.abs(live.eia.weekly_delta_pct)}% w/w
+                      </span>
+                    )}
+                    <span className="num-lg" style={{ fontSize: 18, color: 'var(--wheat)' }}>
+                      {live.eia.latest.value.toLocaleString()} MBBL
+                    </span>
+                  </span>
+                </div>
+              </>
+            ) : (
+              <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
+                {!liveError && live === null ? 'Loading EIA inventory feed…' : 'EIA inventory feed unavailable'}
+              </p>
+            )}
           </Panel>
         )}
       </div>
