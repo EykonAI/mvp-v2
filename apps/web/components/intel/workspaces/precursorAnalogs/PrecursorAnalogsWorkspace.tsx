@@ -19,13 +19,27 @@ interface Match {
   similarity: number;
 }
 
+interface CurrentDomains {
+  air: number;
+  sea: number;
+  conflict: number;
+  grid: number;
+  imagery: number;
+}
+
 export default function PrecursorAnalogsWorkspace() {
   const [eventType, setEventType] = useState(EVENT_TYPES[0].slug);
   const [theatreSlug, setTheatreSlug] = useState('black-sea');
   const [matches, setMatches] = useState<Match[]>([]);
   const [source, setSource] = useState<'db' | 'fixture' | null>(null);
+  const [apiSeries, setApiSeries] = useState<number[] | null>(null);
+  const [apiDomains, setApiDomains] = useState<CurrentDomains | null>(null);
+  const [sourceCurrent, setSourceCurrent] = useState<'live' | 'fixture' | null>(null);
 
   useEffect(() => {
+    setApiSeries(null);
+    setApiDomains(null);
+    setSourceCurrent(null);
     fetch('/api/intel/precursor/match', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -35,11 +49,17 @@ export default function PrecursorAnalogsWorkspace() {
       .then(j => {
         setMatches(j.matches ?? []);
         setSource(j.source ?? null);
+        setApiSeries(Array.isArray(j.current_series) ? j.current_series : null);
+        setApiDomains(j.current_domains ?? null);
+        setSourceCurrent(j.source_current ?? null);
       });
   }, [eventType, theatreSlug]);
 
   const theatre = posture.theatres.find(t => t.slug === theatreSlug);
-  const currentSeries = theatre?.last_30d_composite ?? [];
+  const currentSeries = apiSeries ?? theatre?.last_30d_composite ?? [];
+  const currentDomains: CurrentDomains | null =
+    apiDomains ?? (theatre ? { air: theatre.air, sea: theatre.sea, conflict: theatre.conflict, grid: theatre.grid, imagery: theatre.imagery } : null);
+  const currentValue = currentSeries.length > 0 ? currentSeries[currentSeries.length - 1] : theatre?.composite;
 
   return (
     <div
@@ -103,8 +123,13 @@ export default function PrecursorAnalogsWorkspace() {
         <div style={{ background: 'var(--bg-panel)', padding: 14, border: '1px solid var(--rule-soft)', marginTop: 10 }}>
           <Sparkline values={currentSeries} width={600} height={100} stroke="var(--teal)" fill="rgba(25, 208, 184, 0.14)" min={0} max={1} />
           <p style={{ fontSize: 11.5, color: 'var(--ink-dim)', marginTop: 8 }}>
-            30-day composite trajectory. Current value: {theatre?.composite.toFixed(2)}.
+            30-day composite trajectory. Current value: {currentValue != null ? currentValue.toFixed(2) : '—'}.
           </p>
+          {currentDomains && (
+            <div style={{ fontFamily: 'var(--f-mono)', fontSize: 10.5, color: 'var(--ink-faint)', marginTop: 6, letterSpacing: '0.06em' }}>
+              AIR {currentDomains.air.toFixed(2)} · SEA {currentDomains.sea.toFixed(2)} · CONFLICT {currentDomains.conflict.toFixed(2)} · GRID {currentDomains.grid.toFixed(2)} · IMAGERY {currentDomains.imagery.toFixed(2)}
+            </div>
+          )}
         </div>
 
         <Head accent="var(--teal)" margin={14}>Top matches</Head>
@@ -141,7 +166,12 @@ export default function PrecursorAnalogsWorkspace() {
           Similarity is cosine against the library vectors.{' '}
           {source === 'db'
             ? 'Library loaded from Supabase — pgvector will replace this JS cosine when the extension is enabled.'
-            : 'Library loaded from fixture JSON — run db:seed to load the library into Supabase.'}
+            : 'Library loaded from fixture JSON — run db:seed to load the library into Supabase.'}{' '}
+          {sourceCurrent === 'live'
+            ? 'Current-theatre vector computed from live posture_scores (30-day daily-average composite + latest domain scores).'
+            : sourceCurrent === 'fixture'
+              ? 'Current-theatre vector from fixture posture seed.'
+              : null}
         </p>
         <p style={{ fontSize: 11.5, color: 'var(--ink-dim)', lineHeight: 1.55, marginTop: 10 }}>
           Thresholds: <span style={{ color: 'var(--red)' }}>≥ 0.85 alert</span> · <span style={{ color: 'var(--amber)' }}>≥ 0.7 watch</span>.
