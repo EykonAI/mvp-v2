@@ -10,9 +10,20 @@ interface Metric {
   spark: number[];
 }
 
+interface PerformanceRow {
+  feature: string;
+  window: string;
+  resolved_count: number;
+  open_count: number;
+  mean_brier: number | null;
+  mean_log_loss: number | null;
+}
+
 export default function CalibrationWorkspace() {
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [degraded, setDegraded] = useState(true);
+  const [perfRows, setPerfRows] = useState<PerformanceRow[]>([]);
+  const [perfError, setPerfError] = useState(false);
 
   useEffect(() => {
     fetch('/api/intel/calibration/summary')
@@ -21,6 +32,14 @@ export default function CalibrationWorkspace() {
         setMetrics(j.metrics ?? []);
         setDegraded(!!j.degraded);
       });
+    fetch('/api/intel/calibration/performance')
+      .then(r => r.json())
+      .then(j => {
+        const rows = Array.isArray(j.rows) ? j.rows : [];
+        setPerfRows(rows);
+        setPerfError(!!j.error || rows.length === 0);
+      })
+      .catch(() => setPerfError(true));
   }, []);
 
   return (
@@ -107,16 +126,24 @@ export default function CalibrationWorkspace() {
               </tr>
             </thead>
             <tbody>
-              {ROWS.map((r, i) => (
-                <tr key={i} style={{ borderTop: '1px solid var(--rule-soft)', color: 'var(--ink)' }}>
-                  <td style={{ padding: '6px 8px' }}>{r.feature}</td>
-                  <td style={{ padding: '6px 8px', color: 'var(--ink-dim)' }}>{r.window}</td>
-                  <td style={{ padding: '6px 8px', textAlign: 'right' }}>{r.count}</td>
-                  <td style={{ padding: '6px 8px', textAlign: 'right' }}>{r.brier}</td>
-                  <td style={{ padding: '6px 8px', textAlign: 'right' }}>{r.logloss}</td>
-                  <td style={{ padding: '6px 8px', textAlign: 'right' }}>{r.slope}</td>
+              {perfError ? (
+                <tr style={{ borderTop: '1px solid var(--rule-soft)' }}>
+                  <td colSpan={6} style={{ padding: '10px 8px', color: 'var(--ink-faint)', textAlign: 'center' }}>
+                    performance feed unavailable
+                  </td>
                 </tr>
-              ))}
+              ) : (
+                perfRows.map((r, i) => (
+                  <tr key={i} style={{ borderTop: '1px solid var(--rule-soft)', color: 'var(--ink)' }}>
+                    <td style={{ padding: '6px 8px' }}>{r.feature}</td>
+                    <td style={{ padding: '6px 8px', color: 'var(--ink-dim)' }}>{r.window}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right' }}>{r.resolved_count}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right' }}>{r.mean_brier != null ? r.mean_brier.toFixed(3) : '—'}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right' }}>{r.mean_log_loss != null ? r.mean_log_loss.toFixed(3) : '—'}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right' }}>—</td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -151,13 +178,3 @@ function ReliabilityDiagram({ persona }: { persona: string }) {
     </div>
   );
 }
-
-const ROWS = [
-  { feature: 'posture_shift',       window: '7d',  count: '—', brier: '—', logloss: '—', slope: '—' },
-  { feature: 'posture_shift',       window: '30d', count: '—', brier: '—', logloss: '—', slope: '—' },
-  { feature: 'posture_shift',       window: '90d', count: '—', brier: '—', logloss: '—', slope: '—' },
-  { feature: 'conflict_escalation', window: '7d',  count: '—', brier: '—', logloss: '—', slope: '—' },
-  { feature: 'conflict_escalation', window: '30d', count: '—', brier: '—', logloss: '—', slope: '—' },
-  { feature: 'trade_flow',          window: '7d',  count: '—', brier: '—', logloss: '—', slope: '—' },
-  { feature: 'trade_flow',          window: '30d', count: '—', brier: '—', logloss: '—', slope: '—' },
-];
