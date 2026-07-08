@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import reflag from '@/lib/fixtures/reflag_destinations.json';
 
 export interface SanctionsInput {
@@ -17,6 +18,10 @@ export interface WargameNode {
   label: string;
   ring: 0 | 1 | 2 | 3;
   severity: 'seed' | 'high' | 'medium' | 'low';
+  /** true = node comes from the OFAC-derived entity graph; false/absent = synthetic expansion */
+  real?: boolean;
+  /** OFAC sanction programs carried on real nodes (e.g. ['IRAN', 'RUSSIA-EO14024']) */
+  programs?: string[];
 }
 
 export interface WargameEdge {
@@ -32,68 +37,125 @@ export interface SanctionsOutput {
   fleet_scope: { affected: number; total: number; window_days: number };
   top_affected: Array<{ label: string; weighted_hop_distance: number; severity: string }>;
   reflag_destinations: Array<{ flag: string; share: number }>;
+  graph_source: 'live' | 'synthetic' | 'mixed';
   computed_at: string;
 }
 
+/** Max first-hop neighbours per target (IRISL alone has ~121 linked vessels). */
+const MAX_HOP1 = 12;
+/** Max second-hop neighbours per target. */
+const MAX_HOP2 = 20;
+
+interface LiveNeighbourhood {
+  seed: WargameNode;
+  nodes: WargameNode[];
+  edges: WargameEdge[];
+  hop1: WargameNode[];
+}
+
 /**
- * Deterministic sanctions-wargame model (v1).
- * Walks a synthetic kinship graph seeded from the input entities.
- * When the `entities` + `fleet_kinship_edges` tables are populated
- * by the behavioural agent this function will be swapped to walk the
- * real graph; the return shape stays stable.
+ * Deterministic sanctions-wargame model (v2).
+ *
+ * Network topology: when a Supabase client is provided, each target is
+ * resolved against the `entities` table (ILIKE on canonical_name; the
+ * candidate with the most `fleet_kinship_edges` wins) and its real
+ * OFAC-derived neighbourhood is walked up to 2 hops. Targets that do
+ * not resolve — or resolve to an entity with no edges — fall back to
+ * the original synthetic expansion, and `graph_source` reports
+ * 'live' / 'synthetic' / 'mixed' accordingly.
+ *
+ * Model dynamics (fleet-scope fractions, hop weights, reflag shares)
+ * remain deterministic illustrative parameters in both paths.
  */
-export function runWargame(input: SanctionsInput): SanctionsOutput {
+export async function runWargame(
+  input: SanctionsInput,
+  supabase?: SupabaseClient,
+): Promise<SanctionsOutput> {
   const nodes: WargameNode[] = [];
   const edges: WargameEdge[] = [];
   const seen = new Set<string>();
+  let liveTargets = 0;
 
-  input.target_entities.forEach((e, i) => {
-    const id = `seed-${slugify(e)}`;
-    nodes.push({ id, label: e, ring: 0, severity: 'seed' });
-    seen.add(id);
+  for (let i = 0; i < input.target_entities.length; i++) {
+    const e = input.target_entities[i];
 
-    // First-hop affected: operator / flag / vessel / port adjacent
-    const hop1 = adjacenciesFor(e, i);
-    for (const h of hop1) {
-      if (!seen.has(h.id)) {
-        nodes.push({ ...h, ring: 1 });
-        seen.add(h.id);
+    let live: LiveNeighbourhood | null = null;
+    if (supabase) {
+      try {
+        live = await realNeighbourhood(supabase, e, input.depth);
+      } catch {
+        live = null; // DB unavailable → synthetic fallback, never a hard failure
       }
-      edges.push({ from: id, to: h.id });
     }
 
-    if (input.depth >= 2) {
-      // Second-hop: broader commercial network
-      const hop2 = secondaryAdjacencies(e, i);
-      for (const h of hop2) {
+    let hop1: WargameNode[];
+    let seedId: string;
+
+    if (live) {
+      liveTargets++;
+      seedId = live.seed.id;
+      if (!seen.has(live.seed.id)) {
+        nodes.push(live.seed);
+        seen.add(live.seed.id);
+      }
+      for (const n of live.nodes) {
+        if (!seen.has(n.id)) {
+          nodes.push(n);
+          seen.add(n.id);
+        }
+      }
+      edges.push(...live.edges);
+      hop1 = live.hop1;
+    } else {
+      seedId = `seed-${slugify(e)}`;
+      nodes.push({ id: seedId, label: e, ring: 0, severity: 'seed', real: false });
+      seen.add(seedId);
+
+      // First-hop affected: operator / flag / vessel / port adjacent
+      hop1 = adjacenciesFor(e, i);
+      for (const h of hop1) {
         if (!seen.has(h.id)) {
-          nodes.push({ ...h, ring: 2 });
+          nodes.push({ ...h, ring: 1 });
           seen.add(h.id);
         }
-        // link to a random first-hop as approx
-        const pick = hop1[h.id.charCodeAt(0) % hop1.length];
-        edges.push({ from: pick.id, to: h.id });
+        edges.push({ from: seedId, to: h.id });
+      }
+
+      if (input.depth >= 2) {
+        // Second-hop: broader commercial network
+        const hop2 = secondaryAdjacencies(e, i);
+        for (const h of hop2) {
+          if (!seen.has(h.id)) {
+            nodes.push({ ...h, ring: 2 });
+            seen.add(h.id);
+          }
+          // link to a random first-hop as approx
+          const pick = hop1[h.id.charCodeAt(0) % hop1.length];
+          edges.push({ from: pick.id, to: h.id });
+        }
       }
     }
 
     if (input.depth >= 3) {
-      // Third-hop: projected reflags
+      // Third-hop: projected reflags (always a modelled projection)
+      const anchors = hop1.length > 0 ? hop1 : nodes.filter(n => n.id === seedId);
       const hop3 = reflag.destinations.slice(0, 5).map(d => ({
         id: `reflag-${d.flag_code.toLowerCase()}-${i}`,
         label: `Reflag · ${d.label}`,
         ring: 3 as const,
         severity: 'low' as const,
+        real: false,
       }));
       for (const h of hop3) {
         if (!seen.has(h.id)) {
           nodes.push(h);
           seen.add(h.id);
         }
-        const pick = hop1[h.id.charCodeAt(0) % hop1.length];
+        const pick = anchors[h.id.charCodeAt(0) % anchors.length];
         edges.push({ from: pick.id, to: h.id, projected_reflag: true });
       }
     }
-  });
+  }
 
   const total = 480 + input.target_entities.length * 120;
   const affectedFraction = scopeFraction(input);
@@ -113,6 +175,9 @@ export function runWargame(input: SanctionsInput): SanctionsOutput {
     share: d.share,
   }));
 
+  const graph_source: SanctionsOutput['graph_source'] =
+    liveTargets === 0 ? 'synthetic' : liveTargets === input.target_entities.length ? 'live' : 'mixed';
+
   return {
     input,
     nodes,
@@ -120,23 +185,163 @@ export function runWargame(input: SanctionsInput): SanctionsOutput {
     fleet_scope: { affected, total, window_days: 90 },
     top_affected,
     reflag_destinations,
+    graph_source,
     computed_at: new Date().toISOString(),
   };
 }
 
+interface EntityRecord {
+  id: string;
+  canonical_name: string;
+  entity_type: string;
+  metadata: Record<string, unknown> | null;
+}
+
+interface EdgeRecord {
+  source_entity_id: string;
+  target_entity_id: string;
+  weight: number | null;
+}
+
+/**
+ * Resolve a target name against `entities` and walk `fleet_kinship_edges`
+ * up to 2 hops. Returns null when the name does not resolve to an entity
+ * with at least one edge (caller falls back to synthetic expansion).
+ */
+async function realNeighbourhood(
+  supabase: SupabaseClient,
+  targetName: string,
+  depth: 1 | 2 | 3,
+): Promise<LiveNeighbourhood | null> {
+  const cleaned = targetName.trim().replaceAll(/[%_,()]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!cleaned) return null;
+
+  const { data: candidates, error } = await supabase
+    .from('entities')
+    .select('id, canonical_name, entity_type, metadata')
+    .ilike('canonical_name', `%${cleaned}%`)
+    .limit(5);
+  if (error || !candidates || candidates.length === 0) return null;
+
+  // Prefer the candidate with the most kinship edges
+  let best: EntityRecord | null = null;
+  let bestEdges: EdgeRecord[] = [];
+  for (const c of candidates as EntityRecord[]) {
+    const around = await edgesTouching(supabase, [c.id], 200);
+    if (around.length > bestEdges.length) {
+      best = c;
+      bestEdges = around;
+    }
+  }
+  if (!best || bestEdges.length === 0) return null;
+
+  const seed: WargameNode = {
+    id: best.id,
+    label: best.canonical_name,
+    ring: 0,
+    severity: 'seed',
+    real: true,
+    programs: programsOf(best),
+  };
+
+  // ── hop 1 ──
+  const hop1Ids: string[] = [];
+  const liveEdges: WargameEdge[] = [];
+  const sorted = [...bestEdges].sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
+  for (const ed of sorted) {
+    const other = ed.source_entity_id === best.id ? ed.target_entity_id : ed.source_entity_id;
+    if (other === best.id || hop1Ids.includes(other)) continue;
+    if (hop1Ids.length >= MAX_HOP1) break;
+    hop1Ids.push(other);
+    liveEdges.push({ from: best.id, to: other });
+  }
+
+  // ── hop 2 ──
+  const hop2Ids: string[] = [];
+  if (depth >= 2 && hop1Ids.length > 0) {
+    const around = await edgesTouching(supabase, hop1Ids, 400);
+    for (const ed of around) {
+      const inHop1Source = hop1Ids.includes(ed.source_entity_id);
+      const anchor = inHop1Source ? ed.source_entity_id : ed.target_entity_id;
+      const other = inHop1Source ? ed.target_entity_id : ed.source_entity_id;
+      if (other === best.id || hop1Ids.includes(other)) continue;
+      if (!hop2Ids.includes(other)) {
+        if (hop2Ids.length >= MAX_HOP2) continue;
+        hop2Ids.push(other);
+      }
+      liveEdges.push({ from: anchor, to: other });
+    }
+  }
+
+  // ── resolve node details ──
+  const allIds = [...hop1Ids, ...hop2Ids];
+  const details = new Map<string, EntityRecord>();
+  if (allIds.length > 0) {
+    const { data } = await supabase
+      .from('entities')
+      .select('id, canonical_name, entity_type, metadata')
+      .in('id', allIds);
+    for (const row of (data ?? []) as EntityRecord[]) details.set(row.id, row);
+  }
+
+  const toNode = (id: string, ring: 1 | 2): WargameNode => {
+    const d = details.get(id);
+    return {
+      id,
+      label: d?.canonical_name ?? 'Unknown entity',
+      ring,
+      severity: ring === 1 ? 'high' : 'medium',
+      real: true,
+      programs: d ? programsOf(d) : undefined,
+    };
+  };
+
+  const hop1Nodes = hop1Ids.map(id => toNode(id, 1));
+  const hop2Nodes = hop2Ids.map(id => toNode(id, 2));
+  const known = new Set([best.id, ...allIds]);
+
+  return {
+    seed,
+    nodes: [...hop1Nodes, ...hop2Nodes],
+    edges: liveEdges.filter(e => known.has(e.from) && known.has(e.to)),
+    hop1: hop1Nodes,
+  };
+}
+
+async function edgesTouching(
+  supabase: SupabaseClient,
+  ids: string[],
+  limit: number,
+): Promise<EdgeRecord[]> {
+  if (ids.length === 0) return [];
+  const list = ids.join(',');
+  const { data, error } = await supabase
+    .from('fleet_kinship_edges')
+    .select('source_entity_id, target_entity_id, weight')
+    .or(`source_entity_id.in.(${list}),target_entity_id.in.(${list})`)
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as EdgeRecord[];
+}
+
+function programsOf(e: EntityRecord): string[] | undefined {
+  const p = (e.metadata as Record<string, unknown> | null)?.programs;
+  return Array.isArray(p) ? (p as string[]) : undefined;
+}
+
 function adjacenciesFor(name: string, i: number): WargameNode[] {
   return [
-    { id: `${slugify(name)}-a`, label: `${name} · Operator-A`, ring: 1, severity: 'high' },
-    { id: `${slugify(name)}-b`, label: `${name} · Flag-${i % 2 === 0 ? 'COK' : 'GAB'}`, ring: 1, severity: 'medium' },
-    { id: `${slugify(name)}-c`, label: `${name} · Fleet cluster`, ring: 1, severity: 'high' },
+    { id: `${slugify(name)}-a`, label: `${name} · Operator-A`, ring: 1, severity: 'high', real: false },
+    { id: `${slugify(name)}-b`, label: `${name} · Flag-${i % 2 === 0 ? 'COK' : 'GAB'}`, ring: 1, severity: 'medium', real: false },
+    { id: `${slugify(name)}-c`, label: `${name} · Fleet cluster`, ring: 1, severity: 'high', real: false },
   ];
 }
 
 function secondaryAdjacencies(name: string, i: number): WargameNode[] {
   return [
-    { id: `${slugify(name)}-x`, label: `${name} · BO chain`, ring: 2, severity: 'medium' },
-    { id: `${slugify(name)}-y`, label: `${name} · Insurer ${i + 1}`, ring: 2, severity: 'medium' },
-    { id: `${slugify(name)}-z`, label: `${name} · Port cluster ${i + 1}`, ring: 2, severity: 'low' },
+    { id: `${slugify(name)}-x`, label: `${name} · BO chain`, ring: 2, severity: 'medium', real: false },
+    { id: `${slugify(name)}-y`, label: `${name} · Insurer ${i + 1}`, ring: 2, severity: 'medium', real: false },
+    { id: `${slugify(name)}-z`, label: `${name} · Port cluster ${i + 1}`, ring: 2, severity: 'low', real: false },
   ];
 }
 

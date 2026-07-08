@@ -23,7 +23,7 @@ const PRESETS = [
 export default function SanctionsWorkspace() {
   const [bodies, setBodies] = useState<SanctionsInput['sanctioning_bodies']>(['OFAC']);
   const [preset, setPreset] = useState<SanctionsInput['preset']>('secondary_expansion');
-  const [targets, setTargets] = useState<string[]>(['Sovcomflot Operator', 'NITC Operator', 'Gabon Flag', 'Kozmino Port']);
+  const [targets, setTargets] = useState<string[]>(['SOVCOMFLOT', 'NATIONAL IRANIAN TANKER COMPANY', 'HENNESEA HOLDINGS', 'OCEANLINK MARITIME']);
   const [depth, setDepth] = useState<1 | 2 | 3>(2);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<SanctionsOutput | null>(null);
@@ -53,6 +53,8 @@ export default function SanctionsWorkspace() {
     setBodies(b => (b.includes(c) ? b.filter(x => x !== c) : ([...b, c] as SanctionsInput['sanctioning_bodies'])));
   };
 
+  const liveGraph = result?.graph_source === 'live' || result?.graph_source === 'mixed';
+
   return (
     <>
       <div
@@ -69,9 +71,27 @@ export default function SanctionsWorkspace() {
       >
         <IllustrativeBadge label="ILLUSTRATIVE MODEL" />
         <span>
-          Deterministic scenario model — parameters are illustrative fixtures anchored to historical episodes; not live data.
+          {liveGraph
+            ? 'Deterministic scenario model — network topology comes from OFAC SDN linkages; elasticity multipliers and fleet-scope dynamics remain modelled.'
+            : 'Deterministic scenario model — parameters are illustrative fixtures anchored to historical episodes; not live data.'}
         </span>
       </div>
+      {liveGraph && (
+        <div
+          style={{
+            padding: '6px 10px',
+            marginBottom: 1,
+            background: 'rgba(61, 178, 170, 0.05)',
+            borderLeft: '2px solid var(--teal)',
+            fontSize: 10.5,
+            color: 'var(--teal)',
+            fontFamily: 'var(--f-mono)',
+            letterSpacing: '0.06em',
+          }}
+        >
+          Network: OFAC SDN linkages (live) — model dynamics remain deterministic
+        </div>
+      )}
     <ScenarioLayout
       left={
         <div className="flex flex-col" style={{ gap: 16 }}>
@@ -312,9 +332,20 @@ function NetworkGraph({ result }: { result: SanctionsOutput | null }) {
               ? 'var(--amber)'
               : 'var(--ink-faint)';
           const r = n.severity === 'seed' ? 11 : n.severity === 'high' ? 7 : 5;
+          const hasReal = result.graph_source !== 'synthetic';
+          const synthetic = hasReal && n.real !== true;
           return (
             <g key={n.id}>
-              <circle cx={p.x} cy={p.y} r={r} fill={colour} opacity={0.85} />
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={r}
+                fill={synthetic ? 'transparent' : colour}
+                stroke={colour}
+                strokeWidth={synthetic ? 1 : 0}
+                strokeDasharray={synthetic ? '2 2' : undefined}
+                opacity={synthetic ? 0.55 : 0.9}
+              />
               <text
                 x={p.x}
                 y={p.y - r - 4}
