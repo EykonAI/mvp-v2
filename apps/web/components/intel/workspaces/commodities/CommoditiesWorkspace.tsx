@@ -1,12 +1,15 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usePersona } from '@/components/intel/shell/PersonaContext';
 import Sparkline from '@/components/intel/shared/Sparkline';
 import IllustrativeBadge from '@/components/intel/shared/IllustrativeBadge';
 
 // Live inputs (grounding audit P1): chokepoint transits + EIA inventory
-// from /api/intel/commodities/live. Sections render an honest
-// "unavailable" state when the feed is missing — never fixture numbers.
+// from /api/intel/commodities/live. Per-commodity market inputs
+// (grounding P2b): prices / export shares / computed sanction bands /
+// heuristic 72h ribbon from /api/intel/commodities/markets. Sections
+// render an honest "unavailable" state when a feed is missing — never
+// fixture numbers.
 interface LiveChokepoint {
   chokepoint: string;
   label: string;
@@ -30,6 +33,39 @@ interface LiveData {
   eia: LiveEia | null;
 }
 
+// /api/intel/commodities/markets?commodity=<slug> — per-commodity payload
+interface MarketPrices {
+  source: string;
+  unit: string;
+  cadence: 'daily' | 'monthly';
+  series: number[];
+  latest: { period: string; value: number };
+}
+interface ExportShares {
+  period: string;
+  source: string;
+  rows: Array<{ reporter: string; value_usd: number; share: number }>;
+}
+interface SanctionRiskRow {
+  country: string;
+  band: 'red' | 'amber' | 'green';
+  ofac_active_designations: number | null;
+  fatalities_30d: number | null;
+  conflict_events_30d: number | null;
+}
+interface RibbonData {
+  heuristic: true;
+  base: number;
+  inputs: { flags_72h: number; weighted_density: number };
+  buckets: Array<{ t_plus_h: number; value: number }>;
+}
+interface MarketsData {
+  prices: MarketPrices | null;
+  export_shares: ExportShares | null;
+  sanction_risk: { computed: boolean; rows: SanctionRiskRow[] } | null;
+  ribbon: RibbonData | null;
+}
+
 const COMMODITIES = [
   { slug: 'wheat',   label: 'Wheat',        family: 'agri' },
   { slug: 'brent',   label: 'Brent',        family: 'oil' },
@@ -41,15 +77,13 @@ const COMMODITIES = [
   { slug: 'copper',  label: 'Copper',       family: 'mineral' },
 ];
 
-const BASE_PRICE: Record<string, number> = {
-  wheat: 610, brent: 82, wti: 78, ttf: 38, cobalt: 32500, lithium: 14_800, ree: 680, copper: 9200,
-};
-
 export default function CommoditiesWorkspace() {
   const { persona } = usePersona();
   const [selected, setSelected] = useState('wheat');
   const [live, setLive] = useState<LiveData | null>(null);
   const [liveError, setLiveError] = useState(false);
+  const [markets, setMarkets] = useState<MarketsData | null>(null);
+  const [marketsLoading, setMarketsLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,9 +101,27 @@ export default function CommoditiesWorkspace() {
     return () => { cancelled = true; };
   }, []);
 
-  const priceSeries = useMemo(() => {
-    const base = BASE_PRICE[selected] ?? 100;
-    return Array.from({ length: 60 }, (_, i) => base * (1 + 0.08 * Math.sin(i * 0.25) + 0.005 * (i - 30)));
+  useEffect(() => {
+    let cancelled = false;
+    setMarketsLoading(true);
+    fetch(`/api/intel/commodities/markets?commodity=${selected}`)
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data: MarketsData) => {
+        if (!cancelled) {
+          setMarkets(data);
+          setMarketsLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMarkets(null);
+          setMarketsLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
   }, [selected]);
 
   const isEnergy = ['brent', 'wti', 'ttf'].includes(selected);
@@ -130,32 +182,84 @@ export default function CommoditiesWorkspace() {
           border: '1px solid var(--rule-soft)',
         }}
       >
-        <Panel title="01 · Production & Export Share" badge>
-          <div className="flex flex-col" style={{ gap: 4 }}>
-            {DONUT_STUB.map(d => (
-              <div key={d.country} className="flex items-center" style={{ gap: 8 }}>
-                <span style={{ width: 80, fontFamily: 'var(--f-mono)', fontSize: 10.5, color: 'var(--ink-dim)' }}>
-                  {d.country}
-                </span>
-                <div style={{ flex: 1, height: 5, background: 'var(--bg-raised)', border: '1px solid var(--rule)' }}>
-                  <div style={{ width: `${d.share * 100}%`, height: '100%', background: 'var(--wheat)' }} />
-                </div>
-                <span className="num-lg" style={{ width: 40, fontSize: 10.5, color: 'var(--ink)', textAlign: 'right' }}>
-                  {(d.share * 100).toFixed(0)}%
-                </span>
+        <Panel title="01 · Production & Export Share" badge={!markets?.export_shares}>
+          {markets?.export_shares ? (
+            <>
+              <div className="flex flex-col" style={{ gap: 4 }}>
+                {markets.export_shares.rows.map(d => (
+                  <div key={d.reporter} className="flex items-center" style={{ gap: 8 }}>
+                    <span style={{ width: 80, fontFamily: 'var(--f-mono)', fontSize: 10.5, color: 'var(--ink-dim)' }}>
+                      {d.reporter}
+                    </span>
+                    <div style={{ flex: 1, height: 5, background: 'var(--bg-raised)', border: '1px solid var(--rule)' }}>
+                      <div style={{ width: `${Math.min(100, d.share * 100)}%`, height: '100%', background: 'var(--wheat)' }} />
+                    </div>
+                    <span className="num-lg" style={{ width: 40, fontSize: 10.5, color: 'var(--ink)', textAlign: 'right' }}>
+                      {(d.share * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+              <div className="eyebrow" style={{ marginTop: 8 }}>
+                {markets.export_shares.source} · {markets.export_shares.period}
+              </div>
+            </>
+          ) : (
+            // No sourced trade flows yet (Comtrade ingest may lag its API
+            // key) — keep the illustrative stub, clearly badged as such.
+            <div className="flex flex-col" style={{ gap: 4 }}>
+              {DONUT_STUB.map(d => (
+                <div key={d.country} className="flex items-center" style={{ gap: 8 }}>
+                  <span style={{ width: 80, fontFamily: 'var(--f-mono)', fontSize: 10.5, color: 'var(--ink-dim)' }}>
+                    {d.country}
+                  </span>
+                  <div style={{ flex: 1, height: 5, background: 'var(--bg-raised)', border: '1px solid var(--rule)' }}>
+                    <div style={{ width: `${d.share * 100}%`, height: '100%', background: 'var(--wheat)' }} />
+                  </div>
+                  <span className="num-lg" style={{ width: 40, fontSize: 10.5, color: 'var(--ink)', textAlign: 'right' }}>
+                    {(d.share * 100).toFixed(0)}%
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </Panel>
 
-        <Panel title={`02 · Price Volatility & Futures · ${selected.toUpperCase()}`} badge>
-          <Sparkline values={priceSeries} width={420} height={120} stroke="var(--wheat)" fill="rgba(212, 162, 76, 0.14)" />
-          <div className="flex items-baseline justify-between" style={{ marginTop: 8 }}>
-            <span className="eyebrow">Spot · 60-day</span>
-            <span className="num-lg" style={{ fontSize: 18, color: 'var(--wheat)' }}>
-              ${priceSeries.at(-1)?.toFixed(2)}
-            </span>
-          </div>
+        <Panel
+          title={`02 · Price Volatility & Futures · ${selected.toUpperCase()}`}
+          badge={!marketsLoading && !markets?.prices}
+        >
+          {markets?.prices ? (
+            <>
+              <Sparkline
+                values={markets.prices.series}
+                width={420}
+                height={120}
+                stroke="var(--wheat)"
+                fill="rgba(212, 162, 76, 0.14)"
+              />
+              <div className="flex items-baseline justify-between" style={{ marginTop: 8 }}>
+                <span className="eyebrow">
+                  Spot · {markets.prices.series.length} obs ·{' '}
+                  {markets.prices.source === 'eia_spot' ? 'EIA daily' : 'World Bank CMO monthly'}
+                </span>
+                <span className="flex items-baseline" style={{ gap: 8 }}>
+                  <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10.5, color: 'var(--ink-dim)' }}>
+                    {markets.prices.latest.period}
+                  </span>
+                  <span className="num-lg" style={{ fontSize: 18, color: 'var(--wheat)' }}>
+                    {markets.prices.latest.value.toLocaleString()} {markets.prices.unit}
+                  </span>
+                </span>
+              </div>
+            </>
+          ) : (
+            <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
+              {marketsLoading
+                ? 'Loading price series…'
+                : 'No sourced price series yet — awaiting the commodity_prices ingest for this instrument.'}
+            </p>
+          )}
         </Panel>
 
         <Panel title="03 · Chokepoint Transits · 24h">
@@ -203,52 +307,90 @@ export default function CommoditiesWorkspace() {
           )}
         </Panel>
 
-        <Panel title="04 · Top Exporters & Sanction Risk" badge>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontFamily: 'var(--f-mono)', fontSize: 11 }}>
-            {RISK_EXPORTERS.map(r => (
-              <li key={r.country} className="flex items-center justify-between" style={{ padding: '5px 0', borderBottom: '1px solid var(--rule-soft)' }}>
-                <span style={{ color: 'var(--ink)' }}>{r.country}</span>
-                <span
-                  style={{
-                    padding: '1px 6px',
-                    background: r.band === 'red' ? 'var(--red)' : r.band === 'amber' ? 'var(--amber)' : 'var(--green)',
-                    color: 'var(--bg-void)',
-                    letterSpacing: '0.12em',
-                    textTransform: 'uppercase',
-                    fontSize: 9.5,
-                  }}
-                >
-                  {r.band}
-                </span>
-              </li>
-            ))}
-          </ul>
+        <Panel title="04 · Top Exporters & Sanction Risk">
+          {markets?.sanction_risk?.rows.length ? (
+            <>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontFamily: 'var(--f-mono)', fontSize: 11 }}>
+                {markets.sanction_risk.rows.map(r => (
+                  <li
+                    key={r.country}
+                    className="flex items-center justify-between"
+                    style={{ gap: 8, padding: '5px 0', borderBottom: '1px solid var(--rule-soft)' }}
+                  >
+                    <span style={{ color: 'var(--ink)' }}>{r.country}</span>
+                    <span className="flex items-center" style={{ gap: 8 }}>
+                      <span style={{ fontSize: 9.5, color: 'var(--ink-dim)' }}>
+                        {r.ofac_active_designations != null
+                          ? `${r.ofac_active_designations.toLocaleString()} OFAC`
+                          : 'OFAC n/a'}
+                        {r.fatalities_30d != null && r.fatalities_30d > 0
+                          ? ` · ${r.fatalities_30d.toLocaleString()} fatal/30d`
+                          : ''}
+                      </span>
+                      <span
+                        style={{
+                          padding: '1px 6px',
+                          background: r.band === 'red' ? 'var(--red)' : r.band === 'amber' ? 'var(--amber)' : 'var(--green)',
+                          color: 'var(--bg-void)',
+                          letterSpacing: '0.12em',
+                          textTransform: 'uppercase',
+                          fontSize: 9.5,
+                        }}
+                      >
+                        {r.band}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p style={{ marginTop: 8, fontSize: 10, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
+                Computed from OFAC designations + 30d conflict reporting — not an asserted rating.
+              </p>
+            </>
+          ) : (
+            <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
+              {marketsLoading ? 'Computing risk bands…' : 'Risk bands unavailable — OFAC and conflict feeds could not be read.'}
+            </p>
+          )}
         </Panel>
 
-        <Panel title="05 · Trade-Flow Horizon · 72h" span={2} badge>
-          <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
-            72-h disruption ribbon: probability-weighted corridor risk for the next three days. Feature 4.
-          </p>
-          <div className="flex" style={{ gap: 1, marginTop: 10, background: 'var(--rule-soft)', border: '1px solid var(--rule-soft)' }}>
-            {[0.12, 0.22, 0.38, 0.55, 0.62, 0.48, 0.28].map((v, i) => (
-              <div
-                key={i}
-                style={{
-                  flex: 1,
-                  padding: 8,
-                  background: 'var(--bg-panel)',
-                  color: 'var(--ink)',
-                  fontFamily: 'var(--f-mono)',
-                  fontSize: 10.5,
-                  borderBottom: `3px solid ${v >= 0.5 ? 'var(--red)' : v >= 0.3 ? 'var(--amber)' : 'var(--green)'}`,
-                  textAlign: 'center',
-                }}
-              >
-                <div className="eyebrow" style={{ marginBottom: 4 }}>T+{i * 12}h</div>
-                <div className="num-lg" style={{ fontSize: 14 }}>{(v * 100).toFixed(0)}%</div>
+        <Panel
+          title="05 · Trade-Flow Horizon · 72h"
+          span={2}
+          tag={markets?.ribbon ? { label: 'HEURISTIC', title: 'Computed from live anomaly densities — not a forecast model' } : undefined}
+        >
+          {markets?.ribbon ? (
+            <>
+              <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
+                HEURISTIC · live anomaly densities · 72h — severity- and recency-weighted Maritime + Energy
+                anomaly flags ({markets.ribbon.inputs.flags_72h} in window), decayed over the next three days.
+              </p>
+              <div className="flex" style={{ gap: 1, marginTop: 10, background: 'var(--rule-soft)', border: '1px solid var(--rule-soft)' }}>
+                {markets.ribbon.buckets.map(b => (
+                  <div
+                    key={b.t_plus_h}
+                    style={{
+                      flex: 1,
+                      padding: 8,
+                      background: 'var(--bg-panel)',
+                      color: 'var(--ink)',
+                      fontFamily: 'var(--f-mono)',
+                      fontSize: 10.5,
+                      borderBottom: `3px solid ${b.value >= 0.5 ? 'var(--red)' : b.value >= 0.3 ? 'var(--amber)' : 'var(--green)'}`,
+                      textAlign: 'center',
+                    }}
+                  >
+                    <div className="eyebrow" style={{ marginBottom: 4 }}>T+{b.t_plus_h}h</div>
+                    <div className="num-lg" style={{ fontSize: 14 }}>{(b.value * 100).toFixed(0)}%</div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          ) : (
+            <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
+              {marketsLoading ? 'Loading anomaly densities…' : 'Anomaly density feed unavailable — no ribbon rendered.'}
+            </p>
+          )}
         </Panel>
 
         {isEnergy && (
@@ -291,6 +433,8 @@ export default function CommoditiesWorkspace() {
   );
 }
 
+// Illustrative fallback for Panel 01 only — shown badged until the
+// Comtrade trade-flow ingest delivers real export shares.
 const DONUT_STUB = [
   { country: 'Russia',    share: 0.18 },
   { country: 'USA',       share: 0.14 },
@@ -300,17 +444,19 @@ const DONUT_STUB = [
   { country: 'France',    share: 0.06 },
 ];
 
-const RISK_EXPORTERS = [
-  { country: 'Russia',   band: 'red' },
-  { country: 'Iran',     band: 'red' },
-  { country: 'Venezuela',band: 'amber' },
-  { country: 'Libya',    band: 'amber' },
-  { country: 'Nigeria',  band: 'amber' },
-  { country: 'Norway',   band: 'green' },
-  { country: 'Canada',   band: 'green' },
-];
-
-function Panel({ title, children, span = 1, badge = false }: { title: string; children: React.ReactNode; span?: number; badge?: boolean }) {
+function Panel({
+  title,
+  children,
+  span = 1,
+  badge = false,
+  tag,
+}: {
+  title: string;
+  children: React.ReactNode;
+  span?: number;
+  badge?: boolean;
+  tag?: { label: string; title?: string };
+}) {
   return (
     <section
       style={{
@@ -325,6 +471,11 @@ function Panel({ title, children, span = 1, badge = false }: { title: string; ch
         {badge && (
           <span style={{ marginLeft: 8 }}>
             <IllustrativeBadge title="Fixture data — not a live feed" />
+          </span>
+        )}
+        {tag && (
+          <span style={{ marginLeft: 8 }}>
+            <IllustrativeBadge label={tag.label} title={tag.title} />
           </span>
         )}
       </h3>
