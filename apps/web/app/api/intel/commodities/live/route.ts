@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
+import { EIA_CUSHING_CRUDE_STOCKS } from '@/lib/eia/client';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -15,8 +16,9 @@ export const revalidate = 0;
  *    a corridor absent from recent snapshots simply isn't listed.
  *
  *  • EIA inventory — eia_inventory_observations (ingest-eia-inventory
- *    cron). Currently one series: W_EPC0_SAX_YCUOK_MBBL (weekly crude
- *    ending stocks at Cushing, OK, excl. SPR, thousand barrels).
+ *    cron). This widget shows W_EPC0_SAX_YCUOK_MBBL (weekly crude
+ *    ending stocks at Cushing, OK, excl. SPR, thousand barrels); the
+ *    table also carries WCESTUS1/WGTSTUS1/WDISTUS1 for other widgets.
  *
  * No fixture fallback: if a query fails the section reports
  * unavailable — the workspace renders an honest empty state instead of
@@ -61,6 +63,10 @@ export async function GET(_req: NextRequest) {
     supabase
       .from('eia_inventory_observations')
       .select('series_id, period, value, unit, fetched_at')
+      // Pin to the Cushing series: ingest-eia-inventory now writes
+      // several weekly stock series into this table, and an unfiltered
+      // latest-26 would interleave them into a meaningless sparkline.
+      .eq('series_id', EIA_CUSHING_CRUDE_STOCKS)
       .order('period', { ascending: false })
       .limit(26),
   ]);
