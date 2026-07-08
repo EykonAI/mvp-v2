@@ -18,7 +18,7 @@
 
 version: 2
 updates:
-  # ── Root workspace (supervisor + ais-ingest scripts)
+  # ── Root workspace (ais-ingest script)
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
