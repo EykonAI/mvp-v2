@@ -46,7 +46,10 @@ export async function POST(req: NextRequest) {
         .from('anomaly_flags')
         .select('*')
         .gte('created_at', since)
-        .eq('processed', true)
+        // No processed filter: the detectors insert with the default
+        // processed=false, and until the process-anomaly-flags cron nothing
+        // ever promoted them, so the previous .eq('processed', true) starved
+        // this briefing (same bug class as compute-convergences).
         .limit(20),
       userId
         ? supabase.from('watchlists').select('*').eq('user_id', userId)
