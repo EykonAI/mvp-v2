@@ -34,10 +34,17 @@ export async function POST(req: NextRequest) {
     const parsed = validate(body);
     if ('error' in parsed) return NextResponse.json({ error: parsed.error }, { status: 400 });
 
-    const output = runWargame(parsed);
+    let supabase: ReturnType<typeof createServerSupabase> | undefined;
+    try {
+      supabase = createServerSupabase();
+    } catch {
+      supabase = undefined; // no DB → wargame falls back to synthetic graph
+    }
+
+    const output = await runWargame(parsed, supabase);
 
     try {
-      const supabase = createServerSupabase();
+      if (!supabase) throw new Error('no client');
       await supabase.from('scenario_runs').insert({
         scenario_type: 'sanctions',
         input: parsed,

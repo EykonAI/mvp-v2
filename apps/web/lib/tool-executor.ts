@@ -497,16 +497,20 @@ async function runChokepointScenario(input: Record<string, any>): Promise<string
 
 async function runSanctionsWargameTool(input: Record<string, any>): Promise<string> {
   try {
-    const output = runWargame({
-      sanctioning_bodies: input.sanctioning_bodies,
-      preset: input.preset,
-      target_entities: input.target_entities,
-      depth: (input.depth ?? 2) as 1 | 2 | 3,
-    });
+    const output = await runWargame(
+      {
+        sanctioning_bodies: input.sanctioning_bodies,
+        preset: input.preset,
+        target_entities: input.target_entities,
+        depth: (input.depth ?? 2) as 1 | 2 | 3,
+      },
+      createServerSupabase(),
+    );
     return JSON.stringify({
       fleet_scope: output.fleet_scope,
       top_affected: output.top_affected,
       reflag_destinations: output.reflag_destinations,
+      graph_source: output.graph_source,
     });
   } catch (err: any) {
     return JSON.stringify({ error: err.message });
