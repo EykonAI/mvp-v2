@@ -3,10 +3,31 @@ import { useEffect, useState } from 'react';
 import IllustrativeBadge from '@/components/intel/shared/IllustrativeBadge';
 
 interface Data {
-  groups: Array<{ slug: string; label: string; minerals: Array<{ slug: string; label: string; china_refining_share: number; risk_band: string }> }>;
-  refining_dominance: Array<{ mineral: string; share: number }>;
-  mines: Array<{ mineral: string; name: string; country: string; owner: string; tonnage_pct: number; status: string }>;
-  supply_risk_index: Array<{ mineral: string; band: string }>;
+  groups: Array<{
+    slug: string;
+    label: string;
+    minerals: Array<{ slug: string; label: string; china_refining_share: number | null; risk_band: string | null }>;
+  }>;
+  refining_dominance: Array<{ mineral: string; share: number; year?: number }> | null;
+  mines: Array<{
+    mineral: string;
+    name: string;
+    country: string;
+    owner: string | null;
+    tonnage_pct: number | null;
+    status: string | null;
+    source_url?: string | null;
+    as_of?: string | null;
+    notes?: string | null;
+  }> | null;
+  supply_risk_index: Array<{
+    mineral: string;
+    slug?: string;
+    band: string;
+    hhi?: number;
+    top_refiner?: string | null;
+    top_refining_share?: number;
+  }> | null;
   in_transit: Array<{ vessel: string; flag: string; route: string; mineral: string; tonnage_t: number; eta_hours: number }>;
 }
 
@@ -75,8 +96,8 @@ export default function MineralsWorkspace() {
       >
         <IllustrativeBadge />
         <span>
-          Illustrative dataset — mine, refining, risk and shipment figures are fixtures; grounding on
-          USGS/IEA/Comtrade is scheduled (P2b).
+          Shipments and imagery remain illustrative — AIS-derived shipments and Sentinel-2 tiles land in P2c.
+          Mine, refining and risk figures are grounded on cited USGS/IEA annual data.
         </span>
       </div>
 
@@ -89,84 +110,107 @@ export default function MineralsWorkspace() {
           border: '1px solid var(--rule-soft)',
         }}
       >
-        <Panel title="01 · Mine Tonnage">
-          <table style={{ width: '100%', fontFamily: 'var(--f-mono)', fontSize: 11, borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ color: 'var(--ink-faint)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
-                <th style={{ textAlign: 'left', padding: '6px 4px' }}>Mine</th>
-                <th style={{ textAlign: 'left', padding: '6px 4px' }}>Owner</th>
-                <th style={{ textAlign: 'right', padding: '6px 4px' }}>%</th>
-                <th style={{ textAlign: 'right', padding: '6px 4px' }}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.mines
-                .filter(m => m.mineral === selected)
-                .map((m, i) => (
-                  <tr key={i} style={{ borderTop: '1px solid var(--rule-soft)' }}>
-                    <td style={{ padding: '6px 4px', color: 'var(--ink)' }}>{m.name}</td>
-                    <td style={{ padding: '6px 4px', color: 'var(--ink-dim)' }}>{m.owner}</td>
-                    <td style={{ padding: '6px 4px', color: 'var(--ink)', textAlign: 'right' }}>
-                      {(m.tonnage_pct * 100).toFixed(0)}%
-                    </td>
-                    <td style={{ padding: '6px 4px', textAlign: 'right' }}>
-                      <StatusBadge status={m.status} />
-                    </td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
+        <Panel title="01 · Mine Tonnage" source="Curated · operator reports / USGS MCS 2026 · annual">
+          {data.mines === null ? (
+            <Unavailable />
+          ) : (
+            <table style={{ width: '100%', fontFamily: 'var(--f-mono)', fontSize: 11, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ color: 'var(--ink-faint)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+                  <th style={{ textAlign: 'left', padding: '6px 4px' }}>Mine</th>
+                  <th style={{ textAlign: 'left', padding: '6px 4px' }}>Owner</th>
+                  <th style={{ textAlign: 'right', padding: '6px 4px' }}>%</th>
+                  <th style={{ textAlign: 'right', padding: '6px 4px' }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.mines
+                  .filter(m => m.mineral === selected)
+                  .map((m, i) => (
+                    <tr key={i} style={{ borderTop: '1px solid var(--rule-soft)' }} title={m.notes ?? undefined}>
+                      <td style={{ padding: '6px 4px', color: 'var(--ink)' }}>
+                        {m.name} <span style={{ color: 'var(--ink-faint)' }}>· {m.country}</span>
+                      </td>
+                      <td style={{ padding: '6px 4px', color: 'var(--ink-dim)' }}>{m.owner ?? '—'}</td>
+                      <td style={{ padding: '6px 4px', color: 'var(--ink)', textAlign: 'right' }}>
+                        {m.tonnage_pct === null ? '—' : `${(m.tonnage_pct * 100).toFixed(0)}%`}
+                      </td>
+                      <td style={{ padding: '6px 4px', textAlign: 'right' }}>
+                        <StatusBadge status={m.status ?? 'unknown'} />
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          )}
         </Panel>
 
-        <Panel title="02 · China Refining">
-          <div className="flex flex-col" style={{ gap: 6 }}>
-            {data.refining_dominance.map(r => (
-              <div key={r.mineral} className="flex items-center" style={{ gap: 10 }}>
-                <span style={{ width: 40, fontFamily: 'var(--f-mono)', fontSize: 10.5, color: 'var(--ink-dim)' }}>{r.mineral}</span>
-                <div style={{ flex: 1, height: 6, background: 'var(--bg-raised)', border: '1px solid var(--rule)' }}>
-                  <div style={{ width: `${r.share * 100}%`, height: '100%', background: r.share >= 0.7 ? 'var(--red)' : r.share >= 0.5 ? 'var(--amber)' : 'var(--green)' }} />
+        <Panel title="02 · China Refining" source="IEA Global Critical Minerals Outlook 2025 · 2024 shares">
+          {data.refining_dominance === null ? (
+            <Unavailable />
+          ) : (
+            <div className="flex flex-col" style={{ gap: 6 }}>
+              {data.refining_dominance.map(r => (
+                <div key={r.mineral} className="flex items-center" style={{ gap: 10 }}>
+                  <span style={{ width: 40, fontFamily: 'var(--f-mono)', fontSize: 10.5, color: 'var(--ink-dim)' }}>{r.mineral}</span>
+                  <div style={{ flex: 1, height: 6, background: 'var(--bg-raised)', border: '1px solid var(--rule)' }}>
+                    <div style={{ width: `${r.share * 100}%`, height: '100%', background: r.share >= 0.7 ? 'var(--red)' : r.share >= 0.5 ? 'var(--amber)' : 'var(--green)' }} />
+                  </div>
+                  <span className="num-lg" style={{ width: 40, fontSize: 11, color: 'var(--ink)', textAlign: 'right' }}>
+                    {(r.share * 100).toFixed(0)}%
+                  </span>
                 </div>
-                <span className="num-lg" style={{ width: 40, fontSize: 11, color: 'var(--ink)', textAlign: 'right' }}>
-                  {(r.share * 100).toFixed(0)}%
-                </span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </Panel>
 
-        <Panel title="03 · Supply Risk Index">
-          <div className="flex flex-col" style={{ gap: 4 }}>
-            {data.supply_risk_index.map(r => (
-              <div
-                key={r.mineral}
-                className="flex items-center justify-between"
-                style={{
-                  padding: '5px 8px',
-                  background: r.mineral.toLowerCase().startsWith(selected.slice(0, 3)) ? 'rgba(139, 127, 216, 0.08)' : 'var(--bg-panel)',
-                  border: `1px solid ${r.mineral.toLowerCase().startsWith(selected.slice(0, 3)) ? 'var(--violet)' : 'var(--rule-soft)'}`,
-                  fontFamily: 'var(--f-mono)',
-                  fontSize: 11,
-                }}
-              >
-                <span style={{ color: 'var(--ink-dim)' }}>{r.mineral}</span>
-                <span
-                  style={{
-                    padding: '1px 6px',
-                    background: bandColour(r.band),
-                    color: 'var(--bg-void)',
-                    fontSize: 9.5,
-                    letterSpacing: '0.12em',
-                    textTransform: 'uppercase',
-                  }}
-                >
-                  {r.band}
-                </span>
-              </div>
-            ))}
-          </div>
+        <Panel title="03 · Supply Risk Index" source="Computed · USGS MCS 2026 + IEA GCMO 2025">
+          {data.supply_risk_index === null ? (
+            <Unavailable />
+          ) : (
+            <div className="flex flex-col" style={{ gap: 4 }}>
+              {data.supply_risk_index.map(r => {
+                const active = (r.slug ?? r.mineral.toLowerCase()) === selected;
+                return (
+                  <div
+                    key={r.mineral}
+                    style={{
+                      padding: '5px 8px',
+                      background: active ? 'rgba(139, 127, 216, 0.08)' : 'var(--bg-panel)',
+                      border: `1px solid ${active ? 'var(--violet)' : 'var(--rule-soft)'}`,
+                      fontFamily: 'var(--f-mono)',
+                      fontSize: 11,
+                    }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span style={{ color: 'var(--ink-dim)' }}>{r.mineral}</span>
+                      <span
+                        style={{
+                          padding: '1px 6px',
+                          background: bandColour(r.band),
+                          color: 'var(--bg-void)',
+                          fontSize: 9.5,
+                          letterSpacing: '0.12em',
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        {r.band}
+                      </span>
+                    </div>
+                    {r.hhi !== undefined && r.top_refining_share !== undefined && (
+                      <div style={{ marginTop: 2, fontSize: 9.5, color: 'var(--ink-faint)' }}>
+                        HHI {r.hhi.toFixed(2)} · {countryCode(r.top_refiner)} refining {r.top_refining_share.toFixed(2)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </Panel>
 
-        <Panel title="04 · In-Transit Shipments" span={3}>
+        <Panel title="04 · In-Transit Shipments" span={3} badge>
           <table style={{ width: '100%', fontFamily: 'var(--f-mono)', fontSize: 11, borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ color: 'var(--ink-faint)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
@@ -193,7 +237,7 @@ export default function MineralsWorkspace() {
           </table>
         </Panel>
 
-        <Panel title="05 · Sentinel-2 Stockpile Imagery" span={3}>
+        <Panel title="05 · Sentinel-2 Stockpile Imagery" span={3} badge>
           <div className="grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
             {[1, 2, 3, 4].map(i => (
               <div
@@ -223,7 +267,24 @@ export default function MineralsWorkspace() {
   );
 }
 
-function Panel({ title, children, span = 1 }: { title: string; children: React.ReactNode; span?: number }) {
+/**
+ * Section panel. `badge` is OPT-IN: panels 01-03 are grounded on seeded
+ * USGS/IEA datasets (mig 079) and instead show a `source` line; only the
+ * still-fixture panels (04 In-Transit, 05 Sentinel — P2c) carry the badge.
+ */
+function Panel({
+  title,
+  children,
+  span = 1,
+  badge = false,
+  source,
+}: {
+  title: string;
+  children: React.ReactNode;
+  span?: number;
+  badge?: boolean;
+  source?: string;
+}) {
   return (
     <section
       style={{
@@ -232,16 +293,38 @@ function Panel({ title, children, span = 1 }: { title: string; children: React.R
         padding: 14,
       }}
     >
-      <h3 className="panel-title" style={{ marginBottom: 10 }}>
+      <h3 className="panel-title" style={{ marginBottom: source ? 4 : 10 }}>
         <span className="idx">{title.split(' · ')[0]}</span>
         {title.split(' · ')[1]}
-        {/* All five minerals sections are fixture-backed today (grounding P2b) */}
-        <span style={{ marginLeft: 8 }}>
-          <IllustrativeBadge title="Fixture data — not a live feed" />
-        </span>
+        {badge && (
+          <span style={{ marginLeft: 8 }}>
+            <IllustrativeBadge title="Fixture data — not a live feed" />
+          </span>
+        )}
       </h3>
+      {source && (
+        <p
+          style={{
+            marginBottom: 10,
+            fontFamily: 'var(--f-mono)',
+            fontSize: 9.5,
+            letterSpacing: '0.06em',
+            color: 'var(--ink-faint)',
+          }}
+        >
+          {source}
+        </p>
+      )}
       {children}
     </section>
+  );
+}
+
+function Unavailable() {
+  return (
+    <p style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--ink-faint)' }}>
+      Data unavailable — table not reachable.
+    </p>
   );
 }
 
@@ -249,7 +332,8 @@ function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; colour: string }> = {
     running: { label: 'RUNNING', colour: 'var(--green)' },
     'permit-review': { label: 'PERMIT', colour: 'var(--amber)' },
-    strike: { label: 'STRIKE', colour: 'var(--red)' },
+    suspended: { label: 'SUSPENDED', colour: 'var(--red)' },
+    expansion: { label: 'EXPANSION', colour: 'var(--violet)' },
   };
   const e = map[status] ?? { label: status.toUpperCase(), colour: 'var(--ink-faint)' };
   return (
@@ -272,4 +356,10 @@ function StatusBadge({ status }: { status: string }) {
 
 function bandColour(band: string): string {
   return band === 'red' ? 'var(--red)' : band === 'amber' ? 'var(--amber)' : 'var(--green)';
+}
+
+function countryCode(country?: string | null): string {
+  if (!country) return '—';
+  const map: Record<string, string> = { China: 'CN', Indonesia: 'ID', 'United States': 'US' };
+  return map[country] ?? country.slice(0, 2).toUpperCase();
 }
