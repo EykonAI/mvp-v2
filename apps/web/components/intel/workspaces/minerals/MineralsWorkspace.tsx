@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import IllustrativeBadge from '@/components/intel/shared/IllustrativeBadge';
 
 interface Data {
   groups: Array<{ slug: string; label: string; minerals: Array<{ slug: string; label: string; china_refining_share: number; risk_band: string }> }>;
@@ -59,6 +60,24 @@ export default function MineralsWorkspace() {
             ))}
           </div>
         ))}
+      </div>
+
+      <div
+        className="flex items-center"
+        style={{
+          gap: 10,
+          padding: 10,
+          background: 'rgba(212, 162, 76, 0.04)',
+          borderLeft: '2px solid var(--amber)',
+          fontSize: 11.5,
+          color: 'var(--ink-dim)',
+        }}
+      >
+        <IllustrativeBadge />
+        <span>
+          Illustrative dataset — mine, refining, risk and shipment figures are fixtures; grounding on
+          USGS/IEA/Comtrade is scheduled (P2b).
+        </span>
       </div>
 
       <div
@@ -216,6 +235,10 @@ function Panel({ title, children, span = 1 }: { title: string; children: React.R
       <h3 className="panel-title" style={{ marginBottom: 10 }}>
         <span className="idx">{title.split(' · ')[0]}</span>
         {title.split(' · ')[1]}
+        {/* All five minerals sections are fixture-backed today (grounding P2b) */}
+        <span style={{ marginLeft: 8 }}>
+          <IllustrativeBadge title="Fixture data — not a live feed" />
+        </span>
       </h3>
       {children}
     </section>
