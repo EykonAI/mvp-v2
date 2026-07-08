@@ -35,6 +35,27 @@ export default function PrecursorAnalogsWorkspace() {
   const [apiSeries, setApiSeries] = useState<number[] | null>(null);
   const [apiDomains, setApiDomains] = useState<CurrentDomains | null>(null);
   const [sourceCurrent, setSourceCurrent] = useState<'live' | 'fixture' | null>(null);
+  const [liveComposites, setLiveComposites] = useState<Record<string, number>>({});
+
+  // Live composite per theatre for the sidebar buttons; the fixture value
+  // stays as the loading fallback until this resolves.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/intel/posture/summary')
+      .then(r => r.json())
+      .then(j => {
+        if (cancelled || !Array.isArray(j?.theatres)) return;
+        const map: Record<string, number> = {};
+        for (const t of j.theatres) {
+          if (t?.slug != null && typeof t.composite === 'number') map[t.slug] = t.composite;
+        }
+        setLiveComposites(map);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     setApiSeries(null);
@@ -112,7 +133,7 @@ export default function PrecursorAnalogsWorkspace() {
                 borderRadius: 2,
               }}
             >
-              {t.label} · {t.composite.toFixed(2)}
+              {t.label} · {(liveComposites[t.slug] ?? t.composite).toFixed(2)}
             </button>
           ))}
         </div>
@@ -132,7 +153,26 @@ export default function PrecursorAnalogsWorkspace() {
           )}
         </div>
 
-        <Head accent="var(--teal)" margin={14}>Top matches</Head>
+        <Head accent="var(--teal)" margin={14}>
+          Top matches
+          {/* Inline on purpose — a parallel PR owns the shared badge component. */}
+          <span
+            title="Episode similarity uses illustrative pseudo-vectors — library grounding is a scheduled follow-up"
+            style={{
+              fontFamily: 'var(--f-mono)',
+              fontSize: 9,
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+              border: '1px solid var(--amber)',
+              color: 'var(--amber)',
+              padding: '1px 6px',
+              borderRadius: 2,
+              cursor: 'help',
+            }}
+          >
+            ILLUSTRATIVE LIBRARY
+          </span>
+        </Head>
         <div className="flex flex-col" style={{ gap: 6, marginTop: 10 }}>
           {matches.map(m => (
             <div

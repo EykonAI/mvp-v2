@@ -36,13 +36,18 @@ async function buildLiveCurrent(
   theatreSlug: string,
 ): Promise<{ series: number[]; domains: CurrentDomains } | null> {
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  // Series query is column-narrow (composite + computed_at only) so the full
+  // 30-day window fits in one round-trip: posture cadence is ~10 rows/hour,
+  // so 10 × 24 × 30 ≈ 7,200 rows — limit(8000) covers the window with head-
+  // room. The previous limit(1000) on wide rows truncated the window to ~11
+  // days of daily averages.
   const { data, error } = await supabase
     .from('posture_scores')
-    .select('composite, air, sea, conflict, grid, imagery, computed_at')
+    .select('composite, computed_at')
     .eq('theatre_slug', theatreSlug)
     .gte('computed_at', since)
     .order('computed_at', { ascending: false })
-    .limit(1000);
+    .limit(8000);
   if (error || !data || data.length === 0) return null;
 
   // Daily average of composite, keyed by UTC day.
@@ -61,7 +66,17 @@ async function buildLiveCurrent(
     const agg = byDay.get(d)!;
     return round3(agg.sum / agg.n);
   });
-  const latest = data[0]; // ordered descending, so first row is the most recent
+
+  // Latest domain scores come from a separate single-row query (the series
+  // query no longer selects the domain columns).
+  const { data: latestRows, error: latestError } = await supabase
+    .from('posture_scores')
+    .select('air, sea, conflict, grid, imagery')
+    .eq('theatre_slug', theatreSlug)
+    .order('computed_at', { ascending: false })
+    .limit(1);
+  if (latestError || !latestRows || latestRows.length === 0) return null;
+  const latest = latestRows[0];
   const domains: CurrentDomains = {
     air: round3(Number(latest.air) || 0),
     sea: round3(Number(latest.sea) || 0),
@@ -140,6 +155,7 @@ export async function POST(req: NextRequest) {
             })
             .sort((a, b) => b.similarity - a.similarity)
             .slice(0, topK);
+          console.log('[precursor] source_current=%s library=%s theatre=%s', sourceCurrent, 'db', theatreSlug);
           return NextResponse.json({ theatre_slug: theatreSlug, top_k: topK, matches: scored, source: 'db', ...currentPayload });
         }
       } catch {}
@@ -160,6 +176,7 @@ export async function POST(req: NextRequest) {
       };
     }).sort((a, b) => b.similarity - a.similarity).slice(0, topK);
 
+    console.log('[precursor] source_current=%s library=%s theatre=%s', sourceCurrent, 'fixture', theatreSlug);
     return NextResponse.json({ theatre_slug: theatreSlug, top_k: topK, matches: scored, source: 'fixture', ...currentPayload });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown error';
