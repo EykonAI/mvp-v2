@@ -10,11 +10,11 @@ export const dynamic = 'force-dynamic';
  *   refining_dominance ← mineral_refining_share (IEA GCMO 2025, 2024 shares)
  *   supply_risk_index  ← COMPUTED from mineral_production (USGS MCS 2026)
  *                        + mineral_refining_share — not asserted.
+ *   in_transit         ← mineral_shipments      (AIS-derived inference cron)
+ *   tiles              ← sentinel_tiles         (Sentinel-2 L2A monthly cron)
  *
- * in_transit stays a fixture (marked illustrative) until the AIS-derived
- * shipment inference lands in P2c.
- *
- * Graceful degradation: any table read failing → that section null.
+ * Graceful degradation: any table read failing (including "table does not
+ * exist" while the sibling migration deploys) → that section null.
  * Never fake numbers.
  */
 
@@ -69,6 +69,28 @@ interface RefiningRow {
   share_pct: number;
   source: string;
 }
+interface ShipmentRow {
+  vessel_name: string;
+  flag: string | null;
+  mineral: string;
+  origin_port: string | null;
+  origin_country: string | null;
+  dest_hint: string | null;
+  dwt: number | null;
+  inferred_from: 'destination' | 'destination+port_call';
+  last_seen: string;
+}
+interface TileRow {
+  aoi_kind: 'mine' | 'port';
+  aoi_ref: string;
+  mineral: string;
+  acquisition_date: string;
+  image_url: string;
+  index_name: string;
+  index_mean: number | null;
+  prev_mean: number | null;
+  change_pct: number | null;
+}
 
 /** Latest-year rows per mineral dataset key. */
 function latestByMineral<T extends { mineral: string; year: number }>(rows: T[]): Map<string, T[]> {
@@ -91,7 +113,7 @@ export async function GET() {
   const supabase = createServerSupabase();
 
   // ─── Table reads (independent; a failure nulls its section only) ──
-  const [minesRes, refiningRes, productionRes] = await Promise.all([
+  const [minesRes, refiningRes, productionRes, shipmentsRes, tilesRes] = await Promise.all([
     supabase
       .from('mines_curated')
       .select('mineral, name, country, owner, tonnage_pct, status, source_url, as_of, notes')
@@ -104,6 +126,17 @@ export async function GET() {
       .from('mineral_production')
       .select('mineral, country, year, share_pct')
       .order('year', { ascending: false }),
+    supabase
+      .from('mineral_shipments')
+      .select('vessel_name, flag, mineral, origin_port, origin_country, dest_hint, dwt, inferred_from, last_seen')
+      .eq('status', 'underway')
+      .order('last_seen', { ascending: false })
+      .limit(12),
+    supabase
+      .from('sentinel_tiles')
+      .select('aoi_kind, aoi_ref, mineral, acquisition_date, image_url, index_name, index_mean, prev_mean, change_pct')
+      .order('acquisition_date', { ascending: false })
+      .limit(64),
   ]);
 
   // ─── Mines (panel 01) ─────────────────────────────────────────
@@ -199,13 +232,48 @@ export async function GET() {
     }),
   }));
 
-  // ─── In-transit shipments — FIXTURE until AIS derivation (P2c) ─
-  const in_transit = [
-    { vessel: 'DON GIOVANNI',  flag: 'PAN', route: 'DRC → Shanghai',      mineral: 'cobalt',    tonnage_t: 18_400, eta_hours: 310 },
-    { vessel: 'BERLIN TIGRIS', flag: 'BHS', route: 'Australia → Ulsan',   mineral: 'lithium',   tonnage_t: 23_000, eta_hours: 192 },
-    { vessel: 'GRAN CANARIA',  flag: 'MLT', route: 'Indonesia → Shekou',  mineral: 'nickel',    tonnage_t: 32_200, eta_hours: 72  },
-    { vessel: 'EVERGLOW SAIL', flag: 'HKG', route: 'Bayan Obo → Tianjin', mineral: 'neodymium', tonnage_t: 4_100,  eta_hours: 24  },
-  ];
+  // ─── In-transit shipments (panel 04) — AIS-derived inference ──
+  // Rows come from the shipments cron: cargo is INFERRED from vessel class
+  // + route + (optionally) an origin port call — never manifest data.
+  // Table missing (migration not yet applied) or query error → null.
+  const in_transit = shipmentsRes.error
+    ? null
+    : ((shipmentsRes.data ?? []) as ShipmentRow[]).map(s => ({
+        vessel_name: s.vessel_name,
+        flag: s.flag,
+        mineral: s.mineral,
+        origin_port: s.origin_port,
+        origin_country: s.origin_country,
+        dest_hint: s.dest_hint,
+        dwt: s.dwt === null ? null : Number(s.dwt),
+        inferred_from: s.inferred_from,
+        last_seen: s.last_seen,
+      }));
+
+  // ─── Sentinel-2 tiles (panel 05) — latest pass per AOI ────────
+  // Rows are ordered acquisition_date desc; keep the first (latest) row
+  // per aoi_ref, cap at 8 for the grid.
+  let tiles: TileRow[] | null = null;
+  if (!tilesRes.error) {
+    const seen = new Set<string>();
+    tiles = [];
+    for (const t of (tilesRes.data ?? []) as TileRow[]) {
+      if (seen.has(t.aoi_ref)) continue;
+      seen.add(t.aoi_ref);
+      tiles.push({
+        aoi_kind: t.aoi_kind,
+        aoi_ref: t.aoi_ref,
+        mineral: t.mineral,
+        acquisition_date: t.acquisition_date,
+        image_url: t.image_url,
+        index_name: t.index_name,
+        index_mean: t.index_mean === null ? null : Number(t.index_mean),
+        prev_mean: t.prev_mean === null ? null : Number(t.prev_mean),
+        change_pct: t.change_pct === null ? null : Number(t.change_pct),
+      });
+      if (tiles.length >= 8) break;
+    }
+  }
 
   return NextResponse.json({
     groups,
@@ -213,11 +281,14 @@ export async function GET() {
     mines,
     supply_risk_index,
     in_transit,
-    illustrative: { in_transit: true },
+    in_transit_source: 'ais_derived',
+    tiles,
     sources: {
       production: 'USGS Mineral Commodity Summaries 2026 · 2025 mine production',
       refining: 'IEA Global Critical Minerals Outlook 2025 · 2024 refined-output shares',
       mines: 'Curated · operator reports / USGS MCS 2026',
+      shipments: 'AIS-derived · cargo inferred from vessel class + route, not manifest data',
+      tiles: 'Sentinel-2 L2A via Copernicus · spectral-index change proxy',
     },
   });
 }

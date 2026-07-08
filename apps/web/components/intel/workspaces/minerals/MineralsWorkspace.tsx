@@ -28,7 +28,29 @@ interface Data {
     top_refiner?: string | null;
     top_refining_share?: number;
   }> | null;
-  in_transit: Array<{ vessel: string; flag: string; route: string; mineral: string; tonnage_t: number; eta_hours: number }>;
+  in_transit: Array<{
+    vessel_name: string;
+    flag: string | null;
+    mineral: string;
+    origin_port: string | null;
+    origin_country: string | null;
+    dest_hint: string | null;
+    dwt: number | null;
+    inferred_from: 'destination' | 'destination+port_call';
+    last_seen: string;
+  }> | null;
+  in_transit_source?: string;
+  tiles: Array<{
+    aoi_kind: 'mine' | 'port';
+    aoi_ref: string;
+    mineral: string;
+    acquisition_date: string;
+    image_url: string;
+    index_name: string;
+    index_mean: number | null;
+    prev_mean: number | null;
+    change_pct: number | null;
+  }> | null;
 }
 
 export default function MineralsWorkspace() {
@@ -81,24 +103,6 @@ export default function MineralsWorkspace() {
             ))}
           </div>
         ))}
-      </div>
-
-      <div
-        className="flex items-center"
-        style={{
-          gap: 10,
-          padding: 10,
-          background: 'rgba(212, 162, 76, 0.04)',
-          borderLeft: '2px solid var(--amber)',
-          fontSize: 11.5,
-          color: 'var(--ink-dim)',
-        }}
-      >
-        <IllustrativeBadge />
-        <span>
-          Shipments and imagery remain illustrative — AIS-derived shipments and Sentinel-2 tiles land in P2c.
-          Mine, refining and risk figures are grounded on cited USGS/IEA annual data.
-        </span>
       </div>
 
       <div
@@ -210,57 +214,124 @@ export default function MineralsWorkspace() {
           )}
         </Panel>
 
-        <Panel title="04 · In-Transit Shipments" span={3} badge>
-          <table style={{ width: '100%', fontFamily: 'var(--f-mono)', fontSize: 11, borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ color: 'var(--ink-faint)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
-                <th style={{ textAlign: 'left', padding: '6px 4px' }}>Vessel · Flag</th>
-                <th style={{ textAlign: 'left', padding: '6px 4px' }}>Route</th>
-                <th style={{ textAlign: 'left', padding: '6px 4px' }}>Mineral</th>
-                <th style={{ textAlign: 'right', padding: '6px 4px' }}>Tonnage</th>
-                <th style={{ textAlign: 'right', padding: '6px 4px' }}>ETA</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.in_transit.map((s, i) => (
-                <tr key={i} style={{ borderTop: '1px solid var(--rule-soft)' }}>
-                  <td style={{ padding: '6px 4px', color: 'var(--ink)' }}>
-                    {s.vessel} · {s.flag}
-                  </td>
-                  <td style={{ padding: '6px 4px', color: 'var(--ink-dim)' }}>{s.route}</td>
-                  <td style={{ padding: '6px 4px', color: 'var(--violet)' }}>{s.mineral}</td>
-                  <td style={{ padding: '6px 4px', color: 'var(--ink)', textAlign: 'right' }}>{s.tonnage_t.toLocaleString()} t</td>
-                  <td style={{ padding: '6px 4px', color: 'var(--ink)', textAlign: 'right' }}>{Math.round(s.eta_hours / 24)} d</td>
+        <Panel
+          title="04 · In-Transit Shipments"
+          span={3}
+          source="AIS-derived · cargo inferred from vessel class + route — not manifest data"
+        >
+          {data.in_transit === null ? (
+            <Unavailable />
+          ) : data.in_transit.length === 0 ? (
+            <p style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--ink-faint)' }}>
+              No inferred shipments yet — AIS derivation warming up (port-call history accrues daily).
+            </p>
+          ) : (
+            <table style={{ width: '100%', fontFamily: 'var(--f-mono)', fontSize: 11, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ color: 'var(--ink-faint)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+                  <th style={{ textAlign: 'left', padding: '6px 4px' }}>Vessel · Flag</th>
+                  <th style={{ textAlign: 'left', padding: '6px 4px' }}>Route</th>
+                  <th style={{ textAlign: 'left', padding: '6px 4px' }}>Mineral</th>
+                  <th style={{ textAlign: 'right', padding: '6px 4px' }}>DWT</th>
+                  <th style={{ textAlign: 'right', padding: '6px 4px' }}>Confidence</th>
+                  <th style={{ textAlign: 'right', padding: '6px 4px' }}>Last Seen</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.in_transit.map((s, i) => (
+                  <tr key={i} style={{ borderTop: '1px solid var(--rule-soft)' }}>
+                    <td style={{ padding: '6px 4px', color: 'var(--ink)' }}>
+                      {s.vessel_name}
+                      {s.flag ? <span style={{ color: 'var(--ink-faint)' }}> · {s.flag}</span> : null}
+                    </td>
+                    <td style={{ padding: '6px 4px', color: 'var(--ink-dim)' }}>
+                      {s.origin_port ?? s.origin_country ?? '—'}
+                      {s.origin_port && s.origin_country ? (
+                        <span style={{ color: 'var(--ink-faint)' }}> ({s.origin_country})</span>
+                      ) : null}
+                      {' → '}
+                      {s.dest_hint ?? '—'}
+                    </td>
+                    <td style={{ padding: '6px 4px', color: 'var(--violet)' }}>{s.mineral}</td>
+                    <td style={{ padding: '6px 4px', color: 'var(--ink)', textAlign: 'right' }}>
+                      {s.dwt === null ? 'DWT n/a' : s.dwt.toLocaleString()}
+                    </td>
+                    <td style={{ padding: '6px 4px', textAlign: 'right' }}>
+                      <ConfidenceTag inferredFrom={s.inferred_from} />
+                    </td>
+                    <td style={{ padding: '6px 4px', color: 'var(--ink)', textAlign: 'right' }}>{daysAgo(s.last_seen)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </Panel>
 
-        <Panel title="05 · Sentinel-2 Stockpile Imagery" span={3} badge>
-          <div className="grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-            {[1, 2, 3, 4].map(i => (
-              <div
-                key={i}
-                style={{
-                  aspectRatio: '1 / 1',
-                  background:
-                    'linear-gradient(135deg, var(--bg-raised), var(--bg-hover)), repeating-linear-gradient(45deg, rgba(255,255,255,0.02) 0 4px, transparent 4px 8px)',
-                  border: '1px solid var(--rule)',
-                  padding: 10,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                }}
-              >
-                <span className="eyebrow">Tile {i}</span>
-                <span className="num-lg" style={{ fontSize: 16, color: i % 2 === 0 ? 'var(--red)' : 'var(--amber)' }}>
-                  {i % 2 === 0 ? '+18%' : '+9%'}
-                </span>
-                <span style={{ fontSize: 10, color: 'var(--ink-faint)', fontFamily: 'var(--f-mono)' }}>vs baseline</span>
-              </div>
-            ))}
-          </div>
+        <Panel
+          title="05 · Sentinel-2 Stockpile Imagery"
+          span={3}
+          badge={!data.tiles || data.tiles.length === 0}
+          source={
+            data.tiles && data.tiles.length > 0
+              ? `Sentinel-2 L2A via Copernicus · ${data.tiles[0].index_name} change proxy — not volumetric measurement`
+              : undefined
+          }
+        >
+          {data.tiles === null ? (
+            <Unavailable />
+          ) : data.tiles.length === 0 ? (
+            <p style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--ink-faint)' }}>
+              Awaiting first Sentinel-2 acquisition — tiles land after the monthly cron&apos;s first run.
+            </p>
+          ) : (
+            <div className="grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+              {data.tiles.map(t => (
+                <figure
+                  key={t.aoi_ref}
+                  style={{
+                    margin: 0,
+                    border: '1px solid var(--rule)',
+                    background: 'var(--bg-raised)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                  }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={t.image_url}
+                    alt={`Sentinel-2 ${t.index_name} tile — ${t.aoi_ref} (${t.aoi_kind}), acquired ${t.acquisition_date}`}
+                    style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', display: 'block' }}
+                    loading="lazy"
+                  />
+                  <figcaption style={{ padding: '6px 8px', fontFamily: 'var(--f-mono)', fontSize: 10 }}>
+                    <div className="flex items-center justify-between" style={{ gap: 6 }}>
+                      <span style={{ color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {t.aoi_ref}
+                      </span>
+                      {t.change_pct !== null ? (
+                        <span
+                          className="num-lg"
+                          style={{
+                            fontSize: 12,
+                            color: Math.abs(t.change_pct) >= 15 ? 'var(--red)' : Math.abs(t.change_pct) >= 5 ? 'var(--amber)' : 'var(--ink-dim)',
+                          }}
+                        >
+                          {t.change_pct > 0 ? '+' : ''}
+                          {t.change_pct.toFixed(1)}%
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--ink-faint)' }}>baseline pass</span>
+                      )}
+                    </div>
+                    <div style={{ marginTop: 2, color: 'var(--ink-faint)' }}>
+                      {t.acquisition_date}
+                      {t.change_pct !== null ? ' · vs prior pass' : ''}
+                    </div>
+                  </figcaption>
+                </figure>
+              ))}
+            </div>
+          )}
         </Panel>
       </div>
     </div>
@@ -269,8 +340,9 @@ export default function MineralsWorkspace() {
 
 /**
  * Section panel. `badge` is OPT-IN: panels 01-03 are grounded on seeded
- * USGS/IEA datasets (mig 079) and instead show a `source` line; only the
- * still-fixture panels (04 In-Transit, 05 Sentinel — P2c) carry the badge.
+ * USGS/IEA datasets (mig 079), 04 on AIS-derived mineral_shipments and 05
+ * on sentinel_tiles — all show a `source` line. The badge only remains on
+ * panel 05's empty state (no acquisition yet → placeholder framing).
  */
 function Panel({
   title,
@@ -298,7 +370,7 @@ function Panel({
         {title.split(' · ')[1]}
         {badge && (
           <span style={{ marginLeft: 8 }}>
-            <IllustrativeBadge title="Fixture data — not a live feed" />
+            <IllustrativeBadge title="No live data yet — awaiting first acquisition" />
           </span>
         )}
       </h3>
@@ -352,6 +424,40 @@ function StatusBadge({ status }: { status: string }) {
       {e.label}
     </span>
   );
+}
+
+/** Confidence tag for panel 04 — derived from how the cargo was inferred. */
+function ConfidenceTag({ inferredFrom }: { inferredFrom: 'destination' | 'destination+port_call' }) {
+  const strong = inferredFrom === 'destination+port_call';
+  const colour = strong ? 'var(--green)' : 'var(--amber)';
+  return (
+    <span
+      title={strong ? 'Inferred from AIS route AND an origin port call' : 'Inferred from AIS destination only'}
+      style={{
+        padding: '2px 6px',
+        fontFamily: 'var(--f-mono)',
+        fontSize: 9,
+        letterSpacing: '0.12em',
+        textTransform: 'uppercase',
+        background: 'transparent',
+        color: colour,
+        border: `1px solid ${colour}`,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {strong ? 'AIS route + port call' : 'AIS destination'}
+    </span>
+  );
+}
+
+/** Compact "how stale is this AIS fix" formatter for panel 04. */
+function daysAgo(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '—';
+  const hours = Math.max(0, (Date.now() - t) / 3_600_000);
+  if (hours < 1) return '<1 h ago';
+  if (hours < 48) return `${Math.round(hours)} h ago`;
+  return `${Math.round(hours / 24)} d ago`;
 }
 
 function bandColour(band: string): string {
