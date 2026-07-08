@@ -9,9 +9,11 @@ export const revalidate = 0;
  * audit, P2b). Feeds panels 01/02/04/05 with sourced or computed data:
  *
  *  • prices        — commodity_prices (migration 079): EIA daily spot for
- *                    brent/wti ('eia_spot'), World Bank CMO monthly for the
- *                    rest ('wb_cmo_dbnomics'). Last 60 observations of the
- *                    preferred source; null until the ingest crons run.
+ *                    brent/wti ('eia_spot'), IMF PCPS monthly for the rest
+ *                    ('imf_pcps_sdmx'; the earlier 'imf_pcps_dbnomics'
+ *                    mirror froze at 2025-06 and was replaced). Reads are
+ *                    source-agnostic: last 60 observations of the preferred
+ *                    source; null until the ingest crons run.
  *
  *  • export_shares — mineral_trade_flows (migration 079, UN Comtrade):
  *                    top-6 reporters at the latest period, flow='export',
