@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { usePersona } from '@/components/intel/shell/PersonaContext';
 import Sparkline from '@/components/intel/shared/Sparkline';
+import IllustrativeBadge from '@/components/intel/shared/IllustrativeBadge';
 
 // Live inputs (grounding audit P1): chokepoint transits + EIA inventory
 // from /api/intel/commodities/live. Sections render an honest
@@ -129,7 +130,7 @@ export default function CommoditiesWorkspace() {
           border: '1px solid var(--rule-soft)',
         }}
       >
-        <Panel title="01 · Production & Export Share">
+        <Panel title="01 · Production & Export Share" badge>
           <div className="flex flex-col" style={{ gap: 4 }}>
             {DONUT_STUB.map(d => (
               <div key={d.country} className="flex items-center" style={{ gap: 8 }}>
@@ -147,7 +148,7 @@ export default function CommoditiesWorkspace() {
           </div>
         </Panel>
 
-        <Panel title={`02 · Price Volatility & Futures · ${selected.toUpperCase()}`}>
+        <Panel title={`02 · Price Volatility & Futures · ${selected.toUpperCase()}`} badge>
           <Sparkline values={priceSeries} width={420} height={120} stroke="var(--wheat)" fill="rgba(212, 162, 76, 0.14)" />
           <div className="flex items-baseline justify-between" style={{ marginTop: 8 }}>
             <span className="eyebrow">Spot · 60-day</span>
@@ -202,7 +203,7 @@ export default function CommoditiesWorkspace() {
           )}
         </Panel>
 
-        <Panel title="04 · Top Exporters & Sanction Risk">
+        <Panel title="04 · Top Exporters & Sanction Risk" badge>
           <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontFamily: 'var(--f-mono)', fontSize: 11 }}>
             {RISK_EXPORTERS.map(r => (
               <li key={r.country} className="flex items-center justify-between" style={{ padding: '5px 0', borderBottom: '1px solid var(--rule-soft)' }}>
@@ -224,7 +225,7 @@ export default function CommoditiesWorkspace() {
           </ul>
         </Panel>
 
-        <Panel title="05 · Trade-Flow Horizon · 72h" span={2}>
+        <Panel title="05 · Trade-Flow Horizon · 72h" span={2} badge>
           <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
             72-h disruption ribbon: probability-weighted corridor risk for the next three days. Feature 4.
           </p>
@@ -309,7 +310,7 @@ const RISK_EXPORTERS = [
   { country: 'Canada',   band: 'green' },
 ];
 
-function Panel({ title, children, span = 1 }: { title: string; children: React.ReactNode; span?: number }) {
+function Panel({ title, children, span = 1, badge = false }: { title: string; children: React.ReactNode; span?: number; badge?: boolean }) {
   return (
     <section
       style={{
@@ -321,6 +322,11 @@ function Panel({ title, children, span = 1 }: { title: string; children: React.R
       <h3 className="panel-title" style={{ marginBottom: 10 }}>
         <span className="idx">{title.split(' · ')[0]}</span>
         {title.split(' · ').slice(1).join(' · ')}
+        {badge && (
+          <span style={{ marginLeft: 8 }}>
+            <IllustrativeBadge title="Fixture data — not a live feed" />
+          </span>
+        )}
       </h3>
       {children}
     </section>

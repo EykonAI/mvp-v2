@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import ScenarioLayout from '@/components/intel/shared/ScenarioLayout';
+import IllustrativeBadge from '@/components/intel/shared/IllustrativeBadge';
 import Sparkline from '@/components/intel/shared/Sparkline';
 import type { ChokepointOutput, ClosureType } from '@/lib/intel/chokepoint';
 
@@ -54,6 +55,24 @@ export default function ChokepointWorkspace() {
   }
 
   return (
+    <>
+      <div
+        className="flex items-center"
+        style={{
+          gap: 10,
+          padding: 10,
+          marginBottom: 1,
+          background: 'rgba(212, 162, 76, 0.04)',
+          borderLeft: '2px solid var(--amber)',
+          fontSize: 11.5,
+          color: 'var(--ink-dim)',
+        }}
+      >
+        <IllustrativeBadge label="ILLUSTRATIVE MODEL" />
+        <span>
+          Deterministic scenario model — parameters are illustrative fixtures anchored to historical episodes; not live data.
+        </span>
+      </div>
     <ScenarioLayout
       left={
         <div className="flex flex-col" style={{ gap: 16 }}>
@@ -166,6 +185,7 @@ export default function ChokepointWorkspace() {
         </div>
       }
     />
+    </>
   );
 }
 
