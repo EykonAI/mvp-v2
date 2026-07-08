@@ -16,6 +16,8 @@ interface Lead {
 
 interface Evidence {
   mmsi?: string;
+  data_clock?: string | null;
+  feed_lag_minutes?: number | null;
   identity?: {
     name: string | null;
     imo: string | null;
@@ -241,6 +243,12 @@ function EvidenceViewer({ lead }: { lead: Lead }) {
   const telemetry = evidence?.telemetry;
   const contact = evidence?.contact;
   const gapOpen = contact?.dark_gap_open ?? false;
+  const feedLag = evidence?.feed_lag_minutes ?? null;
+  const feedStalled = feedLag !== null && feedLag > 30;
+  const gapHours =
+    contact?.hours_since_contact !== null && contact?.hours_since_contact !== undefined
+      ? Math.round(contact.hours_since_contact)
+      : lead.last_dark_hours;
 
   return (
     <div className="flex flex-col" style={{ gap: 16 }}>
@@ -278,13 +286,31 @@ function EvidenceViewer({ lead }: { lead: Lead }) {
               marginTop: 6,
             }}
           >
-            {gapOpen ? `Dark · ${lead.last_dark_hours}h gap` : 'AIS current'}
+            {gapOpen ? `Dark · ${gapHours}h gap` : 'AIS current'}
           </span>
         </div>
       </header>
 
       <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--rule-soft)', padding: 12 }}>
         <div className="eyebrow" style={{ marginBottom: 8 }}>Live Telemetry · current AIS snapshot</div>
+        {feedStalled && (
+          <div
+            style={{
+              display: 'inline-block',
+              padding: '3px 8px',
+              marginBottom: 8,
+              fontFamily: 'var(--f-mono)',
+              fontSize: 9.5,
+              letterSpacing: '0.15em',
+              textTransform: 'uppercase',
+              color: 'var(--amber)',
+              border: '1px solid var(--amber)',
+              borderRadius: 2,
+            }}
+          >
+            AIS FEED STALLED · {feedLag} min behind
+          </div>
+        )}
         {loading ? (
           <p style={{ fontSize: 11.5, color: 'var(--ink-faint)', fontFamily: 'var(--f-mono)', letterSpacing: '0.08em' }}>
             Fetching live vessel record…
@@ -300,14 +326,18 @@ function EvidenceViewer({ lead }: { lead: Lead }) {
                 label="Last AIS contact"
                 value={
                   contact.hours_since_contact !== null
-                    ? `${contact.hours_since_contact} h ago`
+                    ? `${contact.hours_since_contact} h ${feedStalled ? 'before last feed tick' : 'ago'}`
                     : '—'
                 }
                 sub={contact.last_contact_at ? fmtUtc(contact.last_contact_at) : undefined}
               />
               <Fact
                 label="Dark-gap status"
-                value={gapOpen ? 'OPEN · > 6 h silent' : 'No open gap'}
+                value={
+                  gapOpen
+                    ? `OPEN · > 6 h silent${feedStalled ? ' vs last feed tick' : ''}`
+                    : 'No open gap'
+                }
                 accent={gapOpen}
               />
               <Fact

@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
   try {
     const supabase = createServerSupabase();
 
-    const [pos, prof] = await Promise.all([
+    const [pos, prof, fleetLatest] = await Promise.all([
       supabase
         .from('vessel_positions')
         .select('mmsi, name, imo, flag, destination, speed, heading, nav_status, longitude, latitude, updated_at, ingested_at')
@@ -45,6 +45,12 @@ export async function GET(req: NextRequest) {
         .from('vessel_profiles')
         .select('mmsi, name, imo, flag, dwt, built_year, composite_score, indicators, last_ais_at, last_dark_at')
         .eq('mmsi', mmsi)
+        .maybeSingle(),
+      supabase
+        .from('vessel_positions')
+        .select('ingested_at')
+        .order('ingested_at', { ascending: false })
+        .limit(1)
         .maybeSingle(),
     ]);
 
@@ -66,11 +72,23 @@ export async function GET(req: NextRequest) {
       .map((t: string) => new Date(t).getTime())
       .filter(t => Number.isFinite(t));
     const lastContactMs = stamps.length ? Math.max(...stamps) : null;
+
+    // Data clock = fleet-wide freshest position timestamp, so a feed-wide
+    // ingestion stall doesn't mark every vessel dark (same semantics as the
+    // leads route). Falls back to wall clock only if the feed table is empty.
+    const fleetLatestMs = fleetLatest.data?.ingested_at
+      ? new Date(fleetLatest.data.ingested_at).getTime()
+      : NaN;
+    const dataClockMs = Number.isFinite(fleetLatestMs) ? fleetLatestMs : Date.now();
+    const feedLagMinutes = Math.max(0, Math.round((Date.now() - dataClockMs) / 60_000));
+
     const hoursSinceContact =
-      lastContactMs !== null ? Math.max(0, (Date.now() - lastContactMs) / 3600_000) : null;
+      lastContactMs !== null ? Math.max(0, (dataClockMs - lastContactMs) / 3600_000) : null;
 
     return NextResponse.json({
       mmsi,
+      data_clock: new Date(dataClockMs).toISOString(),
+      feed_lag_minutes: feedLagMinutes,
       identity: {
         name: p?.name ?? pr?.name ?? null,
         imo: p?.imo ?? pr?.imo ?? null,
