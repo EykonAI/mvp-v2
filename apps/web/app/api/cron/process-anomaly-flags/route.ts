@@ -14,10 +14,17 @@ import { runAnalyst } from '@/lib/intelligence-analyst/run';
 //
 //   1. LOW-severity flags are bulk-marked processed with no LLM call — they do
 //      not merit a standalone report (same threshold the supervisor used).
-//   2. Up to MAX_REPORTS_PER_TICK medium/high/critical flags are grounded into
+//   2. Medium+ flags older than STALE_AFTER_DAYS are bulk-expired (processed,
+//      no LLM call): at 8 reports/hour the launch backlog (~2.7k medium+) would
+//      have taken weeks, and a report about a weeks-old anomaly is archaeology,
+//      not intelligence. Expiry keeps the queue bounded at inflow rate.
+//   3. Up to MAX_REPORTS_PER_TICK medium/high/critical flags are grounded into
 //      short intelligence reports via runAnalyst (live-tool loop, tier 'pro')
-//      and written to agent_reports as global reports (user_id NULL).
-//   3. Flags are marked processed even when the LLM call fails, so one bad
+//      and written to agent_reports as global reports (user_id NULL). Order is
+//      severity-major, then NEWEST-first — fresh anomalies always beat the
+//      backlog (flipped 2026-07-09; oldest-first had the cron reporting on
+//      stale flags while today's went unprocessed).
+//   4. Flags are marked processed even when the LLM call fails, so one bad
 //      flag can never poison-pill the queue.
 //
 // Auth: Bearer <CRON_SECRET>. Cost is capped by design at 8 analyst calls/hour.
@@ -28,6 +35,7 @@ export const maxDuration = 300;
 
 const MAX_REPORTS_PER_TICK = 8;
 const SCAN_LIMIT = 100;
+const STALE_AFTER_DAYS = 14;
 const SEVERITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2 };
 
 interface AnomalyFlag {
@@ -98,28 +106,48 @@ export async function POST(req: NextRequest) {
   }
   const lowSkipped = lowRows?.length ?? 0;
 
-  // 2. Candidates: unprocessed medium/high/critical, severity-major then oldest-first.
-  //    (Severity order is enforced in JS — text-column ordering would be alphabetical.)
+  // 2. Expire stale medium+ flags in bulk — no LLM, one UPDATE. Reports on
+  //    weeks-old anomalies are archaeology, not intelligence; the queue stays
+  //    bounded at inflow rate.
+  const staleCutoff = new Date(Date.now() - STALE_AFTER_DAYS * 24 * 3600_000).toISOString();
+  const { data: staleRows, error: staleErr } = await supabase
+    .from('anomaly_flags')
+    .update({ processed: true })
+    .eq('processed', false)
+    .in('severity', ['medium', 'high', 'critical'])
+    .lt('created_at', staleCutoff)
+    .select('id');
+  if (staleErr) {
+    return NextResponse.json({ ok: false, error: staleErr.message, low_skipped: lowSkipped }, { status: 500 });
+  }
+  const staleExpired = staleRows?.length ?? 0;
+
+  // 3. Candidates: unprocessed medium/high/critical, severity-major then
+  //    NEWEST-first. (Severity order is enforced in JS — text-column ordering
+  //    would be alphabetical.)
   const { data: rows, error: candErr } = await supabase
     .from('anomaly_flags')
     .select('id, source, domain, flag_type, severity, payload, created_at')
     .eq('processed', false)
     .in('severity', ['medium', 'high', 'critical'])
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: false })
     .limit(SCAN_LIMIT);
   if (candErr) {
-    return NextResponse.json({ ok: false, error: candErr.message, low_skipped: lowSkipped }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: candErr.message, low_skipped: lowSkipped, stale_expired: staleExpired },
+      { status: 500 },
+    );
   }
 
   const candidates = ((rows ?? []) as AnomalyFlag[])
     .sort(
       (a, b) =>
         (SEVERITY_RANK[a.severity] ?? 9) - (SEVERITY_RANK[b.severity] ?? 9) ||
-        a.created_at.localeCompare(b.created_at),
+        b.created_at.localeCompare(a.created_at),
     )
     .slice(0, MAX_REPORTS_PER_TICK);
 
-  // 3. Ground each candidate into an agent_report.
+  // 4. Ground each candidate into an agent_report.
   let reportsWritten = 0;
   let llmFailures = 0;
 
@@ -163,6 +191,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     ranAt: new Date().toISOString(),
     low_skipped: lowSkipped,
+    stale_expired: staleExpired,
     candidates: candidates.length,
     reports_written: reportsWritten,
     llm_failures: llmFailures,
