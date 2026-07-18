@@ -100,6 +100,8 @@ export const POLL_INTERVALS = {
   aircraft: 15_000,
   vessels: 60_000,
   conflicts: 300_000,
+  // FIRMS NRT lands a few times a day per satellite — no point polling faster.
+  firms: 900_000,
   energy: 300_000,
   weather: 600_000,
   infrastructure: null, // static, loaded once
