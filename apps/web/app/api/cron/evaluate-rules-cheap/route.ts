@@ -15,6 +15,11 @@ import {
   type MultiEventMatchResult,
   type RuleRow,
 } from '@/lib/notifications/evaluator-cheap';
+import {
+  buildFirmsProximityFirePayload,
+  evaluateFirmsProximityRule,
+  type FirmsProximityResult,
+} from '@/lib/notifications/firms-proximity';
 import { dispatchWithCap } from '@/lib/notifications/dispatch-with-cap';
 import { findRecentFireCount, PER_RULE_PER_DAY_FIRE_LIMIT } from '@/lib/notifications/cap';
 import type { Tier } from '@/lib/auth/session';
@@ -56,7 +61,7 @@ export async function POST(req: NextRequest) {
       'id, user_id, name, rule_type, config, channel_ids, active, cooldown_minutes, last_fired_at, created_at',
     )
     .eq('active', true)
-    .in('rule_type', ['single_event', 'multi_event', 'aggregate'])
+    .in('rule_type', ['single_event', 'multi_event', 'aggregate', 'firms_proximity'])
     .order('last_fired_at', { ascending: true, nullsFirst: true })
     .limit(MAX_RULES_PER_TICK);
 
@@ -112,6 +117,7 @@ async function processRule(
     | { kind: 'single'; match: MatchedEvent }
     | { kind: 'multi'; result: MultiEventMatchResult }
     | { kind: 'aggregate'; result: AggregateResult }
+    | { kind: 'firms'; result: FirmsProximityResult }
     | null = null;
   if (rule.rule_type === 'single_event') {
     const match = await findSingleEventMatch(admin, rule);
@@ -124,6 +130,14 @@ async function processRule(
     // alongside single_event / multi_event — same gates above.
     const result = await evaluateAggregateRule(admin, rule);
     if (result) firePayloadInput = { kind: 'aggregate', result };
+  } else if (rule.rule_type === 'firms_proximity') {
+    // NASA FIRMS thermal-anomaly proximity. De-duplication is handled
+    // inside the evaluator by claiming (rule, facility, day) rows in
+    // firms_alert_dispatches, so a facility that flares daily yields
+    // one alert per day rather than one per tick. A null result means
+    // nothing NEW was claimed.
+    const result = await evaluateFirmsProximityRule(admin, rule);
+    if (result) firePayloadInput = { kind: 'firms', result };
   }
   if (!firePayloadInput) {
     return { state: 'no_match', ruleId: rule.id };
@@ -149,6 +163,8 @@ async function processRule(
       ? buildFirePayload(rule, firePayloadInput.match, firedAtIso)
       : firePayloadInput.kind === 'multi'
       ? buildMultiEventFirePayload(rule, firePayloadInput.result, firedAtIso)
+      : firePayloadInput.kind === 'firms'
+      ? buildFirmsProximityFirePayload(rule, firePayloadInput.result, firedAtIso)
       : buildAggregateFirePayload(rule, firePayloadInput.result, firedAtIso);
 
   const userTier = await getUserTier(admin, rule.user_id);
@@ -179,6 +195,12 @@ async function processRule(
       ? {
           match_rows: firePayloadInput.result.matches.map(m => m.row),
           matched_at: firePayloadInput.result.matchedAtIso,
+        }
+      : firePayloadInput.kind === 'firms'
+      ? {
+          // The facility-days this fire claimed. Lets the detail
+          // drawer render the sites without re-running the RPC.
+          firms_matches: firePayloadInput.result.claimed,
         }
       : {
           // Aggregate payload — log the counts so the detail-drawer
