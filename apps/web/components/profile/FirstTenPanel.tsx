@@ -126,8 +126,10 @@ export function FirstTenPanel({
                     {f.question}
                   </div>
                   <div style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--ink-faint)', marginTop: 2 }}>
-                    {f.recent_detections} detection{f.recent_detections === 1 ? '' : 's'} in the last{' '}
-                    {f.baseline_days}d · resolves in {f.window_days}d
+                    {f.recent_detections} detection{f.recent_detections === 1 ? '' : 's'} on{' '}
+                    {f.detection_days}/{f.observed_days} observed day
+                    {f.observed_days === 1 ? '' : 's'} · base rate ~
+                    {Math.round(f.base_rate * 100)}% · resolves in {f.window_days}d
                   </div>
                 </div>
                 <Link
