@@ -52,6 +52,54 @@ export const FIRMS_REGIONS: FirmsRegion[] = [
   { slug: 'gulf', label: 'Arabian Gulf', bbox: { west: 44, south: 22, east: 60, north: 34 } },
   // European refining.
   { slug: 'europe', label: 'Europe', bbox: { west: -10, south: 35, east: 22, north: 60 } },
+
+  // ─── Asia + North America (added 2026-07-18) ─────────────────
+  //
+  // Coverage before these five boxes was 1,817 of 13,262 monitored
+  // facilities — 13.7%. Every facility outside a box has no data at
+  // all (085 makes that honest rather than a false zero), so the
+  // globe showed China, India, Japan and the US as empty because
+  // nobody was looking, not because nothing was burning.
+  //
+  // With these, coverage is 10,556 / 13,262 = 79.6%.
+  //
+  // Boxes are split for SHARDING, not for geography: each is a
+  // separate `?region=` target so one heavy region cannot starve the
+  // others inside the client's 110s curl budget. Sizes are chosen
+  // from the actual facility distribution (counts measured against
+  // production 2026-07-18), not drawn around countries.
+  //
+  // Volume note: asia-south and asia-southeast cover the world's
+  // heaviest agricultural-burning belts, which is precisely the
+  // noise the founder scoped OUT. The ingest-side proximity filter
+  // (086, 8 km) is what makes them affordable — on the existing
+  // three regions it already discards ~91% of detections before
+  // they reach the analytical pipeline. Expect these two shards to
+  // fetch large and retain little; that is the design working, not
+  // a fault. Watch them for a week before adding the remaining gaps
+  // (South America, Africa, Oceania — ~2,700 facilities).
+
+  // China, Korea, Japan, Taiwan — 4,471 facilities, the single
+  // largest gap and the one that unlocks the SEA/CN prospect cell.
+  { slug: 'asia-east', label: 'East Asia', bbox: { west: 100, south: 18, east: 146, north: 46 } },
+
+  // India, Pakistan, Bangladesh, Sri Lanka — 1,817 facilities.
+  // Heaviest crop-burning belt on Earth in Oct-Nov and Apr-May.
+  { slug: 'asia-south', label: 'South Asia', bbox: { west: 60, south: 5, east: 100, north: 37 } },
+
+  // Mainland SE Asia + maritime SE Asia — 828 facilities. Overlaps
+  // asia-east slightly; harmless, the detection upsert is keyed on
+  // (satellite, acq_date, acq_time, lat, lon) and is idempotent.
+  { slug: 'asia-southeast', label: 'Southeast Asia', bbox: { west: 95, south: -11, east: 142, north: 20 } },
+
+  // US Gulf Coast, Midwest, Eastern Canada — 1,307 facilities,
+  // including the Gulf Coast refining complex.
+  { slug: 'na-east', label: 'North America (east)', bbox: { west: -100, south: 24, east: -52, north: 55 } },
+
+  // US West, Rockies, Western Canada — 443 facilities. Lowest
+  // facility density of the five, but high wildfire season volume;
+  // a good early test of whether the proximity filter holds up.
+  { slug: 'na-west', label: 'North America (west)', bbox: { west: -130, south: 25, east: -100, north: 55 } },
 ];
 
 /**
