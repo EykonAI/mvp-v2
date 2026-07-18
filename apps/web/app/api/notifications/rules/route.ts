@@ -37,6 +37,15 @@ import {
   OUTCOME_STATEMENT_MIN_CHARS,
   RULE_COUNTRY_FILTER_MAX_CHARS,
 } from '@/lib/notifications/tools';
+import {
+  getRuleCoverage,
+  normaliseFirmsConfig,
+  suggestFirmsRuleName,
+  FIRMS_MAX_RADIUS_KM,
+  FIRMS_MIN_RADIUS_KM,
+  type FirmsProximityConfig,
+} from '@/lib/notifications/firms-proximity';
+import { createServerSupabase } from '@/lib/supabase-server';
 import { isValidPersona } from '@/lib/intelligence-analyst/personas';
 
 // /api/notifications/rules — list and create rules.
@@ -58,6 +67,7 @@ const ALLOWED_RULE_TYPES = new Set([
   'outcome_ai',
   'cross_data_ai',
   'aggregate',
+  'firms_proximity',
 ]);
 
 export async function GET(_req: NextRequest) {
@@ -109,6 +119,12 @@ interface CreateBody {
     threshold_kind?: unknown;
     threshold_value?: unknown;
     baseline_window_hours?: unknown;
+    // firms_proximity (084)
+    facility_type?: unknown;
+    facility_name?: unknown;
+    radius_km?: unknown;
+    min_frp?: unknown;
+    min_detections?: unknown;
   };
 }
 
@@ -224,6 +240,77 @@ export async function POST(req: NextRequest) {
     );
     savedConfig = { predicates, window_hours: windowHours };
     derivedName = suggestMultiEventRuleName(savedConfig as unknown as MultiEventConfig);
+  } else if (body.rule_type === 'firms_proximity') {
+    // ─── NASA FIRMS thermal-anomaly proximity ────────────────────
+    const parsed = normaliseFirmsConfig(
+      body.config as Record<string, unknown> | undefined,
+    );
+    if ('error' in parsed) {
+      return NextResponse.json(
+        {
+          error: parsed.error,
+          ...(parsed.error === 'invalid_radius'
+            ? {
+                min_km: FIRMS_MIN_RADIUS_KM,
+                max_km: FIRMS_MAX_RADIUS_KM,
+                hint: `The facility roll-up is pre-computed at a fixed radius, so radii above ${FIRMS_MAX_RADIUS_KM} km cannot be answered and would silently under-report.`,
+              }
+            : {}),
+        },
+        { status: 400 },
+      );
+    }
+    const firmsConfig = parsed.config;
+
+    // Coverage gate. A firms_proximity rule can be silently dead in
+    // two ways — no facility matches the filters at all, or the
+    // facilities match but sit outside every FIRMS ingest bbox (China
+    // has 39,796 facilities and none are ingested; their permanent
+    // detection_count = 0 is indistinguishable from "quiet" unless we
+    // check). Refuse to create either, rather than handing the user a
+    // healthy-looking rule that cannot fire.
+    const admin = createServerSupabase();
+    const coverage = await getRuleCoverage(admin, firmsConfig);
+    if (!coverage) {
+      return NextResponse.json({ error: 'coverage_check_failed' }, { status: 503 });
+    }
+    if (coverage.matching === 0) {
+      return NextResponse.json(
+        {
+          error: 'no_facilities_match_filter',
+          matching_facilities: 0,
+          hint: firmsConfig.country
+            ? `No monitored facility matches that filter. Note that refinery country attribution is largely absent in this dataset (populated on 3 of 634 refineries), so country-scoped refinery rules resolve to nothing. Country filters are reliable for power plants.`
+            : 'No monitored facility matches that filter.',
+        },
+        { status: 400 },
+      );
+    }
+    if (coverage.monitored === 0) {
+      return NextResponse.json(
+        {
+          error: 'no_facilities_in_ingest_coverage',
+          matching_facilities: coverage.matching,
+          monitored_facilities: 0,
+          hint: `${coverage.matching} facilities match, but none fall inside a region FIRMS is ingested for (Russia/Ukraine, Arabian Gulf, Europe). Those facilities would report zero detections forever because no satellite query covers them — which is absence of observation, not absence of fire.`,
+        },
+        { status: 400 },
+      );
+    }
+
+    // Partial coverage is allowed but recorded on the rule, so the UI
+    // can state what is actually watched (e.g. Russia 971/1801 — the
+    // ru-ua bbox stops at 60E) instead of implying full national
+    // coverage.
+    savedConfig = {
+      ...(firmsConfig as unknown as Record<string, unknown>),
+      coverage_at_creation: {
+        matching_facilities: coverage.matching,
+        monitored_facilities: coverage.monitored,
+        checked_at: new Date().toISOString(),
+      },
+    };
+    derivedName = suggestFirmsRuleName(firmsConfig);
   } else {
     // aggregate (PR 5)
     const bucket = body.config?.bucket;

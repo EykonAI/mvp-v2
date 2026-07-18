@@ -30,7 +30,13 @@ export interface RuleRow {
   id: string;
   user_id: string;
   name: string;
-  rule_type: 'single_event' | 'multi_event' | 'outcome_ai' | 'cross_data_ai' | 'aggregate';
+  rule_type:
+    | 'single_event'
+    | 'multi_event'
+    | 'outcome_ai'
+    | 'cross_data_ai'
+    | 'aggregate'
+    | 'firms_proximity';
   config: SingleEventConfig | Record<string, unknown>;
   channel_ids: string[];
   active: boolean;
