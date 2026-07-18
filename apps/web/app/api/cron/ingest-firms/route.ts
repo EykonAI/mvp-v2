@@ -9,7 +9,6 @@ import {
   resolveFirmsRegions,
   type FirmsDetection,
 } from '@/lib/firms/client';
-import { firmsRegionBoxes } from '@/lib/notifications/firms-proximity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -269,14 +268,22 @@ async function handle(req: NextRequest) {
       p_since: oldestDay,
       p_radius_km: PROXIMITY_RADIUS_KM,
       p_min_mw: MIN_PLANT_MW,
-      // Migration 085 restricts the rollup to facilities inside a
-      // covered bbox, so a row now MEANS "this facility was watched
-      // on this day" — the property the resolver, alerts and First
-      // Ten all already assumed. p_regions is REQUIRED: the function
-      // fails closed and writes nothing without it. Derived from
-      // FIRMS_REGIONS so widening the ingest widens the rollup with
-      // no migration.
-      p_regions: firmsRegionBoxes(),
+      // NO p_regions here, deliberately. Tagging asks one question —
+      // "is this detection near a monitored facility?" — and that is
+      // a property of the detection, not of our coverage. Coverage
+      // restriction belongs in the ROLLUP (085), which is where it
+      // lives; duplicating it here would be a second place to keep in
+      // sync for no benefit.
+      //
+      // Region-agnostic tagging is also strictly better for retention:
+      // if FIRMS_REGIONS widens later, detections already ingested
+      // near a newly-covered facility are already tagged, so they
+      // survive the raw-tier prune instead of being discarded as
+      // noise and lost before the region goes live.
+      //
+      // (An earlier revision passed p_regions here against a 3-arg
+      // function, which 500'd every run: "Could not find the function
+      // ...(p_min_mw, p_radius_km, p_regions, p_since)".)
     });
     if (error) {
       tagFailed = true;
