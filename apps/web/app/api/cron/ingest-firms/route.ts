@@ -7,6 +7,7 @@ import {
   fetchFirmsArea,
   type FirmsDetection,
 } from '@/lib/firms/client';
+import { firmsRegionBoxes } from '@/lib/notifications/firms-proximity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -165,6 +166,14 @@ async function handle(req: NextRequest) {
       p_day: day,
       p_radius_km: FACILITY_RADIUS_KM,
       p_min_mw: MIN_PLANT_MW,
+      // Migration 085 restricts the rollup to facilities inside a
+      // covered bbox, so a row now MEANS "this facility was watched
+      // on this day" — the property the resolver, alerts and First
+      // Ten all already assumed. p_regions is REQUIRED: the function
+      // fails closed and writes nothing without it. Derived from
+      // FIRMS_REGIONS so widening the ingest widens the rollup with
+      // no migration.
+      p_regions: firmsRegionBoxes(),
     });
     if (error) {
       deriveFailed = true;

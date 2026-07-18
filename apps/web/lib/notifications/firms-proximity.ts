@@ -48,7 +48,25 @@ export interface FirmsProximityConfig {
   min_frp?: number;
   /** Minimum number of detections at the facility that day. */
   min_detections?: number;
+  /**
+   * Alert only on facility-days that migration 085 classified as
+   * SIGNIFICANT (ignition / elevated / went_dark), rather than on any
+   * detection meeting the numeric filters.
+   *
+   * Why this exists: a working refinery flares, so a raw-detection
+   * rule on Bandar Abbas or Tasnee fires every single day, forever.
+   * That is not an alert, it is a subscription to the fact that a
+   * refinery is operating — and it trains the reader to ignore the
+   * channel entirely. Significance is deviation from the FACILITY'S
+   * OWN baseline, which is the only thing that warrants an interrupt.
+   *
+   * Defaults to false so existing rules keep their exact behaviour.
+   */
+  significant_only?: boolean;
 }
+
+/** Event classes migration 085 can assign to a facility-day. */
+export type FirmsEventType = 'ignition' | 'elevated' | 'went_dark';
 
 // The roll-up (firms_derive_facility_observations) pre-computes at a
 // fixed radius, currently 5 km. A rule asking for MORE than that
@@ -180,6 +198,7 @@ export function normaliseFirmsConfig(
       radius_km: radius,
       min_frp: minFrp,
       min_detections: Math.floor(minDet),
+      significant_only: r.significant_only === true,
     },
   };
 }
@@ -287,8 +306,48 @@ export async function evaluateFirmsProximityRule(
   });
   if (error) throw new Error(`firms_match_facility_alerts: ${error.message}`);
 
-  const candidates = (data ?? []) as FirmsMatchRow[];
+  let candidates = (data ?? []) as FirmsMatchRow[];
   if (candidates.length === 0) return null;
+
+  // Significance gate. Narrow the candidate facility-days to those
+  // migration 085 classified as a departure from the facility's own
+  // baseline, BEFORE the claim step — claiming a routine flare would
+  // burn its dispatch slot and suppress a genuinely significant event
+  // on the same facility-day later in the window.
+  //
+  // Fails CLOSED: if firms_significant_events cannot be read we alert
+  // on nothing rather than falling back to raw detections, because the
+  // fallback is exactly the every-day-forever behaviour the flag was
+  // set to avoid.
+  const significanceByKey = new Map<string, FirmsEventType>();
+  if (config.significant_only) {
+    const { data: sig, error: sigErr } = await supabase
+      .from('firms_significant_events')
+      .select('facility_type, facility_id, period, event_type')
+      .gte('period', sincePeriod)
+      .in(
+        'facility_id',
+        Array.from(new Set(candidates.map(c => c.facility_id))),
+      );
+    if (sigErr) {
+      throw new Error(`firms_significant_events: ${sigErr.message}`);
+    }
+    for (const row of (sig ?? []) as Array<{
+      facility_type: string;
+      facility_id: string;
+      period: string;
+      event_type: FirmsEventType;
+    }>) {
+      significanceByKey.set(
+        `${row.facility_type}|${row.facility_id}|${row.period}`,
+        row.event_type,
+      );
+    }
+    candidates = candidates.filter(c =>
+      significanceByKey.has(`${c.facility_type}|${c.facility_id}|${c.period}`),
+    );
+    if (candidates.length === 0) return null;
+  }
 
   // Claim step — the unique index does the de-duplication.
   const { data: claimedRows, error: claimErr } = await supabase
@@ -329,7 +388,7 @@ export async function evaluateFirmsProximityRule(
   return {
     claimed,
     summary: buildSummary(claimed, config),
-    detailLines: buildDetailLines(claimed, config),
+    detailLines: buildDetailLines(claimed, config, significanceByKey),
   };
 }
 
@@ -367,20 +426,37 @@ export function buildSummary(
   } (${rows.length} facility-days).`;
 }
 
+/** How each 085 event class is described to a reader. Phrased as an
+ *  observation about the satellite record, never as a facility state:
+ *  "no detections recorded", not "the refinery is down". */
+const EVENT_PHRASE: Record<FirmsEventType, string> = {
+  ignition:
+    'first detection after a period with none recorded — a change from this site’s own baseline',
+  elevated:
+    'detected heat well above this site’s own typical lit-day level',
+  went_dark:
+    'no detections recorded across several consecutive COVERED days at a site that normally registers them',
+};
+
 export function buildDetailLines(
   rows: FirmsMatchRow[],
   config: FirmsProximityConfig,
+  significance?: Map<string, FirmsEventType>,
 ): string[] {
   const lines: string[] = [];
+  const seenEvents = new Set<FirmsEventType>();
 
   for (const r of rows.slice(0, FIRMS_MAX_DETAIL_FACILITIES)) {
     const frp = r.max_frp !== null && Number.isFinite(Number(r.max_frp))
       ? `, peak FRP ${Number(r.max_frp).toFixed(1)} MW`
       : '';
+    const ev = significance?.get(`${r.facility_type}|${r.facility_id}|${r.period}`);
+    if (ev) seenEvents.add(ev);
+    const evNote = ev ? ` [${ev}: ${EVENT_PHRASE[ev]}]` : '';
     lines.push(
       `${r.period} — ${r.detection_count} detection${
         r.detection_count === 1 ? '' : 's'
-      } within ${fmtKm(r.nearest_km)} of ${facilityLabel(r)}${frp}.`,
+      } within ${fmtKm(r.nearest_km)} of ${facilityLabel(r)}${frp}${evNote}.`,
     );
   }
   if (rows.length > FIRMS_MAX_DETAIL_FACILITIES) {
@@ -412,6 +488,21 @@ export function buildDetailLines(
   lines.push(
     'Proximity is measured to the facility footprint and does not establish that the heat source is the facility itself.',
   );
+
+  if (config.significant_only) {
+    lines.push(
+      'This rule reports only departures from each facility’s OWN baseline, not routine activity. Baseline is built from that facility’s prior COVERED days; a site with too little history is not judged at all.',
+    );
+  }
+  if (seenEvents.has('went_dark')) {
+    // The outage read is the most valuable and the most abusable
+    // signal here, so it gets its own caveat. Sustained absence over
+    // covered days is evidence, not proof — the same cloud cover that
+    // makes a single quiet day meaningless can persist for several.
+    lines.push(
+      'A "went_dark" flag means detections STOPPED at a site that normally registers them, across several days we know were covered. It is an inference about the satellite record, NOT a confirmed outage, shutdown or loss of production — persistent cloud, seasonal maintenance and changes in flaring practice all produce the same signature.',
+    );
+  }
 
   return lines;
 }

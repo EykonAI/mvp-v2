@@ -72,6 +72,23 @@ const FIRMS_BASELINE_DAYS = 30;
 // the 30-day window fills.
 const FIRMS_PRIOR_DAYS = 10;
 
+/**
+ * Callable band for a 7-day detection question.
+ *
+ * Outside this band the outcome is close to foregone and the call
+ * carries almost no information about a forecaster's skill:
+ *   > 0.85 — the permanent flare stacks (Tasnee logged 101 detections
+ *            and Bandar Abbas 23 in two days; a working refinery
+ *            flares, so "yes" is nearly free)
+ *   < 0.15 — the never-detected sites, where "no" is nearly free
+ *
+ * Deliberately asymmetric to nothing: both tails are equally corrosive
+ * to a calibration ledger. Widen this band only with a reason, and
+ * never to fill the panel.
+ */
+export const FIRMS_MIN_CALLABLE_RATE = 0.15;
+export const FIRMS_MAX_CALLABLE_RATE = 0.85;
+
 // Sensitive-site guard.
 //
 // A template reading "will a thermal anomaly be detected within 5 km of
@@ -319,6 +336,22 @@ export async function loadFirmsFacilityTemplates(
   }
 
   return templates
+    // Ranking demotes the tails but never REMOVES them, so on a thin
+    // day slice(0, limit) still handed out near-certain calls once the
+    // genuinely uncertain facilities ran out. That is the exact defect
+    // the founder flagged: "will a thermal anomaly be detected at
+    // Bandar Abbas" is a ~100% base rate, and scoring a creator
+    // CORRECT for answering yes is a free point the Reputation Note
+    // must never award. A hard band makes the tails unofferable.
+    //
+    // Returning FEWER templates than asked is the correct outcome. An
+    // empty First Ten panel is honest; a panel padded with free calls
+    // silently corrupts every Brier score computed from it.
+    .filter(
+      (t) =>
+        t.base_rate >= FIRMS_MIN_CALLABLE_RATE &&
+        t.base_rate <= FIRMS_MAX_CALLABLE_RATE,
+    )
     .sort(
       (a, b) =>
         Math.abs(a.base_rate - 0.5) - Math.abs(b.base_rate - 0.5) ||
