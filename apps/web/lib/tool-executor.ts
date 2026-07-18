@@ -2,6 +2,7 @@
 import { createServerSupabase } from './supabase-server';
 import { simulateChokepoint } from './intel/chokepoint';
 import { runWargame } from './intel/sanctions';
+import { FIRMS_REGIONS } from './firms/client';
 
 const APP_URL = () => process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
@@ -19,6 +20,7 @@ export async function executeToolCall(toolName: string, toolInput: Record<string
       case 'query_airports':            return await queryAirports(toolInput);
       case 'query_ports':               return await queryPorts(toolInput);
       case 'query_weather':             return await queryWeather(toolInput);
+      case 'query_thermal_anomalies':   return await queryThermalAnomalies(toolInput);
       case 'query_agent_reports':       return await queryAgentReports(toolInput);
 
       // Intelligence Center
@@ -383,6 +385,179 @@ async function queryWeather(input: Record<string, any>): Promise<string> {
     current: data.current || {},
     units: data.current_units || {},
   });
+}
+
+// NASA FIRMS thermal anomalies (VIIRS 375m + MODIS 1km NRT).
+//
+// HONESTY CONTRACT — a detection is a satellite hot pixel, not a fire and
+// not a strike; most hot pixels at oil/gas infrastructure are routine
+// flares; and absence of detection does not imply absence of fire (cloud,
+// smoke, overpass timing). Ingest is also REGIONAL, not global, so a
+// facility outside the monitored boxes reads zero because nobody looked.
+// Every response therefore ships `caveat` + `coverage` alongside the data
+// so the model cannot present a zero as "nothing happened".
+const FIRMS_CAVEAT =
+  'A FIRMS detection is a satellite hot pixel — NOT a confirmed fire, strike or outage. ' +
+  'Most detections at oil/gas/refining sites are routine industrial gas flares that burn daily. ' +
+  'Attribution to a strike or shutdown is inference: label it as such and corroborate it. ' +
+  'Absence of detection does NOT imply absence of fire (cloud cover, smoke, overpass timing). ' +
+  'Ingest is regional, not global — check coverage before calling a zero result quiet.';
+
+async function firmsCoverage(supabase: any, sinceDate: string) {
+  const { data, error } = await supabase
+    .from('firms_ingest_runs')
+    .select('region, satellite, day_covered, ok, rows_upserted, ran_at')
+    .gte('day_covered', sinceDate)
+    .order('day_covered', { ascending: false })
+    .limit(1000);
+  if (error) {
+    return { note: 'Ingest ledger unavailable — treat any zero result as unverified coverage.' };
+  }
+  const runs = data ?? [];
+  const okRuns = runs.filter((r: any) => r.ok);
+  const days = Array.from(new Set(okRuns.map((r: any) => r.day_covered))).sort();
+  const failed = runs.filter((r: any) => !r.ok);
+  return {
+    monitored_regions: FIRMS_REGIONS.map(r => ({ slug: r.slug, label: r.label, bbox: r.bbox })),
+    global: false,
+    days_with_data: days,
+    days_with_data_count: days.length,
+    latest_day_covered: days.length ? days[days.length - 1] : null,
+    failed_runs: failed.length,
+    note:
+      'Ingest covers ONLY the monitored_regions bounding boxes. Facilities outside them ' +
+      '(e.g. China, the Americas, East Asia) return zero detections because they are not ' +
+      'watched — that is not evidence of quiet. Within a covered region, a zero means ' +
+      'watched-and-nothing-detected, which still does not rule out a cloud-obscured fire.',
+  };
+}
+
+async function queryThermalAnomalies(input: Record<string, any>): Promise<string> {
+  try {
+    const supabase = createServerSupabase();
+    const mode = String(input.mode ?? 'facilities').toLowerCase() === 'raw' ? 'raw' : 'facilities';
+    const days = Math.min(30, Math.max(1, Number(input.days ?? 7)));
+    const limit = Math.min(500, Math.max(1, Number(input.limit ?? 50)));
+    const sinceDate = new Date(Date.now() - days * 24 * 3600_000).toISOString().slice(0, 10);
+    const coverage = await firmsCoverage(supabase, sinceDate);
+    const provider = 'NASA FIRMS (VIIRS S-NPP/NOAA-20 375m + MODIS 1km, NRT)';
+    const attribution = 'NASA FIRMS — data courtesy of NASA/LANCE/EOSDIS';
+
+    if (mode === 'raw') {
+      let q = supabase
+        .from('firms_thermal_anomalies')
+        .select('satellite, acq_date, acq_time, latitude, longitude, brightness, bright_ti5, frp, confidence, daynight')
+        .gte('acq_date', sinceDate)
+        .order('frp', { ascending: false, nullsFirst: false })
+        .limit(Math.min(2000, limit * 4));
+      if (input.lat_min !== undefined) q = q.gte('latitude', Number(input.lat_min));
+      if (input.lat_max !== undefined) q = q.lte('latitude', Number(input.lat_max));
+      if (input.lon_min !== undefined) q = q.gte('longitude', Number(input.lon_min));
+      if (input.lon_max !== undefined) q = q.lte('longitude', Number(input.lon_max));
+      if (input.min_frp !== undefined) q = q.gte('frp', Number(input.min_frp));
+      const { data, error } = await q;
+      if (error) return JSON.stringify({ error: error.message, caveat: FIRMS_CAVEAT, coverage });
+      const rows = (data ?? []).slice(0, limit);
+      return JSON.stringify({
+        mode: 'raw',
+        window_days: days,
+        since: sinceDate,
+        count: rows.length,
+        provider,
+        attribution,
+        caveat: FIRMS_CAVEAT,
+        coverage,
+        detections: rows.map((d: any) => ({
+          satellite: d.satellite,
+          acq_date: d.acq_date,
+          acq_time_utc: d.acq_time,
+          lat: d.latitude,
+          lon: d.longitude,
+          frp_mw: d.frp === null ? null : Number(d.frp),
+          brightness_k: d.brightness === null ? null : Number(d.brightness),
+          bright_ti5_k: d.bright_ti5 === null ? null : Number(d.bright_ti5),
+          // MODIS reports confidence 0-100; VIIRS reports l | n | h.
+          confidence: d.confidence,
+          daynight: d.daynight,
+        })),
+      });
+    }
+
+    // facilities mode — pre-aggregated rollup, one row per facility per day
+    // (including detection_count = 0 rows for watched-but-silent facilities).
+    let q = supabase
+      .from('firms_facility_observations')
+      .select('facility_type, facility_id, facility_name, country, period, detection_count, max_frp, nearest_km, radius_km')
+      .gte('period', sinceDate)
+      .limit(5000);
+    if (input.facility_type) q = q.eq('facility_type', String(input.facility_type));
+    if (input.country) q = q.ilike('country', `%${String(input.country)}%`);
+    if (input.facility_name) q = q.ilike('facility_name', `%${String(input.facility_name)}%`);
+    const { data, error } = await q;
+    if (error) return JSON.stringify({ error: error.message, caveat: FIRMS_CAVEAT, coverage });
+
+    const rows = data ?? [];
+    const byFacility = new Map<string, any>();
+    for (const r of rows) {
+      const key = `${r.facility_type}:${r.facility_id}`;
+      let f = byFacility.get(key);
+      if (!f) {
+        f = {
+          facility_type: r.facility_type,
+          facility_id: r.facility_id,
+          facility_name: r.facility_name,
+          country: r.country,
+          radius_km: r.radius_km === null ? null : Number(r.radius_km),
+          detections: 0,
+          max_frp_mw: null as number | null,
+          nearest_km: null as number | null,
+          days_observed: 0,
+          days_with_detections: [] as string[],
+        };
+        byFacility.set(key, f);
+      }
+      const n = Number(r.detection_count ?? 0);
+      f.detections += n;
+      f.days_observed += 1;
+      if (n > 0) {
+        f.days_with_detections.push(r.period);
+        const frp = r.max_frp === null ? null : Number(r.max_frp);
+        if (frp !== null && (f.max_frp_mw === null || frp > f.max_frp_mw)) f.max_frp_mw = frp;
+        const near = r.nearest_km === null ? null : Number(r.nearest_km);
+        if (near !== null && (f.nearest_km === null || near < f.nearest_km)) f.nearest_km = near;
+      }
+    }
+
+    const minDet = input.min_detections === undefined ? 1 : Math.max(0, Number(input.min_detections));
+    const all = Array.from(byFacility.values());
+    const facilities = all
+      .filter(f => f.detections >= minDet)
+      .sort((a, b) => b.detections - a.detections || (b.max_frp_mw ?? 0) - (a.max_frp_mw ?? 0))
+      .slice(0, limit);
+    for (const f of facilities) f.days_with_detections.sort();
+
+    return JSON.stringify({
+      mode: 'facilities',
+      window_days: days,
+      since: sinceDate,
+      filters: {
+        facility_type: input.facility_type ?? 'all',
+        country: input.country ?? 'all',
+        facility_name: input.facility_name ?? 'all',
+        min_detections: minDet,
+      },
+      facilities_matching_filters: all.length,
+      facilities_with_any_detection: all.filter(f => f.detections > 0).length,
+      count: facilities.length,
+      provider,
+      attribution,
+      caveat: FIRMS_CAVEAT,
+      coverage,
+      facilities,
+    });
+  } catch (err: any) {
+    return JSON.stringify({ error: err?.message ?? 'unknown', caveat: FIRMS_CAVEAT });
+  }
 }
 
 async function queryAgentReports(input: Record<string, any>): Promise<string> {
