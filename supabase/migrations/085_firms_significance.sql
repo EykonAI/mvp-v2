@@ -82,7 +82,12 @@ DECLARE
   v_rows int;
 BEGIN
   IF p_regions IS NULL OR jsonb_array_length(p_regions) = 0 THEN
-    RETURN 0;   -- fail closed: no declared coverage, no observations
+    -- Fail closed AND LOUD. Returning 0 here would be worse than
+    -- useless: the caller reports a successful run that wrote
+    -- nothing, which is the silent-no-op failure mode this whole
+    -- feature exists to prevent. A caller that forgets its regions
+    -- must go red, not green-with-no-data.
+    RAISE EXCEPTION 'firms_derive_facility_observations: p_regions is required (declared coverage cannot be empty)';
   END IF;
 
   WITH monitored AS (
