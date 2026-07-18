@@ -311,7 +311,6 @@ async function handle(req: NextRequest) {
   const regionsJson = firmsRegionsAsJsonb(FIRMS_REGIONS);
 
   const derived: Record<string, number> = {};
-  const significant: Record<string, number> = {};
   let deriveFailed = false;
   if (runDerive) {
     for (const day of daysCovered) {
@@ -328,17 +327,17 @@ async function handle(req: NextRequest) {
       }
       derived[day] = typeof data === 'number' ? data : 0;
 
-      // Significance (085). Nothing else in the codebase calls this —
-      // without it, firms_significant_events is created and stays
-      // empty forever while the rest of the pipeline looks healthy.
-      // Non-fatal: the rollup is the load-bearing artefact, and a
-      // significance failure should not mask a successful ingest.
-      const sig = await supabase.rpc('firms_detect_significant_events', { p_day: day });
-      if (sig.error) {
-        errors.push(`significance ${day}: ${sig.error.message}`);
-      } else {
-        significant[day] = typeof sig.data === 'number' ? sig.data : 0;
-      }
+      // Significance detection deliberately does NOT run here.
+      //
+      // It was called inline while nothing else owned it, but #290
+      // added /api/cron/detect-firms-significance as its own cron.
+      // Keeping the inline call would run it once per SHARD per hour
+      // against the same 110s curl budget this route is being split
+      // up to protect — redundant work on an idempotent upsert.
+      //
+      // Scheduling requirement: run the significance cron AFTER the
+      // ingest cron. It is idempotent and hourly, so a tick that
+      // lands early recomputes correctly on the next pass.
     }
   }
 
@@ -371,7 +370,6 @@ async function handle(req: NextRequest) {
       tagged,
       days: Array.from(daysCovered),
       derived,
-      significant,
       pruned,
       errors: errors.slice(0, 10),
     },
