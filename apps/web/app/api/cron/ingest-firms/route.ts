@@ -151,7 +151,15 @@ async function handle(req: NextRequest) {
   }
 
   // Derive the facility rollup for every day this run touched.
+  //
+  // A derive failure is NOT cosmetic: without it the observable
+  // family has no rows and nothing downstream can resolve, even
+  // though detections landed fine. It must therefore fail the whole
+  // run — an earlier version returned ok:true here, so Railway
+  // reported "Last run succeeded" for hours while the rollup was
+  // silently timing out and firms_facility_observations stayed empty.
   const derived: Record<string, number> = {};
+  let deriveFailed = false;
   for (const day of daysCovered) {
     const { data, error } = await supabase.rpc('firms_derive_facility_observations', {
       p_day: day,
@@ -159,6 +167,7 @@ async function handle(req: NextRequest) {
       p_min_mw: MIN_PLANT_MW,
     });
     if (error) {
+      deriveFailed = true;
       errors.push(`derive ${day}: ${error.message}`);
     } else {
       derived[day] = typeof data === 'number' ? data : 0;
@@ -166,14 +175,21 @@ async function handle(req: NextRequest) {
   }
 
   const allFailed = attempts > 0 && runs.every((r) => !r.ok);
-  return NextResponse.json({
-    ok: !allFailed,
-    fetched: totalFetched,
-    upserted: totalUpserted,
-    days: Array.from(daysCovered),
-    derived,
-    errors: errors.slice(0, 10),
-  });
+  const ok = !allFailed && !deriveFailed;
+
+  return NextResponse.json(
+    {
+      ok,
+      fetched: totalFetched,
+      upserted: totalUpserted,
+      days: Array.from(daysCovered),
+      derived,
+      errors: errors.slice(0, 10),
+    },
+    // Non-2xx so `curl -fsS` exits non-zero and Railway marks the run
+    // failed, rather than reporting green on a broken pipeline.
+    { status: ok ? 200 : 500 },
+  );
 }
 
 export async function GET(req: NextRequest) {
