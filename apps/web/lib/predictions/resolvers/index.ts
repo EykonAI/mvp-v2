@@ -3,6 +3,7 @@ import { resolvePolymarket } from './polymarket';
 import { resolveEia } from './eia';
 import { resolveOfac } from './ofac';
 import { resolveAisChokepoint } from './ais-chokepoint';
+import { resolveFirms } from './firms';
 import type { PredictionRow, Resolution, SupabaseAny } from './types';
 
 export type { PredictionRow, Resolution } from './types';
@@ -26,6 +27,8 @@ export async function resolveBySource(
       return resolveOfac(row, supabase);
     case 'ais':
       return resolveAisChokepoint(row, supabase);
+    case 'firms':
+      return resolveFirms(row, supabase);
     case 'manual':
     default:
       return resolveManual(row, supabase);

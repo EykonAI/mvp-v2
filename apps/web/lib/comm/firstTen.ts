@@ -24,6 +24,99 @@ export type FastMarket = {
   days_to_close: number;
 };
 
+// ── FIRMS facility templates ───────────────────────────────────
+//
+// The second observable family a creator can call on (migration 081).
+// Polymarket only covers what a betting market happens to list, which
+// left conflict / energy-infrastructure analysts with nothing in their
+// own beat to be scored on. A FIRMS call is resolved by eYKON's own
+// ingest: "will a thermal anomaly be DETECTED within <radius> km of
+// this facility in the next <N> days?"
+//
+// HONESTY: a detection is a hot pixel, not a confirmed fire and not a
+// strike. The wording below says "detected" everywhere and must keep
+// saying it — attribution belongs in the analyst's prose, never in the
+// resolution. See lib/predictions/resolvers/firms.ts.
+export const FIRMS_WINDOW_DAYS = 7;
+
+export type FirmsTemplate = {
+  facility_type: string;
+  facility_id: string;
+  facility_name: string;
+  country: string | null;
+  // Detections at this facility over the trailing baseline window —
+  // shown so the creator calls with context, not blind.
+  recent_detections: number;
+  baseline_days: number;
+  window_days: number;
+  question: string;
+};
+
+const FIRMS_BASELINE_DAYS = 30;
+
+/**
+ * Surface monitored facilities as callable First Ten templates.
+ *
+ * Ordering favours facilities with SOME recent activity — those are
+ * where the outcome is genuinely uncertain, which is where a call
+ * carries information. A facility that never registers anything is a
+ * near-certain "not detected" and teaches the ledger nothing.
+ */
+export async function loadFirmsFacilityTemplates(
+  admin: SupabaseClient,
+  limit = 8,
+): Promise<FirmsTemplate[]> {
+  const since = new Date(Date.now() - FIRMS_BASELINE_DAYS * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+
+  const { data, error } = await admin
+    .from('firms_facility_observations')
+    .select('facility_type, facility_id, facility_name, country, detection_count, period')
+    .gte('period', since)
+    .order('period', { ascending: false })
+    .limit(4000);
+
+  if (error || !data) return [];
+
+  type Row = {
+    facility_type: string;
+    facility_id: string;
+    facility_name: string | null;
+    country: string | null;
+    detection_count: number | null;
+  };
+
+  const agg = new Map<string, FirmsTemplate>();
+  for (const r of data as Row[]) {
+    const key = `${r.facility_type}:${r.facility_id}`;
+    const prev = agg.get(key);
+    const count = Number(r.detection_count) || 0;
+    if (prev) {
+      prev.recent_detections += count;
+      continue;
+    }
+    const name = r.facility_name ?? r.facility_id;
+    agg.set(key, {
+      facility_type: r.facility_type,
+      facility_id: r.facility_id,
+      facility_name: name,
+      country: r.country,
+      recent_detections: count,
+      baseline_days: FIRMS_BASELINE_DAYS,
+      window_days: FIRMS_WINDOW_DAYS,
+      question: `Will a thermal anomaly be detected within 5 km of ${name}${
+        r.country ? ` (${r.country})` : ''
+      } in the next ${FIRMS_WINDOW_DAYS} days?`,
+    });
+  }
+
+  return Array.from(agg.values())
+    .filter((t) => t.recent_detections > 0)
+    .sort((a, b) => a.recent_detections - b.recent_detections)
+    .slice(0, limit);
+}
+
 export async function loadFastClosingMarkets(
   admin: SupabaseClient,
   limit = 10,
