@@ -52,6 +52,8 @@ export default function Home() {
   const [pipelines, setPipelines] = useState<any[]>([]);
   const [refineries, setRefineries] = useState<any[]>([]);
   const [mines, setMines] = useState<any[]>([]);
+  // FIRMS thermal anomalies — satellite hot-pixel DETECTIONS, not fires.
+  const [thermal, setThermal] = useState<any[]>([]);
 
   // Per-data-source fetch state (one entry per /api/* route).
   const [dataState, setDataState] = useState<Record<DataKey, LayerState>>({
@@ -64,6 +66,7 @@ export default function Home() {
     pipelines: initialDataState(),
     refineries: initialDataState(),
     mines: initialDataState(),
+    firms: initialDataState(),
   });
 
   // Per-sub-layer visibility — independent of fetch state, since one parent
@@ -116,6 +119,7 @@ export default function Home() {
     name === 'power-plants' ? setPowerPlants :
     name === 'pipelines' ? setPipelines :
     name === 'refineries' ? setRefineries :
+    name === 'firms' ? setThermal :
     setMines;
 
   const fetchLayer = useCallback(
@@ -176,6 +180,10 @@ export default function Home() {
       () => fetchLayer('conflicts', buildUrl('conflicts', bboxRef.current)),
       POLL_INTERVALS.conflicts!,
     );
+    intervalsRef.current.firms = setInterval(
+      () => fetchLayer('firms', buildUrl('firms', bboxRef.current)),
+      POLL_INTERVALS.firms!,
+    );
 
     return () => {
       Object.values(intervalsRef.current).forEach(clearInterval);
@@ -211,6 +219,7 @@ export default function Home() {
       aircraft, vessels, conflicts, airports, ports,
       'power-plants': powerPlants,
       pipelines, refineries, mines,
+      firms: thermal,
     };
     for (const cat of CATEGORIES) {
       for (const sub of cat.sublayers) {
@@ -222,7 +231,7 @@ export default function Home() {
       }
     }
     return out;
-  }, [aircraft, vessels, conflicts, airports, ports, powerPlants, pipelines, refineries, mines]);
+  }, [aircraft, vessels, conflicts, airports, ports, powerPlants, pipelines, refineries, mines, thermal]);
 
   const visibleAircraft = useMemo(
     () => filterByVisibleSublayers(aircraft, 'aircraft', sublayerVisible),
@@ -262,6 +271,10 @@ export default function Home() {
     () => sublayerVisible['infrastructure.mines'] ? mines : [],
     [mines, sublayerVisible],
   );
+  const visibleThermal = useMemo(
+    () => filterByVisibleSublayers(thermal, 'thermal', sublayerVisible),
+    [thermal, sublayerVisible],
+  );
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden">
@@ -279,6 +292,7 @@ export default function Home() {
             pipelines={visiblePipelines}
             refineries={visibleRefineries}
             mines={visibleMines}
+            thermal={visibleThermal}
             onViewportChange={setBbox}
           />
           <LayerControls

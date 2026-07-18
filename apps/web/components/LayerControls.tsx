@@ -163,6 +163,29 @@ export default function LayerControls({
                 </button>
               );
             })}
+
+            {/* Standing caveat for categories whose data is easy to over-read
+                (FIRMS: detections, not confirmed fires). Rendered inside the
+                expanded panel so it can't be dismissed away from the layer. */}
+            {expanded && cat.note && (
+              <div
+                style={{
+                  padding: '5px 10px 6px 32px',
+                  color: 'var(--ink-faint)',
+                  fontFamily: 'var(--f-mono)',
+                  fontSize: 10,
+                  lineHeight: 1.45,
+                  letterSpacing: '0.02em',
+                  borderLeft: `1px solid ${cat.color}`,
+                  marginLeft: 10,
+                  background: 'rgba(10, 18, 32, 0.5)',
+                  backdropFilter: 'blur(6px)',
+                  maxWidth: 260,
+                }}
+              >
+                {cat.note}
+              </div>
+            )}
           </div>
         );
       })}

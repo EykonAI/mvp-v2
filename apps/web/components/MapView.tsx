@@ -17,6 +17,8 @@ interface MapViewProps {
   pipelines: any[];
   refineries: any[];
   mines: any[];
+  /** NASA FIRMS thermal-anomaly detections (hot pixels — NOT confirmed fires). */
+  thermal: any[];
   /** Fired ~500ms after the user stops panning/zooming, with the visible bbox. */
   onViewportChange?: (bbox: BBox) => void;
 }
@@ -111,6 +113,39 @@ function powerSize(capacity_mw: any): number {
   return Math.max(6, Math.min(14, Math.sqrt(c) * 0.4));
 }
 
+// ─── Thermal anomaly (NASA FIRMS) styling ───
+// FRP = fire radiative power in MW. The distribution is extremely long-tailed
+// (median ~5 MW, max ~6600 MW), so both size and colour run on a log ramp —
+// a linear scale would render every ordinary detection as an identical dot.
+//
+// Colour ramp is deliberately "heat", NOT the conflict red: a thermal anomaly
+// is a DETECTION, never a strike, and must not read as one on the globe.
+//   low FRP  → deep coral   (matches --coral #DE7F70)
+//   mid FRP  → orange
+//   high FRP → pale yellow-white (hottest)
+function thermalIntensity(frp: any): number {
+  const f = Number(frp);
+  if (!Number.isFinite(f) || f <= 0) return 0;
+  // log10 normalised against a 1000 MW reference — above that it saturates.
+  return Math.max(0, Math.min(1, Math.log10(f + 1) / 3));
+}
+
+function thermalColor(d: any): [number, number, number, number] {
+  const t = thermalIntensity(d.frp);
+  // Two-segment ramp: coral → orange → pale yellow.
+  const [r, g, b] = t < 0.5
+    ? [222 + (240 - 222) * (t / 0.5), 127 + (150 - 127) * (t / 0.5), 112 + (60 - 112) * (t / 0.5)]
+    : [240 + (255 - 240) * ((t - 0.5) / 0.5), 150 + (235 - 150) * ((t - 0.5) / 0.5), 60 + (170 - 60) * ((t - 0.5) / 0.5)];
+  // Low-confidence detections are drawn fainter — the uncertainty is part of
+  // the reading, not something to hide behind a uniform dot.
+  const alpha = d.confidence_band === 'low' ? 120 : d.confidence_band === 'high' ? 235 : 190;
+  return [Math.round(r), Math.round(g), Math.round(b), alpha];
+}
+
+function thermalRadius(d: any): number {
+  return 30000 + thermalIntensity(d.frp) * 90000;
+}
+
 const VIEWPORT_DEBOUNCE_MS = 500;
 
 export default function MapView({
@@ -123,6 +158,7 @@ export default function MapView({
   pipelines,
   refineries,
   mines,
+  thermal,
   onViewportChange,
 }: MapViewProps) {
   const [viewState, setViewState] = useState(MAP_CONFIG.INITIAL_VIEW);
@@ -217,6 +253,23 @@ export default function MapView({
     onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'conflict' } : null),
     updateTriggers: { getPosition: conflicts.length, getFillColor: conflicts.length },
   }), [conflicts]);
+
+  // ─── Thermal Anomaly Layer (NASA FIRMS heat ramp, sized by FRP) ───
+  // HONESTY: these are satellite hot-pixel DETECTIONS. Not fires, not strikes.
+  // Labels/tooltips below must never assert an event or a cause.
+  const thermalLayer = useMemo(() => new ScatterplotLayer({
+    id: 'thermal',
+    data: thermal,
+    getPosition: (d: any) => [Number(d.longitude), Number(d.latitude)],
+    getFillColor: thermalColor,
+    getRadius: thermalRadius,
+    radiusMinPixels: 2,
+    radiusMaxPixels: 14,
+    stroked: false,
+    pickable: true,
+    onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'thermal' } : null),
+    updateTriggers: { getPosition: thermal.length, getFillColor: thermal.length, getRadius: thermal.length },
+  }), [thermal]);
 
   // ─── Refineries Layer (⚗ alembic glyph, orange — OSM Overpass) ───
   const refineryLayer = useMemo(() => new TextLayer({
@@ -403,7 +456,7 @@ export default function MapView({
   // Pipelines render under everything else (lines as background); LNG
   // terminals sit alongside other point markers. Hover-pick order is
   // last → first, so terminals win over pipelines when overlapping.
-  const layers = [pipelineLayer, vesselLayer, aircraftLayer, conflictLayer, refineryLayer, mineLayer, powerPlantLayer, nuclearLayer, airportLayer, portLayer, lngTerminalLayer];
+  const layers = [pipelineLayer, vesselLayer, aircraftLayer, thermalLayer, conflictLayer, refineryLayer, mineLayer, powerPlantLayer, nuclearLayer, airportLayer, portLayer, lngTerminalLayer];
 
   // ─── Tooltip Renderer ───
   const renderTooltip = useCallback(() => {
@@ -445,6 +498,42 @@ export default function MapView({
           </div>
         );
         break;
+      case 'thermal': {
+        const frp = object.frp != null ? Number(object.frp) : null;
+        const band = object.confidence_band || 'nominal';
+        content = (
+          <div>
+            {/* Never "Fire at X" / "Strike": this is a hot-pixel detection. */}
+            <div className="font-semibold" style={{ color: 'rgb(240, 150, 60)' }}>
+              Thermal anomaly detected
+            </div>
+            <div className="text-xs text-gray-400 mt-0.5">
+              {object.satellite || 'FIRMS'} · {object.daynight === 'N' ? 'night' : object.daynight === 'D' ? 'day' : '—'} pass
+            </div>
+            <div className="text-xs mt-1">
+              Radiative power: {frp != null ? `${frp.toFixed(1)} MW` : '—'}
+            </div>
+            {object.brightness != null && (
+              <div className="text-xs">Brightness: {Number(object.brightness).toFixed(1)} K</div>
+            )}
+            <div className="text-xs">
+              Detection confidence: {band}
+              {object.confidence ? ` (${object.confidence})` : ''}
+            </div>
+            <div className="text-xs text-gray-400 mt-1">
+              {object.acquired_at
+                ? `Acquired ${object.acquired_at.replace('T', ' ').replace(':00Z', ' UTC')}`
+                : object.acq_date || '—'}
+            </div>
+            <div className="text-xs text-gray-500 mt-1.5 max-w-[250px] leading-snug">
+              Hot pixel measured from orbit — not a confirmed fire, and not a
+              strike. Often industrial gas flaring or agricultural burning.
+              Any cause is inference.
+            </div>
+          </div>
+        );
+        break;
+      }
       case 'refinery':
         content = (
           <div>

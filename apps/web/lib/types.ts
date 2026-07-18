@@ -147,7 +147,7 @@ export interface SubLayerDef {
   key: string;                // e.g. 'aircraft.civilian'
   label: string;
   status: SubLayerStatus;
-  dataKey?: 'aircraft' | 'vessels' | 'conflicts' | 'airports' | 'ports' | 'power-plants' | 'pipelines' | 'refineries' | 'mines';
+  dataKey?: 'aircraft' | 'vessels' | 'conflicts' | 'airports' | 'ports' | 'power-plants' | 'pipelines' | 'refineries' | 'mines' | 'firms';
   predicate?: (item: any) => boolean;
   comingSoon?: string;        // tooltip text for `planned` sub-layers
   defaultHidden?: boolean;    // `live` layer that starts toggled OFF (still loads + toggleable)
@@ -159,6 +159,12 @@ export interface CategoryDef {
   color: string;              // CSS variable
   icon: string;
   sublayers: SubLayerDef[];
+  /**
+   * Standing caveat shown under the sub-layer list when the category is
+   * expanded. Used where the data's meaning is easy to over-read — e.g.
+   * FIRMS thermal anomalies are detections, not confirmed fires.
+   */
+  note?: string;
 }
 
 // ─── Map Viewport BBox ───

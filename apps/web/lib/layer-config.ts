@@ -50,6 +50,23 @@ export const CATEGORIES: CategoryDef[] = [
     ],
   },
   {
+    key: 'thermal',
+    label: 'Thermal anomalies',
+    color: 'var(--coral)',
+    icon: '◈',
+    // Surfaced verbatim in the layer panel. A FIRMS row is a hot pixel, not a
+    // confirmed fire and never a strike — see app/api/firms/route.ts.
+    note: 'Satellite hot-pixel detections, not confirmed fires. Many are routine industrial gas flares. Attribution is inference; cloud cover means no detection ≠ no fire.',
+    sublayers: [
+      { key: 'thermal.high', label: 'High confidence', status: 'live',
+        dataKey: 'firms', predicate: (d: any) => d.confidence_band === 'high' },
+      { key: 'thermal.nominal', label: 'Nominal confidence', status: 'live',
+        dataKey: 'firms', predicate: (d: any) => d.confidence_band === 'nominal' },
+      { key: 'thermal.low', label: 'Low confidence', status: 'live',
+        dataKey: 'firms', predicate: (d: any) => d.confidence_band === 'low', defaultHidden: true },
+    ],
+  },
+  {
     key: 'imagery',
     label: 'Imagery',
     color: 'var(--violet)',
@@ -83,9 +100,9 @@ export const CATEGORIES: CategoryDef[] = [
   },
 ];
 
-export type DataKey = 'aircraft' | 'vessels' | 'conflicts' | 'airports' | 'ports' | 'power-plants' | 'pipelines' | 'refineries' | 'mines';
+export type DataKey = 'aircraft' | 'vessels' | 'conflicts' | 'airports' | 'ports' | 'power-plants' | 'pipelines' | 'refineries' | 'mines' | 'firms';
 
-export const DATA_KEYS: DataKey[] = ['aircraft', 'vessels', 'conflicts', 'airports', 'ports', 'power-plants', 'pipelines', 'refineries', 'mines'];
+export const DATA_KEYS: DataKey[] = ['aircraft', 'vessels', 'conflicts', 'airports', 'ports', 'power-plants', 'pipelines', 'refineries', 'mines', 'firms'];
 
 /**
  * Default visibility: live sub-layers on (except those flagged
