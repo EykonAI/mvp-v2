@@ -54,6 +54,58 @@ export const FIRMS_REGIONS: FirmsRegion[] = [
   { slug: 'europe', label: 'Europe', bbox: { west: -10, south: 35, east: 22, north: 60 } },
 ];
 
+/**
+ * Resolve a `?region=` shard selector to the regions it names.
+ *
+ * Accepts a comma-separated list of slugs. Empty/absent selects
+ * EVERY region, which is what keeps the existing Railway cron command
+ * (`curl ... /api/cron/ingest-firms`, no query string) behaving
+ * exactly as before.
+ *
+ * Unknown slugs are returned in `unknown` rather than ignored. A typo
+ * in a Railway cron command must fail loudly — silently ingesting
+ * nothing would write a green run record for a region nobody is
+ * actually covering, which is the same class of lie the coverage
+ * ledger exists to prevent.
+ */
+export function resolveFirmsRegions(param: string | null | undefined): {
+  regions: FirmsRegion[];
+  unknown: string[];
+} {
+  const raw = (param ?? '').trim();
+  if (!raw) return { regions: FIRMS_REGIONS, unknown: [] };
+
+  const wanted = raw
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+
+  const bySlug = new Map(FIRMS_REGIONS.map((r) => [r.slug, r]));
+  const regions: FirmsRegion[] = [];
+  const unknown: string[] = [];
+  const seen = new Set<string>();
+
+  for (const slug of wanted) {
+    const region = bySlug.get(slug);
+    if (!region) {
+      unknown.push(slug);
+    } else if (!seen.has(slug)) {
+      seen.add(slug);
+      regions.push(region);
+    }
+  }
+  return { regions, unknown };
+}
+
+/**
+ * The bboxes as passed to SQL. TypeScript stays the single source of
+ * truth (same contract as 084/085) — widening FIRMS_REGIONS widens
+ * coverage with no migration.
+ */
+export function firmsRegionsAsJsonb(regions: FirmsRegion[] = FIRMS_REGIONS): FirmsBbox[] {
+  return regions.map((r) => r.bbox);
+}
+
 export interface FirmsDetection {
   satellite: string;
   acq_date: string;

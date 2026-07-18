@@ -29,6 +29,20 @@ const MAX_WINDOW_HOURS = 24 * 14;
 const DEFAULT_LIMIT = 3000;
 const MAX_LIMIT = 10000;
 
+// Retention boundary — must track FIRMS_RAW_RETENTION_DAYS in
+// apps/web/app/api/cron/ingest-firms/route.ts (migration 086).
+//
+// Detections are retained in two tiers: ALL detections for this many
+// days (which is what this layer draws), and only those within the
+// ingest proximity radius of a monitored facility for far longer.
+// So a request for a window LONGER than this does not return a
+// thinner version of the same picture — it returns a structurally
+// different one, ~91% of the points having been pruned as
+// non-facility-proximate. Callers are told, via `raw_complete` and
+// `partial_window`, rather than being left to infer that the world
+// stopped burning three days ago.
+const RAW_RETENTION_DAYS = Number(process.env.FIRMS_RAW_RETENTION_DAYS ?? 3);
+
 /**
  * FIRMS ships two incompatible confidence encodings in the same feed:
  *   VIIRS (SNPP / NOAA-20) → 'l' | 'n' | 'h'
@@ -90,6 +104,15 @@ async function fetchFromSupabase(params: URLSearchParams) {
     query = query.gte('frp', parseFloat(minFrp));
   }
 
+  // Opt-in: only detections near a monitored facility (migration 086).
+  // This is the analytically interesting subset — it is NOT a claim
+  // that these detections are caused by, or attributable to, those
+  // facilities. Proximity is geometry.
+  const proximateOnly = /^(1|true|yes)$/i.test(params.get('proximate') || '');
+  if (proximateOnly) {
+    query = query.eq('facility_proximate', true);
+  }
+
   // Bounding box — accept both the snake_case spelling used by /api/conflicts
   // and /api/aircraft and the /api/vessels camel-mashed form.
   const latMin = params.get('lat_min') ?? params.get('latmin');
@@ -141,6 +164,14 @@ async function fetchFromSupabase(params: URLSearchParams) {
     source: 'NASA FIRMS (VIIRS SNPP/NOAA-20 + MODIS, near-real-time)',
     window_hours: hours,
     since,
+    proximate_only: proximateOnly,
+    // Days back from today for which ALL detections are retained.
+    raw_complete_days: RAW_RETENTION_DAYS,
+    // True when the requested window reaches past the raw retention
+    // boundary, so the older part of it holds only facility-proximate
+    // detections. Render a caveat, or clamp — do not read the thinning
+    // as a real decline in thermal activity.
+    partial_window: !proximateOnly && days > RAW_RETENTION_DAYS,
     // True when the cap bit — the client is seeing the highest-FRP subset,
     // not everything in the viewport.
     truncated: rows.length >= limit,
