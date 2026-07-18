@@ -23,7 +23,12 @@ import { ProfileModeration } from '@/components/profile/ProfileModeration';
 import { FoundingPartnerEmblem, FoundingPartnerChip } from '@/components/profile/FoundingPartnerEmblem';
 import { FirstTenPanel } from '@/components/profile/FirstTenPanel';
 import { getFoundingPartner } from '@/lib/comm/foundingPartner';
-import { loadFastClosingMarkets, type FastMarket } from '@/lib/comm/firstTen';
+import {
+  loadFastClosingMarkets,
+  loadFirmsFacilityTemplates,
+  type FastMarket,
+  type FirmsTemplate,
+} from '@/lib/comm/firstTen';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { getCurrentUser } from '@/lib/auth/session';
 
@@ -94,8 +99,13 @@ export default async function ProfilePage({
   const admin = createServerSupabase();
   const partner = await getFoundingPartner(admin, p.id);
   const noteShown = (data.reputationNote?.note ?? null) !== null;
-  const fastMarkets: FastMarket[] =
-    isOwner && !noteShown ? await loadFastClosingMarkets(admin) : [];
+  const showFirstTen = isOwner && !noteShown;
+  const [fastMarkets, firmsFacilities]: [FastMarket[], FirmsTemplate[]] = showFirstTen
+    ? await Promise.all([
+        loadFastClosingMarkets(admin),
+        loadFirmsFacilityTemplates(admin),
+      ])
+    : [[], []];
 
   return (
     <article style={{ maxWidth: 980, margin: '0 auto', padding: '36px 24px 72px' }}>
@@ -233,6 +243,7 @@ export default async function ProfilePage({
           <FirstTenPanel
             resolvedCount={data.reputationNote?.nResolved ?? data.resolvedCount}
             markets={fastMarkets}
+            facilities={firmsFacilities}
             deadline={partner && partner.status !== 'graduated' ? partner.note_deadline : null}
           />
         </div>

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { FastMarket } from '@/lib/comm/firstTen';
+import type { FastMarket, FirmsTemplate } from '@/lib/comm/firstTen';
 import { FIRST_TEN_TARGET } from '@/lib/comm/firstTen';
 
 // "The First Ten" (Founding Partner build-prompt §7) — the owner-only
@@ -12,10 +12,14 @@ import { FIRST_TEN_TARGET } from '@/lib/comm/firstTen';
 export function FirstTenPanel({
   resolvedCount,
   markets,
+  facilities = [],
   deadline,
 }: {
   resolvedCount: number;
   markets: FastMarket[];
+  // FIRMS-monitored facilities (migration 081) — the second observable
+  // family, for analysts whose beat no betting market lists.
+  facilities?: FirmsTemplate[];
   deadline: string | null; // Founding Partner note_deadline, if any
 }) {
   const remaining = Math.max(FIRST_TEN_TARGET - resolvedCount, 0);
@@ -96,6 +100,47 @@ export function FirstTenPanel({
             </div>
           ))}
         </div>
+      )}
+
+      {facilities.length > 0 && (
+        <>
+          <div
+            className="eyebrow"
+            style={{ color: 'var(--teal)', marginTop: 16, marginBottom: 6 }}
+          >
+            Infrastructure watch — resolved by eYKON&apos;s own thermal feed
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.55, margin: '0 0 10px', maxWidth: 560 }}>
+            For beats no betting market lists. These resolve from NASA FIRMS detections
+            ingested by eYKON. A detection is a thermal anomaly — not a confirmed fire, and
+            not a confirmed strike; attribution is yours to argue, not the ledger&apos;s to assert.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {facilities.slice(0, 6).map(f => (
+              <div
+                key={`${f.facility_type}:${f.facility_id}`}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, border: '1px solid var(--rule-soft)', borderRadius: 6, padding: '8px 12px' }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {f.question}
+                  </div>
+                  <div style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--ink-faint)', marginTop: 2 }}>
+                    {f.recent_detections} detection{f.recent_detections === 1 ? '' : 's'} in the last{' '}
+                    {f.baseline_days}d · resolves in {f.window_days}d
+                  </div>
+                </div>
+                <Link
+                  href={`?tab=predictions&firms=${encodeURIComponent(`${f.facility_type}:${f.facility_id}`)}`}
+                  scroll={false}
+                  style={{ fontFamily: 'var(--f-mono)', fontSize: 10.5, letterSpacing: '0.04em', color: 'var(--teal)', border: '1px solid var(--teal-dim)', borderRadius: 5, padding: '5px 10px', textDecoration: 'none', flexShrink: 0 }}
+                >
+                  Make this call →
+                </Link>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </section>
   );
