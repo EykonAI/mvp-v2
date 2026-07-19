@@ -335,7 +335,7 @@ export async function loadFirmsFacilityTemplates(
     });
   }
 
-  return templates
+  const callable = templates
     // Ranking demotes the tails but never REMOVES them, so on a thin
     // day slice(0, limit) still handed out near-certain calls once the
     // genuinely uncertain facilities ran out. That is the exact defect
@@ -357,8 +357,58 @@ export async function loadFirmsFacilityTemplates(
         Math.abs(a.base_rate - 0.5) - Math.abs(b.base_rate - 0.5) ||
         // Deterministic tie-break so the list is stable render to render.
         a.facility_id.localeCompare(b.facility_id),
-    )
-    .slice(0, limit);
+    );
+
+  // STRATIFY BY FACILITY TYPE.
+  //
+  // A pure global top-N returned ~8 power plants and no refineries, and
+  // the first reading of that was "refineries flare constantly, so their
+  // base_rate sits near 1.0 and uncertainty ranking excludes them —
+  // showing them would mean compromising calibration."
+  //
+  // Measured against production (2026-07-18) that is not what happens:
+  //
+  //   power_plant  10,125 facilities  avg base_rate 0.272  99% in band
+  //   refinery        431 facilities  avg base_rate 0.393  96% in band
+  //
+  // Refineries actually sit CLOSER to 0.5 than power plants, and 414 of
+  // 431 are already inside the callable band. Only 17 are the permanent
+  // flare stacks that inspired the theory. The real cause is population:
+  // 10,125 vs 431 is 23:1, so any global top-N is nearly all plants no
+  // matter how it ranks. (The same was true of the older raw-count
+  // ranking — the mechanism changed, the outcome did not.)
+  //
+  // So the implied tradeoff — show refineries OR keep calibration — is
+  // false. Composition and calibration are independent here: the
+  // [0.15, 0.85] band above is what protects the Reputation Note, and it
+  // has already been applied. Stratifying changes WHICH callable
+  // questions get offered, never how any of them is scored. Every
+  // facility below is still inside the band.
+  //
+  // Round-robin rather than a fixed quota: it self-balances when a type
+  // has few candidates, and degrades to the old behaviour when only one
+  // type is callable at all.
+  const queues = new Map<string, FirmsTemplate[]>();
+  for (const t of callable) {
+    const q = queues.get(t.facility_type);
+    if (q) q.push(t);
+    else queues.set(t.facility_type, [t]);
+  }
+
+  const lanes = Array.from(queues.values());
+  const picked: FirmsTemplate[] = [];
+  for (let i = 0; picked.length < limit && lanes.some((q) => q.length > 0); i++) {
+    const next = lanes[i % lanes.length].shift();
+    if (next) picked.push(next);
+  }
+
+  // Re-sort for display so the panel still reads most-uncertain first.
+  // Stratification governs the SET that was selected, not its order.
+  return picked.sort(
+    (a, b) =>
+      Math.abs(a.base_rate - 0.5) - Math.abs(b.base_rate - 0.5) ||
+      a.facility_id.localeCompare(b.facility_id),
+  );
 }
 
 export async function loadFastClosingMarkets(
