@@ -118,6 +118,18 @@ interface RunRecord {
   rows_upserted: number;
   ok: boolean;
   error: string | null;
+  // Explicit, NOT left to the column default.
+  //
+  // firms_ingest_runs upserts on (region, satellite, day_covered), so
+  // the row for a given region-day is created once and UPDATED on every
+  // later tick. With ran_at omitted from the payload it kept its
+  // insert-time DEFAULT now() forever, which made the column mean
+  // "first seen" while reading as "last run" — europe/gulf/ru-ua showed
+  // 15:50 UTC hours after they had in fact run at 22:01.
+  //
+  // That is a liveness lie in the one table you consult to find out
+  // whether ingest is alive, so it is sent on every write.
+  ran_at: string;
 }
 
 function ymd(d: Date): string {
@@ -177,6 +189,28 @@ async function handle(req: NextRequest) {
     daysCovered.add(ymd(new Date(today.getTime() - i * 86_400_000)));
   }
 
+  // Write run records for one region×source IMMEDIATELY, rather than
+  // batching every record until after the loop.
+  //
+  // The batched version left no trace at all when a run died partway:
+  // the rows existed only in memory, so a request that failed later
+  // (or was cut off by the client's 110s timeout) wrote nothing and
+  // firms_ingest_runs read as "no runs" rather than "failed runs".
+  // That is how a five-hour outage on 2026-07-18 looked identical to
+  // "the cron was never scheduled" — the table that exists to prove
+  // coverage was silent about its own failure.
+  //
+  // Flushing per combination costs one small upsert per region×source
+  // (≤24 per tick) and means a partial run is still an honest record
+  // of exactly which combinations completed.
+  const flushRuns = async (rows: RunRecord[]) => {
+    if (rows.length === 0) return;
+    const { error } = await supabase
+      .from('firms_ingest_runs')
+      .upsert(rows, { onConflict: 'region,satellite,day_covered' });
+    if (error) errors.push(`ingest_runs: ${error.message}`);
+  };
+
   for (const region of regions) {
     for (const source of FIRMS_SOURCES) {
       attempts++;
@@ -187,17 +221,18 @@ async function handle(req: NextRequest) {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         errors.push(msg);
-        for (const day of daysCovered) {
-          runs.push({
-            region: region.slug,
-            satellite: source,
-            day_covered: day,
-            rows_fetched: 0,
-            rows_upserted: 0,
-            ok: false,
-            error: msg.slice(0, 500),
-          });
-        }
+        const failedRows: RunRecord[] = Array.from(daysCovered).map((day) => ({
+          region: region.slug,
+          satellite: source,
+          day_covered: day,
+          rows_fetched: 0,
+          rows_upserted: 0,
+          ok: false,
+          error: msg.slice(0, 500),
+          ran_at: new Date().toISOString(),
+        }));
+        runs.push(...failedRows);
+        await flushRuns(failedRows);
         continue;
       }
 
@@ -225,25 +260,19 @@ async function handle(req: NextRequest) {
       // Only the days this fetch actually spanned are marked covered.
       const fetchedDays = new Set(detections.map((d) => d.acq_date));
       const marked = fetchedDays.size > 0 ? fetchedDays : daysCovered;
-      for (const day of marked) {
-        runs.push({
-          region: region.slug,
-          satellite: source,
-          day_covered: day,
-          rows_fetched: detections.filter((d) => d.acq_date === day).length,
-          rows_upserted: upserted,
-          ok: true,
-          error: null,
-        });
-      }
+      const okRows: RunRecord[] = Array.from(marked).map((day) => ({
+        region: region.slug,
+        satellite: source,
+        day_covered: day,
+        rows_fetched: detections.filter((d) => d.acq_date === day).length,
+        rows_upserted: upserted,
+        ok: true,
+        error: null,
+        ran_at: new Date().toISOString(),
+      }));
+      runs.push(...okRows);
+      await flushRuns(okRows);
     }
-  }
-
-  if (runs.length > 0) {
-    const { error } = await supabase
-      .from('firms_ingest_runs')
-      .upsert(runs, { onConflict: 'region,satellite,day_covered' });
-    if (error) errors.push(`ingest_runs: ${error.message}`);
   }
 
   // Derive the facility rollup for every day this run touched.
