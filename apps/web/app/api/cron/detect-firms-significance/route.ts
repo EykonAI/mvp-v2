@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
+import { checkShardLiveness } from '@/lib/firms/liveness';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -154,6 +155,26 @@ async function handle(req: NextRequest) {
     }
   }
 
+  // ─── Ingest-shard liveness ───────────────────────────────────────
+  // Piggybacked here rather than given its own Railway service: this
+  // cron is hourly, and it is the natural owner because it is the
+  // CONSUMER of coverage — significance is computed from exactly the
+  // facility-days the shards produce, so a silent shard degrades this
+  // route's output before anyone else's.
+  //
+  // It deliberately does NOT affect `ok` below. See lib/firms/liveness.ts:
+  // a stale shard and a failed detection are different faults and must
+  // stay separately diagnosable. The alert goes to Discord, which a
+  // human reads; the block below keeps it visible in the Railway log.
+  let liveness = null;
+  try {
+    liveness = await checkShardLiveness(supabase);
+    for (const e of liveness.errors) errors.push(`liveness: ${e}`);
+  } catch (e) {
+    // Never let a monitoring bug cost a real significance run.
+    errors.push(`liveness: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
   // A detect failure is not cosmetic. If it fails silently the
   // significance table simply stops growing while ingest keeps
   // reporting green, and every downstream surface degrades to
@@ -174,6 +195,22 @@ async function handle(req: NextRequest) {
       eligible_facilities: eligibleFacilities,
       baseline_days: BASELINE_DAYS,
       min_baseline: MIN_BASELINE,
+      // Ingest-shard health. `unhealthy: []` is the good case; anything
+      // listed here means a region's facilities are going unwatched.
+      liveness: liveness
+        ? {
+            unhealthy: liveness.unhealthy.map((r) => ({
+              region: r.region,
+              severity: r.severity,
+              stale_days: r.staleDays,
+              hours_since_run: r.hoursSinceRun,
+              latest_day_covered: r.latestDayCovered,
+              never_ran: r.neverRan,
+            })),
+            alerted: liveness.alerted,
+            recovered: liveness.recovered,
+          }
+        : null,
       note:
         eligibleFacilities === 0
           ? 'No facility has reached the minimum covered-day baseline yet; ' +

@@ -85,6 +85,17 @@ const ADMIN_SECTIONS: AdminGroup[] = [
       },
     ],
   },
+  {
+    group: 'Operations',
+    links: [
+      {
+        href: '/admin/ingest-health',
+        title: 'Ingest health',
+        glyph: '📡',
+        desc: 'FIRMS shard liveness — which regions are ingesting, and how long a stale one can still be repaired.',
+      },
+    ],
+  },
 ];
 
 export default async function AdminConsolePage() {
