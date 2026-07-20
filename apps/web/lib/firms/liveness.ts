@@ -192,6 +192,38 @@ async function post(text: string): Promise<void> {
 }
 
 /**
+ * READ-ONLY probe: what is each shard's current state?
+ *
+ * Deliberately separate from checkShardLiveness because there are two
+ * kinds of caller and only one of them should have side effects:
+ *
+ *   • the hourly cron ALERTS (posts to Discord, writes dedupe state)
+ *   • the operator console DISPLAYS
+ *
+ * Rendering /admin/ingest-health must never post an alert or advance the
+ * re-alert clock — otherwise opening the page would suppress the next
+ * real alert by 6 hours, and refreshing it would spam the channel. A
+ * dashboard that changes what it measures is not a dashboard.
+ */
+export async function probeShardLiveness(
+  supabase: SupabaseClient,
+  now: Date = new Date(),
+): Promise<{ regions: RegionLiveness[]; errors: string[] }> {
+  // Bounded window: enough to establish recency without scanning the
+  // full history. A region silent for longer than this reads as
+  // never_ran, which is the correct alert either way.
+  const since = ymdUTC(new Date(now.getTime() - 30 * 86_400_000));
+
+  const { data, error } = await supabase
+    .from('firms_ingest_runs')
+    .select('region, day_covered, ok, ran_at')
+    .gte('day_covered', since);
+
+  if (error) return { regions: [], errors: [`liveness query: ${error.message}`] };
+  return { regions: summarise((data ?? []) as RunRow[], now), errors: [] };
+}
+
+/**
  * Probe every configured region, alert on the ones that need it, and
  * clear state for the ones that have recovered.
  *
@@ -207,28 +239,19 @@ export async function checkShardLiveness(
   const alerted: string[] = [];
   const recovered: string[] = [];
 
-  // Bounded window: enough to establish recency without scanning the
-  // full history. A region silent for longer than this reads as
-  // never_ran, which is the correct alert either way.
-  const since = ymdUTC(new Date(now.getTime() - 30 * 86_400_000));
-
-  const { data, error } = await supabase
-    .from('firms_ingest_runs')
-    .select('region, day_covered, ok, ran_at')
-    .gte('day_covered', since);
-
-  if (error) {
+  const probe = await probeShardLiveness(supabase, now);
+  if (probe.errors.length > 0) {
     return {
       checkedAt: now.toISOString(),
       regions: [],
       unhealthy: [],
       alerted,
       recovered,
-      errors: [`liveness query: ${error.message}`],
+      errors: probe.errors,
     };
   }
 
-  const regions = summarise((data ?? []) as RunRow[], now);
+  const regions = probe.regions;
   const unhealthy = regions.filter((r) => r.severity !== 'ok');
   const healthy = regions.filter((r) => r.severity === 'ok');
 
