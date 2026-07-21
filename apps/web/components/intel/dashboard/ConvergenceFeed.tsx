@@ -6,10 +6,18 @@ interface Convergence {
   id: string;
   location: string;
   joint_p_value: number;
+  corroboration_level?: 'single-source' | 'multi-source' | 'sensor-confirmed' | null;
   contributing_anomalies: Array<{ domain: string; label: string } | string>;
   synthesis: string;
   created_at: string;
 }
+
+// Compact corroboration badge — how independent the evidence is.
+const CORROBORATION_BADGE: Record<string, { short: string; colour: string }> = {
+  'sensor-confirmed': { short: 'sensor-confirmed', colour: 'var(--teal)' },
+  'multi-source': { short: 'multi-source', colour: 'var(--violet)' },
+  'single-source': { short: 'reported · single-source', colour: 'var(--amber)' },
+};
 
 interface Payload {
   events: Convergence[];
@@ -144,6 +152,21 @@ export default function ConvergenceFeed({ linkBase = '/briefs/convergence' }: { 
               p &lt; {c.joint_p_value.toFixed(3)}
             </span>
           </header>
+          {!degraded && c.corroboration_level && CORROBORATION_BADGE[c.corroboration_level] && (
+            <span
+              style={{
+                display: 'inline-block',
+                fontFamily: 'var(--f-mono)',
+                fontSize: 8.5,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                color: CORROBORATION_BADGE[c.corroboration_level].colour,
+                marginBottom: 4,
+              }}
+            >
+              {CORROBORATION_BADGE[c.corroboration_level].short}
+            </span>
+          )}
           <p style={{ fontSize: 11, color: 'var(--ink-dim)', lineHeight: 1.5, margin: '4px 0 8px' }}>
             {c.synthesis}
           </p>
@@ -189,11 +212,12 @@ function timeAgo(iso: string): string {
 }
 
 function chipColour(domain: string): string {
-  switch (domain) {
+  switch (domain.toLowerCase()) {
     case 'maritime':    return 'var(--teal)';
     case 'air_traffic': return 'var(--amber)';
     case 'conflict':    return 'var(--red)';
     case 'energy':      return 'var(--green)';
+    case 'thermal':     return 'var(--orange, var(--amber))';
     default:            return 'var(--ink-faint)';
   }
 }
