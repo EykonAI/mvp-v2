@@ -144,3 +144,159 @@ export async function probeFeedHealth(
 
   return { feeds, errors };
 }
+
+// ─── Alerting (the push half) ──────────────────────────────────────
+// probeFeedHealth above is READ-ONLY and drives the /admin/ingest-health
+// page. checkFeedHealth below is its side-effecting sibling — the exact
+// counterpart of checkShardLiveness in lib/firms/liveness.ts, sharing the
+// same dedup discipline and the same Discord webhook — so the two liveness
+// mechanisms behave identically and a reader learns one pattern, not two.
+//
+// Rendering the page must NEVER call this: displaying health must not post
+// an alert or advance the re-alert clock, or opening the page would suppress
+// the next real alert and refreshing it would spam the channel.
+
+// Re-alert cadence for a feed that stays broken. Escalations bypass it.
+const FEED_REALERT_HOURS = Number(process.env.FEED_REALERT_HOURS ?? 6);
+
+export interface FeedHealthReport {
+  checkedAt: string;
+  feeds: FeedHealth[];
+  unhealthy: FeedHealth[];
+  alerted: string[];
+  recovered: string[];
+  errors: string[];
+}
+
+async function post(text: string): Promise<void> {
+  const url = process.env.NEWSJACK_ALERT_WEBHOOK;
+  if (!url) return;
+  try {
+    // Both keys, matching lib/firms/liveness.ts and lib/newsjack/notify.ts —
+    // Slack reads `text`, Discord reads `content`.
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text, content: text }),
+    });
+  } catch {
+    /* fail-soft: an unreachable webhook must never break the host cron */
+  }
+}
+
+function describe(f: FeedHealth): string {
+  const stale = f.hoursStale === null ? 'unreadable' : `${f.hoursStale}h stale`;
+  const latest = f.latest ?? 'no rows';
+  return `${f.label} — ${stale} (newest ${latest}) · threshold warn ${f.warnHours}h / crit ${f.criticalHours}h`;
+}
+
+/**
+ * Probe every live feed, alert on the ones that need it, clear state for the
+ * ones that have recovered. Fail-soft throughout: every failure is collected
+ * into `errors` and returned, never thrown — the host cron has real work of
+ * its own that a monitoring bug must not cost.
+ *
+ * Known limit, stated rather than hidden (identical to firms liveness): this
+ * rides inside a host cron, so if that cron stops firing the probe stops with
+ * it. It guards against one feed dying, not against the scheduler dying — but
+ * a dead host cron at least shows red in Railway, which the silent-feed case
+ * did not.
+ */
+export async function checkFeedHealth(
+  supabase: SupabaseClient,
+  now: Date = new Date(),
+): Promise<FeedHealthReport> {
+  const errors: string[] = [];
+  const alerted: string[] = [];
+  const recovered: string[] = [];
+
+  const probe = await probeFeedHealth(supabase, now);
+  // A probe error means a specific feed was marked critical (see above), which
+  // is itself alertable — so we do NOT bail here the way firms liveness does on
+  // a whole-query failure; we carry the errors through and still alert.
+  errors.push(...probe.errors);
+
+  const feeds = probe.feeds;
+  const unhealthy = feeds.filter((f) => f.severity !== 'ok');
+  const healthy = feeds.filter((f) => f.severity === 'ok');
+
+  const { data: stateRows, error: stateErr } = await supabase
+    .from('live_feed_alerts')
+    .select('feed, severity, last_alerted_at');
+  if (stateErr) errors.push(`feed-alert state: ${stateErr.message}`);
+
+  const state = new Map(
+    ((stateRows ?? []) as Array<{ feed: string; severity: string; last_alerted_at: string }>).map(
+      (r) => [r.feed, r],
+    ),
+  );
+
+  for (const f of unhealthy) {
+    const prior = state.get(f.key);
+    const escalated = prior !== undefined && prior.severity !== f.severity;
+    const dueAgain =
+      prior !== undefined &&
+      now.getTime() - Date.parse(prior.last_alerted_at) >= FEED_REALERT_HOURS * 3_600_000;
+
+    if (prior !== undefined && !escalated && !dueAgain) continue;
+
+    const tag = f.severity === 'critical' ? 'CRITICAL' : 'WARN';
+    const headline =
+      f.severity === 'critical'
+        ? 'Live feed down — fresh data has stopped landing'
+        : 'Live feed going stale';
+    const remedy =
+      `Fix here: ${f.source}\n` +
+      `A Railway worker showing "Online" or a cron showing "Completed" is NOT proof ` +
+      `it is producing rows — check max(${'ingested_at'}) on the feed's table.`;
+
+    await post(`[${tag}] ${headline}\n${describe(f)}\n${remedy}`);
+    alerted.push(f.key);
+
+    const { error: upErr } = await supabase.from('live_feed_alerts').upsert(
+      {
+        feed: f.key,
+        severity: f.severity,
+        hours_stale: f.hoursStale,
+        last_alerted_at: now.toISOString(),
+      },
+      { onConflict: 'feed' },
+    );
+    if (upErr) errors.push(`feed-alert upsert ${f.key}: ${upErr.message}`);
+  }
+
+  // Recovery: clear state and say so once, so the channel closes the loop
+  // rather than leaving the last word as an alarm.
+  const toClear = healthy.map((f) => f.key).filter((key) => state.has(key));
+  if (toClear.length > 0) {
+    const { error: delErr } = await supabase
+      .from('live_feed_alerts')
+      .delete()
+      .in('feed', toClear);
+    if (delErr) errors.push(`feed-alert clear: ${delErr.message}`);
+    else {
+      recovered.push(...toClear);
+      const labels = toClear
+        .map((key) => feeds.find((f) => f.key === key)?.label ?? key)
+        .join(', ');
+      await post(`[RECOVERED] Live feed(s) landing again: ${labels}`);
+    }
+  }
+
+  // Sweep rows for feed keys no longer in FEEDS, so a retired feed cannot
+  // leave state that suppresses a future alert if it returns.
+  const known = new Set(FEEDS.map((f) => f.key));
+  const orphans = Array.from(state.keys()).filter((key) => !known.has(key));
+  if (orphans.length > 0) {
+    await supabase.from('live_feed_alerts').delete().in('feed', orphans);
+  }
+
+  return {
+    checkedAt: now.toISOString(),
+    feeds,
+    unhealthy,
+    alerted,
+    recovered,
+    errors,
+  };
+}
