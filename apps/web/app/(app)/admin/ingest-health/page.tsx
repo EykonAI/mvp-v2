@@ -5,20 +5,18 @@ import { getCurrentUser } from '@/lib/auth/session';
 import { isFounder } from '@/lib/admin/access';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { probeShardLiveness, type RegionLiveness } from '@/lib/firms/liveness';
+import { probeFeedHealth, SEVERITY_RANK, type FeedHealth } from '@/lib/monitoring/feed-health';
 
-// /admin/ingest-health — founder-only. The standing view of FIRMS ingest
-// shard health, companion to the Discord alert fired hourly by
-// /api/cron/detect-firms-significance.
+// /admin/ingest-health — founder-only. The standing view of ingest health:
+//   • Live data feeds (AIS / GDELT / ADS-B) — freshness of max(ingested_at)
+//   • Thermal shards (FIRMS) — per-run coverage from firms_ingest_runs
 //
-// Why both: the alert tells you the MOMENT something breaks; this page
-// answers "is everything fine right now?" whenever you think to ask,
-// without reading a channel backlog. The failure this exists for
-// (cron-ingest-firms-na created with no schedule, silent for 43h,
-// 2026-07-20) was invisible on every dashboard the platform had.
+// Companion to the Discord alert fired hourly for FIRMS shards. The two feed
+// mechanisms differ on purpose (see lib/monitoring/feed-health.ts): shards
+// need per-run coverage records; feeds just need "is fresh data landing?".
 //
-// READ-ONLY by construction: uses probeShardLiveness, never
-// checkShardLiveness. Rendering a dashboard must not post alerts or
-// advance the re-alert clock — see lib/firms/liveness.ts.
+// READ-ONLY by construction: both probes are pure reads. Rendering a
+// dashboard must never post an alert or advance a re-alert clock.
 
 export const metadata: Metadata = {
   title: 'Ingest health — eYKON.ai',
@@ -39,48 +37,66 @@ function ago(hours: number | null): string {
   return `${Math.round(hours / 24)}d ago`;
 }
 
-function Row({ r }: { r: RegionLiveness }) {
-  const tone = TONE[r.severity] ?? TONE.ok;
+function Badge({ severity }: { severity: string }) {
+  const tone = TONE[severity] ?? TONE.ok;
+  return (
+    <span
+      style={{
+        fontFamily: 'var(--f-mono)',
+        fontSize: 10,
+        letterSpacing: '0.1em',
+        color: tone.fg,
+        border: `1px solid ${tone.fg}`,
+        borderRadius: 4,
+        padding: '2px 7px',
+      }}
+    >
+      {tone.label}
+    </span>
+  );
+}
+
+const TH: React.CSSProperties = {
+  textAlign: 'left',
+  padding: '0 10px 8px',
+  fontFamily: 'var(--f-mono)',
+  fontSize: 10,
+  letterSpacing: '0.14em',
+  textTransform: 'uppercase',
+  color: 'var(--teal)',
+  fontWeight: 400,
+};
+const TD: React.CSSProperties = { padding: '9px 10px', fontSize: 12.5 };
+
+function FeedRow({ f }: { f: FeedHealth }) {
   return (
     <tr style={{ borderTop: '1px solid var(--rule-soft)' }}>
-      <td style={{ padding: '9px 10px', fontFamily: 'var(--f-mono)', fontSize: 12.5 }}>
-        {r.region}
+      <td style={{ ...TD, fontFamily: 'var(--f-mono)' }}>{f.label}</td>
+      <td style={TD}>
+        <Badge severity={f.severity} />
       </td>
-      <td style={{ padding: '9px 10px' }}>
-        <span
-          style={{
-            fontFamily: 'var(--f-mono)',
-            fontSize: 10,
-            letterSpacing: '0.1em',
-            color: tone.fg,
-            border: `1px solid ${tone.fg}`,
-            borderRadius: 4,
-            padding: '2px 7px',
-          }}
-        >
-          {tone.label}
-        </span>
+      <td style={{ ...TD, color: f.severity === 'ok' ? 'var(--ink-dim)' : 'var(--ink)' }}>
+        {ago(f.hoursStale)}
       </td>
-      <td
-        style={{
-          padding: '9px 10px',
-          fontSize: 12.5,
-          color: r.severity === 'ok' ? 'var(--ink-dim)' : 'var(--ink)',
-        }}
-      >
+      <td style={{ ...TD, color: 'var(--ink-dim)' }}>{f.source}</td>
+    </tr>
+  );
+}
+
+function ShardRow({ r }: { r: RegionLiveness }) {
+  return (
+    <tr style={{ borderTop: '1px solid var(--rule-soft)' }}>
+      <td style={{ ...TD, fontFamily: 'var(--f-mono)' }}>{r.region}</td>
+      <td style={TD}>
+        <Badge severity={r.severity} />
+      </td>
+      <td style={{ ...TD, color: r.severity === 'ok' ? 'var(--ink-dim)' : 'var(--ink)' }}>
         {ago(r.hoursSinceRun)}
       </td>
-      <td
-        style={{
-          padding: '9px 10px',
-          fontFamily: 'var(--f-mono)',
-          fontSize: 12,
-          color: 'var(--ink-dim)',
-        }}
-      >
+      <td style={{ ...TD, fontFamily: 'var(--f-mono)', color: 'var(--ink-dim)' }}>
         {r.latestDayCovered ?? '—'}
       </td>
-      <td style={{ padding: '9px 10px', fontSize: 12.5, color: 'var(--ink-dim)' }}>
+      <td style={{ ...TD, color: 'var(--ink-dim)' }}>
         {r.neverRan ? 'never ingested' : `${r.staleDays}d behind`}
       </td>
     </tr>
@@ -93,15 +109,25 @@ export default async function IngestHealthPage() {
   if (!isFounder(user)) redirect('/app');
 
   const supabase = createServerSupabase();
-  const { regions, errors } = await probeShardLiveness(supabase);
+  const [{ feeds, errors: feedErrors }, { regions, errors: shardErrors }] = await Promise.all([
+    probeFeedHealth(supabase),
+    probeShardLiveness(supabase),
+  ]);
 
-  const bad = regions.filter((r) => r.severity !== 'ok');
-  const worst = bad.some((r) => r.severity === 'critical')
+  const errors = [...feedErrors, ...shardErrors];
+  const allSeverities = [...feeds.map((f) => f.severity), ...regions.map((r) => r.severity)];
+  const worst = allSeverities.includes('critical')
     ? 'critical'
-    : bad.length > 0
+    : allSeverities.includes('warn')
       ? 'warn'
       : 'ok';
   const tone = TONE[worst];
+  const badCount = allSeverities.filter((s) => s !== 'ok').length;
+
+  const sortedFeeds = [...feeds].sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
+  const sortedShards = [...regions].sort(
+    (a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || a.region.localeCompare(b.region),
+  );
 
   return (
     <section
@@ -132,11 +158,12 @@ export default async function IngestHealthPage() {
       >
         Ingest health
       </h1>
-      <p style={{ color: 'var(--ink-dim)', fontSize: 13.5, marginTop: 8, maxWidth: 660 }}>
-        FIRMS thermal shards — the only feed carrying per-run coverage records
-        (<code style={{ fontFamily: 'var(--f-mono)' }}>firms_ingest_runs</code>), so the only one
-        whose liveness can be stated rather than guessed. Other feeds are not shown here rather
-        than shown as healthy.
+      <p style={{ color: 'var(--ink-dim)', fontSize: 13.5, marginTop: 8, maxWidth: 680 }}>
+        Two questions, two mechanisms. <strong>Live feeds</strong> answer &ldquo;is fresh data still
+        landing?&rdquo; from <code style={{ fontFamily: 'var(--f-mono)' }}>max(ingested_at)</code> on
+        the table each writes. <strong>Thermal shards</strong> answer &ldquo;was each region
+        watched?&rdquo; from per-run coverage records. A green cron or an &ldquo;Online&rdquo; worker
+        is never proof on its own — this reads the data itself.
       </p>
 
       <div
@@ -151,15 +178,11 @@ export default async function IngestHealthPage() {
           gap: 12,
         }}
       >
-        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 12, color: tone.fg }}>
-          {tone.label}
-        </span>
+        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 12, color: tone.fg }}>{tone.label}</span>
         <span style={{ fontSize: 13.5 }}>
           {worst === 'ok'
-            ? `All ${regions.length} shards ingesting normally.`
-            : `${bad.length} of ${regions.length} shards need attention: ${bad
-                .map((r) => r.region)
-                .join(', ')}.`}
+            ? `All ${feeds.length} feeds and ${regions.length} shards healthy.`
+            : `${badCount} of ${feeds.length + regions.length} ingest paths need attention.`}
         </span>
       </div>
 
@@ -169,37 +192,63 @@ export default async function IngestHealthPage() {
         </p>
       )}
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 14 }}>
+      {/* ── Live data feeds ─────────────────────────────────────── */}
+      <h2
+        style={{
+          fontFamily: 'var(--f-mono)',
+          fontSize: 11,
+          letterSpacing: '0.16em',
+          textTransform: 'uppercase',
+          color: 'var(--teal)',
+          margin: '26px 0 6px',
+        }}
+      >
+        Live data feeds
+      </h2>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr>
-            {['Shard', 'State', 'Last run', 'Newest day covered', 'Coverage'].map((h) => (
-              <th
-                key={h}
-                style={{
-                  textAlign: 'left',
-                  padding: '0 10px 8px',
-                  fontFamily: 'var(--f-mono)',
-                  fontSize: 10,
-                  letterSpacing: '0.14em',
-                  textTransform: 'uppercase',
-                  color: 'var(--teal)',
-                  fontWeight: 400,
-                }}
-              >
+            {['Feed', 'State', 'Last ingest', 'Source (fix here)'].map((h) => (
+              <th key={h} style={TH}>
                 {h}
               </th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {[...regions]
-            .sort((a, b) => {
-              const rank = { critical: 0, warn: 1, ok: 2 } as const;
-              return rank[a.severity] - rank[b.severity] || a.region.localeCompare(b.region);
-            })
-            .map((r) => (
-              <Row key={r.region} r={r} />
+          {sortedFeeds.map((f) => (
+            <FeedRow key={f.key} f={f} />
+          ))}
+        </tbody>
+      </table>
+
+      {/* ── Thermal shards (FIRMS) ──────────────────────────────── */}
+      <h2
+        style={{
+          fontFamily: 'var(--f-mono)',
+          fontSize: 11,
+          letterSpacing: '0.16em',
+          textTransform: 'uppercase',
+          color: 'var(--teal)',
+          margin: '30px 0 6px',
+        }}
+      >
+        Thermal shards (FIRMS)
+      </h2>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr>
+            {['Shard', 'State', 'Last run', 'Newest day covered', 'Coverage'].map((h) => (
+              <th key={h} style={TH}>
+                {h}
+              </th>
             ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sortedShards.map((r) => (
+            <ShardRow key={r.region} r={r} />
+          ))}
         </tbody>
       </table>
 
@@ -215,21 +264,25 @@ export default async function IngestHealthPage() {
         }}
       >
         <strong style={{ color: 'var(--ink)' }}>Reading this page.</strong>{' '}
-        <span style={{ color: TONE.warn.fg }}>WARN</span> = the shard has stopped running; the data
-        is still fully recoverable, so re-run it.{' '}
-        <span style={{ color: TONE.critical.fg }}>CRITICAL</span> = its newest covered day is 2+
-        days behind, meaning the oldest missing day is leaving the trailing 2-day FIRMS NRT window
-        and is about to become <em>permanently</em> unrecoverable — which would put a hole in the
-        coverage record that <code style={{ fontFamily: 'var(--f-mono)' }}>went_dark</code> depends
-        on.
+        <span style={{ color: TONE.warn.fg }}>WARN</span> = getting stale, check it;{' '}
+        <span style={{ color: TONE.critical.fg }}>CRITICAL</span> = unambiguously broken. Feed
+        thresholds match each feed&rsquo;s normal cadence (ADS-B tight, AIS loose). For a shard,
+        CRITICAL additionally means its oldest missing day is leaving the 2-day FIRMS window and is
+        about to become <em>permanently</em> unrecoverable.
         <br />
         <br />
-        <strong style={{ color: 'var(--ink)' }}>To repair a shard:</strong> re-run it with{' '}
+        <strong style={{ color: 'var(--ink)' }}>Alerting.</strong> FIRMS shards also ping Discord
+        hourly. Live feeds are page-only for now (thresholds are still being watched against real
+        cadence) — wiring them to the same webhook is the intended next step once the numbers here
+        prove stable.
+        <br />
+        <br />
+        <strong style={{ color: 'var(--ink)' }}>To repair a shard:</strong>{' '}
         <code style={{ fontFamily: 'var(--f-mono)' }}>
           POST /api/cron/ingest-firms?region=&lt;slug&gt;
         </code>{' '}
-        (Bearer CRON_SECRET), then check the Railway service actually has a Cron Schedule — a
-        service with none shows &ldquo;Completed&rdquo; and never fires again.
+        (Bearer CRON_SECRET), then check the Railway service has a Cron Schedule — one with none
+        shows &ldquo;Completed&rdquo; and never fires again.
       </div>
     </section>
   );
