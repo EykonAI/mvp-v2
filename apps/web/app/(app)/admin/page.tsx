@@ -92,7 +92,7 @@ const ADMIN_SECTIONS: AdminGroup[] = [
         href: '/admin/ingest-health',
         title: 'Ingest health',
         glyph: '📡',
-        desc: 'FIRMS shard liveness — which regions are ingesting, and how long a stale one can still be repaired.',
+        desc: 'Live feed freshness (AIS · GDELT · ADS-B) + FIRMS shard liveness — is fresh data actually landing, and can a stale shard still be repaired.',
       },
     ],
   },
