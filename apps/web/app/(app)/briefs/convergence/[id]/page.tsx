@@ -12,14 +12,34 @@ export const dynamic = 'force-dynamic';
 const backLink: CSSProperties = { fontFamily: 'var(--f-mono)', fontSize: 10.5, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-dim)', textDecoration: 'none' };
 
 function chipColour(domain: string): string {
-  switch (domain) {
+  switch (domain.toLowerCase()) {
     case 'maritime': return 'var(--teal)';
     case 'air_traffic': return 'var(--amber)';
     case 'conflict': return 'var(--red)';
     case 'energy': return 'var(--green)';
+    case 'thermal': return 'var(--orange, var(--amber))';
     default: return 'var(--ink-faint)';
   }
 }
+
+// How independent the evidence is, and what it is honest to claim from it.
+const CORROBORATION: Record<string, { label: string; colour: string; caption: string }> = {
+  'sensor-confirmed': {
+    label: 'Sensor-confirmed',
+    colour: 'var(--teal)',
+    caption: 'A physical sensor (FIRMS thermal or AIS maritime) independently agrees with the reported activity.',
+  },
+  'multi-source': {
+    label: 'Multi-source',
+    colour: 'var(--violet)',
+    caption: 'Two or more independent source classes converge here.',
+  },
+  'single-source': {
+    label: 'Single-source',
+    colour: 'var(--amber)',
+    caption: 'All signals are media-derived (ACLED/GDELT) and may stem from one news wave — this is REPORTED activity, not physically confirmed.',
+  },
+};
 
 function timeAgo(iso: string): string {
   const ms = Date.now() - Date.parse(iso);
@@ -54,6 +74,29 @@ export default async function ConvergenceDetailPage({ params }: { params: { id: 
       <div style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--ink-faint)', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 16 }}>
         {timeAgo(c.createdAt)}
       </div>
+
+      {c.corroborationLevel && CORROBORATION[c.corroborationLevel] && (
+        <div style={{ marginBottom: 16 }}>
+          <span
+            style={{
+              display: 'inline-block',
+              fontFamily: 'var(--f-mono)',
+              fontSize: 10,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              padding: '3px 8px',
+              border: `1px solid ${CORROBORATION[c.corroborationLevel].colour}`,
+              color: CORROBORATION[c.corroborationLevel].colour,
+              borderRadius: 2,
+            }}
+          >
+            {CORROBORATION[c.corroborationLevel].label}
+          </span>
+          <p style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--ink-dim)', lineHeight: 1.6, margin: '6px 0 0' }}>
+            {CORROBORATION[c.corroborationLevel].caption}
+          </p>
+        </div>
+      )}
 
       {c.lat != null && c.lon != null && (
         <div style={{ marginBottom: 18 }}>

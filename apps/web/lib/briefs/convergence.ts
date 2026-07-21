@@ -15,6 +15,8 @@ export interface ConvergenceBbox {
   lonMin: number;
   lonMax: number;
 }
+export type CorroborationLevel = 'single-source' | 'multi-source' | 'sensor-confirmed';
+
 export interface ConvergenceDetail {
   id: string;
   location: string;
@@ -22,6 +24,10 @@ export interface ConvergenceDetail {
   lon: number | null;
   bbox: ConvergenceBbox | null;
   jointPValue: number;
+  // How independent the contributing evidence is. null = pre-088 event,
+  // recorded before corroboration was tracked.
+  corroborationLevel: CorroborationLevel | null;
+  sourceClasses: string[];
   anomalies: ConvergenceAnomaly[];
   synthesis: string;
   createdAt: string;
@@ -32,6 +38,8 @@ interface ConvRow {
   location: string | null;
   bounding_box: { lat_min?: number; lat_max?: number; lon_min?: number; lon_max?: number } | null;
   joint_p_value: number | string | null;
+  corroboration_level: CorroborationLevel | null;
+  source_classes: string[] | null;
   contributing_anomalies: Array<{ domain?: string; label?: string } | string> | null;
   synthesis: string | null;
   created_at: string;
@@ -49,7 +57,7 @@ export async function loadConvergence(id: string): Promise<ConvergenceDetail | n
     const supabase = createServerSupabase();
     const { data } = await supabase
       .from('convergence_events')
-      .select('id, location, bounding_box, joint_p_value, contributing_anomalies, synthesis, created_at')
+      .select('id, location, bounding_box, joint_p_value, corroboration_level, source_classes, contributing_anomalies, synthesis, created_at')
       .eq('id', id)
       .maybeSingle();
     if (!data) return null;
@@ -87,6 +95,8 @@ export async function loadConvergence(id: string): Promise<ConvergenceDetail | n
       lon,
       bbox,
       jointPValue: r.joint_p_value != null ? Number(r.joint_p_value) : 0,
+      corroborationLevel: r.corroboration_level ?? null,
+      sourceClasses: Array.isArray(r.source_classes) ? r.source_classes : [],
       anomalies,
       synthesis: r.synthesis ?? '',
       createdAt: r.created_at,

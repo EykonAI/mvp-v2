@@ -17,6 +17,24 @@ const CELL_DEG = 10;
 const CELL_HALF = CELL_DEG / 2;
 const FLAG_LIMIT = 2000; // 72h of flags fits easily; headroom so an energy flood can't truncate the rare conflict/maritime flags.
 
+// Independence, not domain count, is what makes a convergence mean anything.
+// Conflict (ACLED) and Energy (GDELT) are BOTH media-derived: one news wave
+// lights up both, so "two domains" can be one source of evidence. Thermal
+// (FIRMS radiometry) and Maritime (AIS) are PHYSICALLY independent witnesses —
+// a satellite hot pixel and a vessel track don't move with a headline. The
+// score below counts distinct SOURCE CLASSES, so redundant media flags no
+// longer inflate significance, and a sensor agreeing with the news is what
+// actually earns a low p. A domain not in this map counts as its own class.
+const SOURCE_CLASS: Record<string, string> = {
+  Conflict: 'media',
+  Energy: 'media',
+  Maritime: 'sensor-ais',
+  Thermal: 'sensor-firms',
+};
+function sourceClass(domain: string): string {
+  return SOURCE_CLASS[domain] ?? `other:${domain}`;
+}
+
 /**
  * Compute-convergences · every 15 min. Clusters anomaly_flags from the last 72h
  * into 10° cells (≥2 distinct domains) and writes convergence_events.
@@ -73,11 +91,24 @@ export async function POST(req: NextRequest) {
   const writes: any[] = [];
 
   for (const [key, cluster] of bins) {
-    const domains = new Set(cluster.map(c => c.domain));
-    if (domains.size < 2) continue; // need at least two independent domains for a convergence
+    const domains = new Set<string>(cluster.map(c => c.domain));
+    if (domains.size < 2) continue; // need at least two distinct domains to even consider a convergence
     if (occupied.has(key)) continue; // already emitted a convergence for this cell in-window
     occupied.add(key);
-    const joint_p_value = Math.min(0.5, 0.3 / cluster.length);
+
+    // Independence-weighted score. Distinct SOURCE CLASSES — not the raw
+    // flag count — drive the p-value, so ten correlated media flags no
+    // longer read as stronger than two genuinely independent signals.
+    //   K = 1 → 0.30  (single-source: same evidence twice; barely a convergence)
+    //   K = 2 → 0.15
+    //   K = 3 → 0.10
+    const classSet = new Set<string>(Array.from(domains).map(sourceClass));
+    const classes = Array.from(classSet).sort();
+    const K = classSet.size;
+    const joint_p_value = Math.min(0.5, 0.3 / Math.max(K, 1));
+    const hasSensor = classes.some(c => c.startsWith('sensor'));
+    const corroboration_level =
+      K >= 2 && hasSensor ? 'sensor-confirmed' : K >= 2 ? 'multi-source' : 'single-source';
     const [lat, lon] = key.split(':').map(Number);
 
     let synthesis = `Cluster of ${cluster.length} anomalies across ${Array.from(domains).join(', ')} within a ${CELL_DEG}°×${CELL_DEG}° cell around (${lat + CELL_HALF}, ${lon + CELL_HALF}).`;
@@ -86,11 +117,19 @@ export async function POST(req: NextRequest) {
       const r = await anthropic.messages.create({
         model: 'claude-opus-4-7',
         max_tokens: 160,
-        system: 'You are the eYKON Supervisor. Write one short English sentence describing what the cluster of anomalies means, in the voice of a senior analyst. No hedging, no lists.',
+        system:
+          'You are the eYKON Supervisor. Write one short English sentence describing what the cluster of anomalies means, in the voice of a senior analyst. No hedging, no lists. ' +
+          'corroboration_level tells you how independent the evidence is: "single-source" means every signal is media-derived (ACLED/GDELT) and could all stem from one news wave — say the activity is REPORTED, do not imply physical confirmation; ' +
+          '"sensor-confirmed" means a physical sensor (FIRMS thermal or AIS maritime) independently agrees — you may state the signals corroborate.',
         messages: [
           {
             role: 'user',
-            content: JSON.stringify({ bbox: { lat, lon, size: CELL_DEG }, flags: cluster.slice(0, 6) }),
+            content: JSON.stringify({
+              bbox: { lat, lon, size: CELL_DEG },
+              corroboration_level,
+              source_classes: classes,
+              flags: cluster.slice(0, 6),
+            }),
           },
         ],
       });
@@ -104,6 +143,8 @@ export async function POST(req: NextRequest) {
       location: `(${(lat + CELL_HALF).toFixed(1)}, ${(lon + CELL_HALF).toFixed(1)})`,
       bounding_box: { lat_min: lat, lat_max: lat + CELL_DEG, lon_min: lon, lon_max: lon + CELL_DEG },
       joint_p_value,
+      corroboration_level,
+      source_classes: classes,
       contributing_anomalies: cluster.slice(0, 6).map(f => ({ id: f.id, domain: f.domain, label: f.flag_type })),
       synthesis,
     });
@@ -113,5 +154,13 @@ export async function POST(req: NextRequest) {
     await supabase.from('convergence_events').insert(writes);
   }
 
-  return NextResponse.json({ ok: true, clusters: writes.length });
+  // Corroboration breakdown so a Railway log shows at a glance whether the
+  // run produced genuinely sensor-confirmed convergences or just correlated
+  // media clusters.
+  const byCorroboration = writes.reduce<Record<string, number>>((acc, w) => {
+    acc[w.corroboration_level] = (acc[w.corroboration_level] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  return NextResponse.json({ ok: true, clusters: writes.length, by_corroboration: byCorroboration });
 }
