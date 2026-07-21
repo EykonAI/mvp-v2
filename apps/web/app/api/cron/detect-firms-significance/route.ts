@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { checkShardLiveness } from '@/lib/firms/liveness';
+import { checkFeedHealth } from '@/lib/monitoring/feed-health';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -297,6 +298,27 @@ async function handle(req: NextRequest) {
     errors.push(`liveness: ${e instanceof Error ? e.message : String(e)}`);
   }
 
+  // ─── Live-feed freshness alerting (AIS / GDELT / ADS-B) ───────────
+  // The push half of /admin/ingest-health, hosted here for the same
+  // reason as shard liveness: this is the hourly monitoring cron, and
+  // one place for both liveness mechanisms keeps them a single pattern.
+  // Sibling of checkShardLiveness — probes max(ingested_at) per feed,
+  // posts to the same Discord webhook with the same dedup discipline.
+  // Same fault model as shard liveness: an UNHEALTHY feed does NOT fail
+  // this run — that is normal signal, and it alerts to Discord. Only a
+  // monitoring-level error (a feed table we cannot even read) surfaces
+  // into `errors` and turns the run red, exactly as a liveness query
+  // error does. A dead vessel feed and a failed significance detection
+  // stay separately diagnosable: the first is a Discord alert, the
+  // second is a red Railway run.
+  let feedHealth = null;
+  try {
+    feedHealth = await checkFeedHealth(supabase);
+    for (const e of feedHealth.errors) errors.push(`feed-health: ${e}`);
+  } catch (e) {
+    errors.push(`feed-health: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
   // A detect failure is not cosmetic. If it fails silently the
   // significance table simply stops growing while ingest keeps
   // reporting green, and every downstream surface degrades to
@@ -339,6 +361,21 @@ async function handle(req: NextRequest) {
             })),
             alerted: liveness.alerted,
             recovered: liveness.recovered,
+          }
+        : null,
+      // Live-feed health (AIS/GDELT/ADS-B). `unhealthy: []` is the good
+      // case; anything here is a feed that has stopped landing fresh rows.
+      // alerted/recovered list the feeds that were pushed to Discord this run.
+      feed_health: feedHealth
+        ? {
+            unhealthy: feedHealth.unhealthy.map((f) => ({
+              feed: f.key,
+              severity: f.severity,
+              hours_stale: f.hoursStale,
+              latest: f.latest,
+            })),
+            alerted: feedHealth.alerted,
+            recovered: feedHealth.recovered,
           }
         : null,
       note:
