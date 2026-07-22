@@ -35,6 +35,15 @@ interface ProjectSummary {
   pinned: boolean;
 }
 
+interface InsightRow {
+  id: string;
+  title: string;
+  body: string;
+  session_id: string | null;
+  project_id: string | null;
+  created_at: string;
+}
+
 interface ThreadMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -99,6 +108,12 @@ export default function AnalystWorkspace({ tier }: { tier: string }) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameText, setRenameText] = useState('');
 
+  // Insights reading room (Pro+): 'chat' shows the thread, 'insights'
+  // the saved-insight list for the current project scope.
+  const [view, setView] = useState<'chat' | 'insights'>('chat');
+  const [insights, setInsights] = useState<InsightRow[]>([]);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -129,6 +144,36 @@ export default function AnalystWorkspace({ tier }: { tier: string }) {
       /* non-fatal */
     }
   }, []);
+
+  const loadInsights = useCallback(async (projectId: string | null) => {
+    setInsightsLoading(true);
+    try {
+      const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+      const res = await fetch(`/api/analyst/insights${qs}`, { cache: 'no-store' });
+      if (!res.ok) { setInsights([]); return; }
+      const data = await res.json();
+      setInsights(data.insights ?? []);
+    } catch {
+      setInsights([]);
+    } finally {
+      setInsightsLoading(false);
+    }
+  }, []);
+
+  // Refresh the reading room when it's open and the project scope moves.
+  useEffect(() => {
+    if (view === 'insights') void loadInsights(projectFilter);
+  }, [view, projectFilter, loadInsights]);
+
+  async function removeInsight(id: string) {
+    await fetch(`/api/analyst/insights/${id}`, { method: 'DELETE' }).catch(() => {});
+    setInsights((xs) => xs.filter((x) => x.id !== id));
+  }
+
+  function exportDossier() {
+    if (!projectFilter) return;
+    window.open(`/api/analyst/projects/${projectFilter}/export`, '_blank');
+  }
 
   useEffect(() => {
     if (gated) return;
@@ -430,6 +475,12 @@ export default function AnalystWorkspace({ tier }: { tier: string }) {
                 <ProjectChip key={p.id} label={p.name} active={projectFilter === p.id} onClick={() => setProjectFilter(p.id)} />
               ))}
             </div>
+            {projectFilter && (
+              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                <button onClick={() => setView('insights')} style={miniBtn} title="Read this project's saved insights">Insights</button>
+                <button onClick={exportDossier} style={miniBtn} title="Compile insights + sessions into one PDF dossier">Dossier ↓</button>
+              </div>
+            )}
             {newProjectOpen && (
               <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <input value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} placeholder="Project name (e.g. Red Sea shipping)"
@@ -494,6 +545,13 @@ export default function AnalystWorkspace({ tier }: { tier: string }) {
           <span style={{ ...MONO, fontSize: 10, color: 'var(--ink-dim)' }}>{activeSession ? activeSession.title : 'New session'}</span>
 
           <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {/* Chat / Insights view toggle (Pro+) */}
+            {isPro && (
+              <span style={{ display: 'inline-flex', border: '1px solid var(--rule)', borderRadius: 2, overflow: 'hidden' }}>
+                <button onClick={() => setView('chat')} style={{ ...MONO, fontSize: 9.5, padding: '4px 8px', border: 'none', cursor: 'pointer', background: view === 'chat' ? 'var(--teal)' : 'transparent', color: view === 'chat' ? 'var(--bg-void)' : 'var(--ink-dim)' }}>Chat</button>
+                <button onClick={() => setView('insights')} style={{ ...MONO, fontSize: 9.5, padding: '4px 8px', border: 'none', cursor: 'pointer', background: view === 'insights' ? 'var(--teal)' : 'transparent', color: view === 'insights' ? 'var(--bg-void)' : 'var(--ink-dim)' }}>Insights</button>
+              </span>
+            )}
             {/* Move-to-project (Pro+, active session) */}
             {isPro && activeId && projects.length > 0 && (
               <select value={activeSession?.project_id ?? ''} onChange={(e) => void assignProject(e.target.value || null)}
@@ -522,6 +580,17 @@ export default function AnalystWorkspace({ tier }: { tier: string }) {
           </span>
         </div>
 
+        {view === 'insights' ? (
+          <InsightsRoom
+            insights={insights}
+            loading={insightsLoading}
+            scopeName={projectFilter ? projects.find((p) => p.id === projectFilter)?.name ?? null : null}
+            onOpenSession={(sid) => { setView('chat'); void openSession(sid); }}
+            onDelete={(id) => void removeInsight(id)}
+            onExportDossier={projectFilter ? exportDossier : null}
+          />
+        ) : (
+        <>
         {/* Thread */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px' }}>
           {threadLoading && <div style={{ ...MONO, fontSize: 10, color: 'var(--ink-faint)' }}>Loading thread…</div>}
@@ -586,7 +655,69 @@ export default function AnalystWorkspace({ tier }: { tier: string }) {
             </button>
           </div>
         </div>
+        </>
+        )}
       </main>
+    </div>
+  );
+}
+
+function InsightsRoom({
+  insights,
+  loading,
+  scopeName,
+  onOpenSession,
+  onDelete,
+  onExportDossier,
+}: {
+  insights: InsightRow[];
+  loading: boolean;
+  scopeName: string | null;
+  onOpenSession: (sessionId: string) => void;
+  onDelete: (id: string) => void;
+  onExportDossier: (() => void) | null;
+}) {
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px' }}>
+      <div style={{ maxWidth: 780, margin: '0 auto' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 4 }}>
+          <span style={{ fontFamily: 'var(--f-display)', fontSize: 17 }}>Insights</span>
+          <span style={{ ...MONO, fontSize: 10, color: 'var(--ink-faint)' }}>{scopeName ? scopeName : 'All projects'}</span>
+          {onExportDossier && (
+            <button onClick={onExportDossier} style={{ ...MONO, marginLeft: 'auto', fontSize: 9.5, padding: '4px 8px', borderRadius: 2, cursor: 'pointer', border: '1px solid var(--rule)', background: 'transparent', color: 'var(--ink-dim)' }}>
+              Export dossier ↓
+            </button>
+          )}
+        </div>
+        <p style={{ ...MONO, fontSize: 9, color: 'var(--ink-faint)', marginBottom: 16 }}>
+          Findings you saved from answers · the raw material of the project dossier
+        </p>
+
+        {loading && <div style={{ ...MONO, fontSize: 10, color: 'var(--ink-faint)' }}>Loading insights…</div>}
+        {!loading && insights.length === 0 && (
+          <div style={{ color: 'var(--ink-dim)', fontSize: 13.5, lineHeight: 1.6, padding: '30px 0' }}>
+            No insights yet{scopeName ? ' in this project' : ''}. In a chat, use “+ save insight” on any answer to pin it here.
+          </div>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {insights.map((ins) => (
+            <div key={ins.id} style={{ border: '1px solid var(--rule)', borderRadius: 3, padding: '12px 14px', background: 'var(--bg-raised)' }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 500, lineHeight: 1.35, color: 'var(--ink)' }}>{ins.title}</span>
+                <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {ins.session_id && (
+                    <button onClick={() => onOpenSession(ins.session_id as string)} title="Open the source session" style={{ ...MONO, fontSize: 9, background: 'none', border: 'none', color: 'var(--teal)', cursor: 'pointer', padding: 0 }}>source ↗</button>
+                  )}
+                  <button onClick={() => onDelete(ins.id)} title="Remove insight" style={{ ...MONO, fontSize: 10, background: 'none', border: 'none', color: 'var(--ink-faint)', cursor: 'pointer', padding: 0 }}>×</button>
+                </span>
+              </div>
+              <div className="chat-content whitespace-pre-wrap" style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--ink-dim)', marginTop: 6, maxHeight: 220, overflow: 'hidden' }}>
+                {ins.body}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -594,6 +725,7 @@ export default function AnalystWorkspace({ tier }: { tier: string }) {
 const iconBtn: React.CSSProperties = { background: 'none', border: 'none', color: 'var(--ink-faint)', cursor: 'pointer', fontSize: 10, padding: 0 };
 const inputStyle: React.CSSProperties = { width: '100%', fontSize: 12, background: 'var(--bg-void)', color: 'var(--ink)', border: '1px solid var(--rule)', borderRadius: 2, padding: '5px 7px', outline: 'none' };
 const selectStyle: React.CSSProperties = { ...MONO, fontSize: 10, background: 'var(--bg-raised)', color: 'var(--ink-dim)', border: '1px solid var(--rule)', borderRadius: 2, padding: '4px 6px' };
+const miniBtn: React.CSSProperties = { ...MONO, fontSize: 9, padding: '4px 8px', borderRadius: 2, cursor: 'pointer', border: '1px solid var(--rule)', background: 'transparent', color: 'var(--ink-dim)' };
 
 function ProjectChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (

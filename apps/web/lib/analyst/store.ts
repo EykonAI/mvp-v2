@@ -361,3 +361,43 @@ export async function listInsights(
   if (error) throw new Error(`listInsights: ${error.message}`);
   return (data ?? []) as AnalystInsightRow[];
 }
+
+export async function getInsightOwned(
+  insightId: string,
+  userId: string,
+): Promise<AnalystInsightRow | null> {
+  const admin = createServerSupabase();
+  const { data, error } = await admin
+    .from('analyst_insights')
+    .select(INSIGHT_COLS)
+    .eq('id', insightId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw new Error(`getInsightOwned: ${error.message}`);
+  return (data as AnalystInsightRow) ?? null;
+}
+
+export async function deleteInsight(insightId: string): Promise<void> {
+  const admin = createServerSupabase();
+  const { error } = await admin.from('analyst_insights').delete().eq('id', insightId);
+  if (error) throw new Error(`deleteInsight: ${error.message}`);
+}
+
+// Sessions filed under a project, newest activity first — the dossier
+// compiles these in order.
+export async function listSessionsByProject(
+  userId: string,
+  projectId: string,
+): Promise<AnalystSessionRow[]> {
+  const admin = createServerSupabase();
+  const { data, error } = await admin
+    .from('analyst_sessions')
+    .select(SESSION_COLS)
+    .eq('user_id', userId)
+    .eq('project_id', projectId)
+    .is('archived_at', null)
+    .order('last_message_at', { ascending: true, nullsFirst: true })
+    .limit(100);
+  if (error) throw new Error(`listSessionsByProject: ${error.message}`);
+  return (data ?? []) as AnalystSessionRow[];
+}
