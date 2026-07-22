@@ -5,6 +5,7 @@ import {
   getMessages,
   insertMessage,
   touchSession,
+  getProjectOwned,
 } from '@/lib/analyst/store';
 import { runAnalystTurn, type EngineEvent } from '@/lib/analyst/engine';
 import { autoTitleSession } from '@/lib/analyst/title';
@@ -112,6 +113,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const engineMessages = [...history, { role: 'user' as const, content }];
   const isFirstExchange = priorRows.length === 0;
 
+  // Project custom instructions (brief §8.4) — a session filed under a
+  // project reads as a briefed analyst. Non-fatal on failure.
+  let projectInstructions: string | undefined;
+  if (session.project_id) {
+    try {
+      const project = await getProjectOwned(session.project_id, userId);
+      projectInstructions = project?.instructions ?? undefined;
+    } catch (err: any) {
+      console.error('[analyst/messages] project load failed:', err?.message);
+    }
+  }
+
   // Shared post-turn persistence: assistant row + session counters +
   // (first exchange only) the Haiku auto-title, awaited so the client
   // can render the new title from the final payload.
@@ -175,6 +188,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         tier: tier,
         persona: session.persona ?? undefined,
         model: session.model ?? undefined,
+        projectInstructions,
       });
       const { assistantRow, title, queryId } = await persistAssistant(result);
       return NextResponse.json({
@@ -206,6 +220,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           tier: tier,
           persona: session!.persona ?? undefined,
           model: session!.model ?? undefined,
+          projectInstructions,
           onEvent: (ev: EngineEvent) => send(ev as unknown as Record<string, unknown>),
         });
         try {

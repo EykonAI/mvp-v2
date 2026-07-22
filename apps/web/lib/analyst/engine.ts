@@ -76,13 +76,25 @@ export async function runAnalystTurn(input: EngineTurnInput): Promise<EngineTurn
   let iterations = 0;
   let finalUsage: unknown = null;
 
+  // Prompt caching (brief §8.3): the system prompt + 22 tool defs are
+  // large and static within a session. A cache_control breakpoint on
+  // the system block caches tools + system together (render order is
+  // tools → system → messages), so legs 2+ of the loop and turns 2+ of
+  // the session read them at ~0.1x instead of full price. Cast because
+  // SDK 0.32.1 predates the typed cache_control on the system block;
+  // the field is sent on the wire (the notifications evaluator already
+  // relies on this on 0.32).
+  const cachedSystem = [
+    { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
+  ] as any;
+
   // One streamed leg of the loop. Emits text deltas as they arrive
   // and resolves with the fully-accumulated message.
   async function streamLeg() {
     const stream = anthropic.messages.stream({
       model,
       max_tokens: ANALYST_MAX_TOKENS,
-      system: systemPrompt,
+      system: cachedSystem,
       tools,
       messages: conversation as any,
       // Sonnet 5 / Opus 4.8 run adaptive thinking by DEFAULT. In the
