@@ -197,6 +197,25 @@ export default function ChatPanel() {
     setWelcomeDismissed(true);
   }, []);
 
+  // AI ANALYST v2: model badge + session capability, from the ONE
+  // model config (brief §8.7) — the badge can never mislabel again.
+  // sessionCapable=false → Citizen or error → legacy stateless /api/chat.
+  const [modelLabel, setModelLabel] = useState<string | null>(null);
+  const [sessionCapable, setSessionCapable] = useState<boolean>(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/analyst/config', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (cancelled || !data) return;
+        setModelLabel(data.model_label ?? null);
+        setSessionCapable(data.tier !== 'citizen');
+      })
+      .catch(() => { /* badge shows a dash; sends fall back to /api/chat */ });
+    return () => { cancelled = true; };
+  }, []);
+
   // Last-active hint — fetch once on mount.
   useEffect(() => {
     let cancelled = false;
@@ -235,23 +254,72 @@ export default function ChatPanel() {
     setWelcomeDismissed(true);
 
     try {
-      // Snapshot bubbles are visual only — never sent back to /api/chat
-      // (they would confuse the model into thinking the snapshot is
-      // part of the live thread).
-      const apiMessages = [
-        ...messages.filter(m => m.id !== 'welcome' && !m.snapshot),
-        userMsg,
-      ].map(m => ({
-        role: m.role,
-        content: m.content,
-      }));
+      // AI ANALYST v2: Member+ docked exchanges persist into an
+      // "inline" analyst session (same store the /analyst workspace
+      // reads — brief §6.2). The server rebuilds history from the
+      // session, so only the new turn is sent. Citizens (and any
+      // session failure) fall back to the legacy stateless /api/chat.
+      let res: Response | null = null;
+      if (sessionCapable) {
+        try {
+          let sid = sessionId;
+          if (!sid) {
+            const createRes = await fetch('/api/analyst/sessions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ origin: 'inline', persona }),
+            });
+            if (createRes.status === 403) {
+              setSessionCapable(false);
+            } else if (createRes.ok) {
+              const created = await createRes.json();
+              sid = created.session?.id ?? null;
+              if (sid) setSessionId(sid);
+            }
+          }
+          if (sid) {
+            res = await fetch(`/api/analyst/sessions/${sid}/messages`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ content: text.trim(), stream: false }),
+            });
+            // A vanished session (deleted in the workspace mid-flight)
+            // resets the id and falls back for this turn.
+            if (res.status === 404) {
+              setSessionId(null);
+              res = null;
+            }
+          }
+        } catch {
+          res = null; // network hiccup on the session path — fall back
+        }
+      }
 
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: apiMessages, persona }),
-      });
+      if (!res) {
+        // Legacy path. Snapshot bubbles are visual only — never sent
+        // back (they would confuse the model into thinking the
+        // snapshot is part of the live thread).
+        const apiMessages = [
+          ...messages.filter(m => m.id !== 'welcome' && !m.snapshot),
+          userMsg,
+        ].map(m => ({
+          role: m.role,
+          content: m.content,
+        }));
+        res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: apiMessages, persona }),
+        });
+      }
 
+      if (res.status === 429) {
+        // Cap payload carries the upgrade path + pass offers — show
+        // them rather than a bare error code.
+        const cap = await res.json().catch(() => ({} as any));
+        const offer = cap.pass_offer?.week_pass?.label ? ` · ${cap.pass_offer.week_pass.label}` : '';
+        throw new Error(`${cap.error ?? 'Monthly limit reached.'}${offer}`);
+      }
       if (!res.ok) throw new Error(`API error: ${res.status}`);
       const data = await res.json();
 
@@ -413,6 +481,25 @@ export default function ChatPanel() {
           </div>
           <div className="flex items-center gap-3 shrink-0">
             <PersonaPicker value={persona} onChange={onPersonaChange} advancedEnabled={advancedEnabled} />
+            {sessionId && (
+              <a
+                href="/analyst"
+                title="Open this conversation in the full workspace"
+                style={{
+                  fontFamily: 'var(--f-mono)',
+                  fontSize: 9.5,
+                  letterSpacing: '0.1em',
+                  color: 'var(--teal)',
+                  textTransform: 'uppercase',
+                  textDecoration: 'none',
+                }}
+              >
+                Workspace ↗
+              </a>
+            )}
+            {/* Live model badge — renders the configured model
+                (lib/analyst/model.ts via /api/analyst/config), never a
+                hardcoded name (brief §8.7). */}
             <span
               style={{
                 fontFamily: 'var(--f-mono)',
@@ -422,7 +509,7 @@ export default function ChatPanel() {
                 textTransform: 'uppercase',
               }}
             >
-              Sonnet 4.6
+              {modelLabel ?? '—'}
             </span>
           </div>
         </div>

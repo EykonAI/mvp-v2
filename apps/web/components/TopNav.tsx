@@ -26,15 +26,19 @@ interface TopNavProps {
  *           read as six homogeneous tabs). All six sit in one flex with a
  *           single uniform gap, so the spacing between pillars is even.
  *
- * GLOBE/INTEL/NOTIF are <Link>s; AI ANALYST is a <button> toggling the
- * side panel; COMM is a dropdown styled as a peer tab. All share
- * TAB_BASE_STYLE (navTabStyles.ts) so the cluster reads as one unit.
+ * GLOBE/INTEL/NOTIF/AI ANALYST are <Link>s (AI ANALYST lands on the
+ * /analyst workspace since AI ANALYST v2); COMM is a dropdown styled as
+ * a peer tab. Pages that mount the docked panel additionally get a
+ * compact ◫ toggle beside the AI ANALYST tab (wired to onChatToggle).
+ * All share TAB_BASE_STYLE (navTabStyles.ts) so the cluster reads as
+ * one unit.
  */
 export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
   const pathname = usePathname();
   const isGlobe = pathname?.startsWith('/app') ?? false;
   const isIntel = pathname?.startsWith('/intel') ?? false;
   const isNotif = pathname?.startsWith('/notif') ?? false;
+  const isAnalyst = pathname?.startsWith('/analyst') ?? false;
 
   return (
     <nav
@@ -171,12 +175,26 @@ export default function TopNav({ chatOpen, onChatToggle }: TopNavProps) {
         <TabLink href="/app" label="Globe" active={isGlobe} />
         <TabLink href="/intel" label="Intel" active={isIntel} />
         <TabLink href="/notif" label="Notif" active={isNotif} />
-        <TabButton
-          label="AI Analyst"
-          active={!!chatOpen}
-          onClick={onChatToggle}
-          disabled={!onChatToggle}
-        />
+        {/* AI ANALYST v2: the pillar tab navigates to the /analyst
+            workspace. The docked panel keeps a compact toggle beside it
+            on pages that mount it (globe / INTEL / NOTIF / COMM). */}
+        <TabLink href="/analyst" label="AI Analyst" active={isAnalyst} />
+        {onChatToggle && (
+          <button
+            onClick={onChatToggle}
+            aria-label="Toggle docked analyst panel"
+            aria-pressed={!!chatOpen}
+            title={chatOpen ? 'Hide docked analyst panel' : 'Show docked analyst panel'}
+            style={{
+              ...TAB_BASE_STYLE,
+              ...activeStyle(!!chatOpen),
+              paddingLeft: 8,
+              paddingRight: 8,
+            }}
+          >
+            ◫
+          </button>
+        )}
       </div>
     </nav>
   );
@@ -190,30 +208,5 @@ function TabLink({ href, label, active }: { href: string; label: string; active:
   );
 }
 
-function TabButton({
-  label,
-  active,
-  onClick,
-  disabled,
-}: {
-  label: string;
-  active: boolean;
-  onClick?: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      aria-label={`Toggle ${label}`}
-      aria-pressed={active}
-      disabled={disabled}
-      style={{
-        ...TAB_BASE_STYLE,
-        ...activeStyle(active),
-        opacity: disabled ? 0.4 : 1,
-      }}
-    >
-      {label}
-    </button>
-  );
-}
+// TabButton removed with AI ANALYST v2 — the pillar tab is a TabLink to
+// /analyst; the docked-panel toggle is the inline ◫ button above.
