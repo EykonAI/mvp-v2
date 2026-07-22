@@ -85,6 +85,17 @@ export async function runAnalystTurn(input: EngineTurnInput): Promise<EngineTurn
       system: systemPrompt,
       tools,
       messages: conversation as any,
+      // Sonnet 5 / Opus 4.8 run adaptive thinking by DEFAULT. In the
+      // tool-use loop the assistant content is echoed back for the
+      // next leg; a default display:"omitted" thinking block replays
+      // with empty text and the API rejects it (400 "each thinking
+      // block must contain thinking"). The analyst is a tool-
+      // orchestration + synthesis task and does not need extended
+      // thinking (v1 ran without it), so disable it — accepted on
+      // both Sonnet 5 and Opus 4.8. Spread-cast because the installed
+      // SDK 0.32.1 predates the `thinking` param in its types; the
+      // field is still sent on the wire.
+      ...({ thinking: { type: 'disabled' } } as any),
     });
     stream.on('text', (delta: string) => {
       textParts.push(delta);
