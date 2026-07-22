@@ -164,3 +164,98 @@ function ruleLine(doc: PDFKit.PDFDocument, color: string, weight: number) {
 function truncate(s: string, n: number): string {
   return s.length <= n ? s : `${s.slice(0, n - 1)}…`;
 }
+
+// ─── Project dossier (brief §9.4 — the premium deliverable) ───────
+// Compiles a project into one client-ready report: cover + brief +
+// standing instructions + saved insights (the curated findings) +
+// every session's full transcript. Reuses the section drawers above.
+
+export interface DossierInsight {
+  title: string;
+  body: string;
+  createdAtIso: string;
+}
+
+export interface DossierSession {
+  title: string;
+  turns: SessionPdfTurn[];
+}
+
+export interface DossierInput {
+  projectName: string;
+  description?: string | null;
+  instructions?: string | null;
+  insights: DossierInsight[];
+  sessions: DossierSession[];
+  modelLabel: string;
+  generatedAtIso: string;
+}
+
+export async function renderProjectDossierPdf(input: DossierInput): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: 'LETTER',
+      margins: { top: PAGE_MARGIN, bottom: PAGE_MARGIN + 24, left: PAGE_MARGIN, right: PAGE_MARGIN },
+      bufferPages: true,
+      info: {
+        Title: `eYKON Dossier — ${truncate(input.projectName, 60)}`,
+        Author: BRAND_TOKENS.product.wordmark,
+        Subject: 'Geopolitical intelligence project dossier',
+        Creator: BRAND_TOKENS.product.name,
+      },
+    });
+    const chunks: Buffer[] = [];
+    doc.on('data', (c: Buffer) => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    try {
+      // Cover
+      doc.font(FONT_BOLD).fontSize(SIZES.wordmark).fillColor(COLORS.ink)
+        .text(BRAND_TOKENS.product.wordmark, { continued: true })
+        .font(FONT_BODY).fontSize(SIZES.small).fillColor(COLORS.inkDim)
+        .text(`  ·  ${BRAND_TOKENS.product.tagline}`);
+      doc.moveDown(0.6); ruleLine(doc, COLORS.accent, 1.2); doc.moveDown(0.6);
+      doc.font(FONT_BODY).fontSize(SIZES.small).fillColor(COLORS.inkDim).text('Project dossier', { characterSpacing: 1.5 });
+      doc.moveDown(0.15).font(FONT_BOLD).fontSize(18).fillColor(COLORS.ink).text(input.projectName, { lineGap: 2 });
+      if (input.description) {
+        doc.moveDown(0.3).font(FONT_BODY).fontSize(SIZES.body).fillColor(COLORS.inkDim).text(input.description, { lineGap: 1.5 });
+      }
+      doc.moveDown(0.4).font(FONT_MONO).fontSize(SIZES.small).fillColor(COLORS.inkDim)
+        .text(`${input.insights.length} insight${input.insights.length === 1 ? '' : 's'} · ${input.sessions.length} session${input.sessions.length === 1 ? '' : 's'} · generated ${input.generatedAtIso}`);
+
+      if (input.instructions) {
+        doc.moveDown(0.8).font(FONT_BOLD).fontSize(SIZES.h2).fillColor(COLORS.ink).text('Standing instructions');
+        doc.moveDown(0.2).font(FONT_BODY).fontSize(SIZES.body).fillColor(COLORS.inkDim).text(input.instructions, { lineGap: 1.5 });
+      }
+
+      // Insights — the curated findings, first.
+      if (input.insights.length > 0) {
+        doc.moveDown(0.8); ruleLine(doc, COLORS.rule, 0.6); doc.moveDown(0.4);
+        doc.font(FONT_BOLD).fontSize(SIZES.title).fillColor(COLORS.ink).text('Insights');
+        doc.moveDown(0.3);
+        for (const ins of input.insights) {
+          doc.font(FONT_BOLD).fontSize(SIZES.h2).fillColor(COLORS.ink).text(ins.title, { lineGap: 1 });
+          doc.moveDown(0.15);
+          renderLightMarkdown(doc, ins.body);
+          doc.moveDown(0.5);
+        }
+      }
+
+      // Sessions — full transcripts, each on a fresh page.
+      for (const session of input.sessions) {
+        doc.addPage();
+        doc.font(FONT_BODY).fontSize(SIZES.small).fillColor(COLORS.inkDim).text('Session', { characterSpacing: 1.5 });
+        doc.moveDown(0.15).font(FONT_BOLD).fontSize(SIZES.title).fillColor(COLORS.ink).text(session.title, { lineGap: 2 });
+        doc.moveDown(0.6);
+        for (const turn of session.turns) drawTurn(doc, turn);
+        drawProvenanceAppendix(doc, session.turns);
+      }
+
+      drawFooters(doc, input.generatedAtIso, input.modelLabel);
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
