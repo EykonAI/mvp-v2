@@ -114,9 +114,18 @@ export async function runAnalystTurn(input: EngineTurnInput): Promise<EngineTurn
         b.type === 'tool_use',
     );
 
-    // Echo the full assistant content (including any thinking blocks —
-    // required for multi-turn continuity on the same model).
-    conversation.push({ role: 'assistant', content: response.content });
+    // Echo the assistant content back for the tool-result leg, with
+    // thinking/redacted_thinking blocks stripped. Thinking is disabled
+    // (see streamLeg), so this is a no-op on the happy path — but it
+    // permanently closes the "each thinking block must contain thinking"
+    // 400: a display:"omitted" thinking block replays with empty text
+    // and is rejected. With thinking off the model doesn't expect the
+    // blocks back, so dropping them is safe and the tool_use blocks
+    // (all that matters for continuation) are retained.
+    const echoContent = (response.content as Array<{ type: string }>).filter(
+      (b) => b.type !== 'thinking' && b.type !== 'redacted_thinking',
+    );
+    conversation.push({ role: 'assistant', content: echoContent });
 
     const toolResults: any[] = [];
     for (const toolUse of toolUseBlocks) {
