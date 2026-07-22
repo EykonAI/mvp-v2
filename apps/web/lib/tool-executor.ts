@@ -1,5 +1,6 @@
 // ─── Tool Executor: resolves Claude tool calls against live data ───
 import { createServerSupabase } from './supabase-server';
+import { toFips, toIso2 } from './geography/country-codes';
 import { simulateChokepoint } from './intel/chokepoint';
 import { runWargame } from './intel/sanctions';
 import { FIRMS_REGIONS } from './firms/client';
@@ -92,7 +93,8 @@ async function queryAircraft(input: Record<string, any>): Promise<string> {
 
 async function queryConflicts(input: Record<string, any>): Promise<string> {
   const params = new URLSearchParams();
-  if (input.country) params.set('country', input.country);
+  // conflict_events.country is FIPS 10-4 (GDELT). Translate name/ISO → FIPS.
+  if (input.country) params.set('country', toFips(String(input.country)) ?? String(input.country));
   if (input.days) params.set('days', String(input.days));
   if (input.event_type) params.set('event_type', input.event_type);
   if (input.lat_min !== undefined) {
@@ -238,7 +240,8 @@ async function queryRefineries(input: Record<string, any>): Promise<string> {
     lon_min: String(input.lon_min),
     lon_max: String(input.lon_max),
   });
-  if (input.country) params.set('country', String(input.country));
+  // refineries.country is ISO2. Translate name/ISO3/FIPS → ISO2.
+  if (input.country) params.set('country', toIso2(String(input.country)) ?? String(input.country));
   const limit = Math.min(500, Math.max(1, Number(input.limit ?? 50)));
   const res = await fetch(`${APP_URL()}/api/refineries?${params.toString()}`);
   const data = await res.json();
@@ -275,7 +278,8 @@ async function queryMines(input: Record<string, any>): Promise<string> {
   });
   if (input.commodity) params.set('commodity', String(input.commodity));
   if (input.dev_stat) params.set('dev_stat', String(input.dev_stat));
-  if (input.country) params.set('country', String(input.country));
+  // mines.country is ISO2. Translate name/ISO3/FIPS → ISO2.
+  if (input.country) params.set('country', toIso2(String(input.country)) ?? String(input.country));
   if (input.include_minor) params.set('include_minor', 'true');
   const limit = Math.min(500, Math.max(1, Number(input.limit ?? 50)));
   const res = await fetch(`${APP_URL()}/api/mines?${params.toString()}`);
@@ -491,7 +495,9 @@ async function queryThermalAnomalies(input: Record<string, any>): Promise<string
       .gte('period', sinceDate)
       .limit(5000);
     if (input.facility_type) q = q.eq('facility_type', String(input.facility_type));
-    if (input.country) q = q.ilike('country', `%${String(input.country)}%`);
+    // firms_facility_observations.country is ISO2 (from the infra join).
+    // Translate name/ISO3/FIPS → ISO2 so country="Iran" no longer returns 0.
+    if (input.country) q = q.eq('country', toIso2(String(input.country)) ?? String(input.country));
     if (input.facility_name) q = q.ilike('facility_name', `%${String(input.facility_name)}%`);
     const { data, error } = await q;
     if (error) return JSON.stringify({ error: error.message, caveat: FIRMS_CAVEAT, coverage });
