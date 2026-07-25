@@ -64,6 +64,7 @@ async function getOAuthToken(username: string, password: string): Promise<string
     username,
     password,
     client_id: 'acled',
+    scope: 'authenticated', // required by ACLED's OAuth2 token endpoint (verified against acleddata.com docs, 2026-07)
   });
   const res = await fetch(OAUTH_TOKEN_URL, {
     method: 'POST',
