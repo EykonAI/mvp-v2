@@ -17,6 +17,27 @@ the facility's remembered brightness. This worker reads the non-gap-filled
 `DNB_BRDF-Corrected_NTL` plus its quality flags, and stores NULL (no usable
 look) rather than a fabricated number.
 
+## Collection v002 (load-bearing)
+VNP46A2 moved from **v001 (`allData/5000`) to v002 (`allData/5200`)**, and v002
+**changed the file's internals**:
+
+| | v001 | v002 |
+|---|---|---|
+| Data Fields group | `HDFEOS/GRIDS/VNP_Grid_DNB/…` | `VIIRS_Grid_DNB_2d/…` |
+| `DNB_BRDF-Corrected_NTL` | ushort, fill 65535, scale 0.1 | **float, fill −999.9, scale 1** |
+
+Beware the failure mode: LAADS answers a **dead path with a 303 to the Earthdata
+login page**, which is indistinguishable from a rejected token. If you see
+"redirected to Earthdata login", check the collection id *before* regenerating
+tokens.
+
+## NASA publishes in stages
+Probed 2026-07-30: nights A2026200–203 had ~500 tiles (all our regions), while
+every night from A2026204 on had only 189 and none of our regions. A short lag
+lands entirely in the partially-produced zone and writes nothing — "pending"
+forever. Hence `BM_LAG_DAYS=4` + `BM_RESCAN_DAYS=12`; nights already complete
+(`tiles_missing=0`) are skipped, so the wide window costs nothing in steady state.
+
 ## Setup (Railway)
 1. Apply migration `091_blackmarble_radiance.sql` in the Supabase SQL Editor
    **before** deploying.
