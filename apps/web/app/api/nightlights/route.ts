@@ -102,18 +102,28 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: `Supabase error: ${evErr.message}` }, { status: 502 });
     }
 
-    // 4 · Coordinates. The registry view is ~13k rows; one paged read,
-    //     joined in memory on (facility_type, facility_id).
-    const { data: coordRows, error: coordErr } = await supabase
-      .from('firms_monitored_facilities')
-      .select('facility_type,facility_id,facility_name,facility_country,latitude,longitude')
-      .limit(20000);
-    if (coordErr) {
-      return NextResponse.json({ error: `Supabase error: ${coordErr.message}` }, { status: 502 });
-    }
+    // 4 · Coordinates, PAGED. The registry view is ~13k rows and PostgREST
+    //     caps an unpaged response at ~1,000 — an unpaged read silently
+    //     returns a fraction, the join then misses, and the layer renders a
+    //     healthy-looking 18% of the data (measured: 756 of 4,234 points,
+    //     with the rest counted as skipped_no_geo). Page explicitly, and
+    //     surface any shortfall in the payload rather than hiding it.
+    const PAGE = 1000;
     const coords = new Map<string, CoordRow>();
-    for (const c of (coordRows ?? []) as CoordRow[]) {
-      coords.set(`${c.facility_type}|${c.facility_id}`, c);
+    for (let offset = 0; ; offset += PAGE) {
+      const { data, error } = await supabase
+        .from('firms_monitored_facilities')
+        .select('facility_type,facility_id,facility_name,facility_country,latitude,longitude')
+        .range(offset, offset + PAGE - 1);
+      if (error) {
+        return NextResponse.json({ error: `Supabase error: ${error.message}` }, { status: 502 });
+      }
+      const page = (data ?? []) as CoordRow[];
+      for (const c of page) coords.set(`${c.facility_type}|${c.facility_id}`, c);
+      if (page.length < PAGE) break;
+      // Hard stop: the registry is ~13k rows; 40k means something is wrong
+      // upstream and we should not spin forever.
+      if (offset > 40_000) break;
     }
 
     // Optional viewport bbox (same snake_case contract as /api/firms).
@@ -193,7 +203,12 @@ export async function GET(req: NextRequest) {
       night,
       event_window_days: EVENT_WINDOW_DAYS,
       truncated: radRows.length >= limit,
+      // Facilities whose coordinates were not found in the registry view.
+      // Should be ~0; a large number means the coordinate read is
+      // under-serving (the PostgREST 1,000-row cap) and the layer is
+      // rendering a fraction of the data while looking healthy.
       skipped_no_geo: skippedNoGeo,
+      facilities_indexed: coords.size,
       // Shipped with the payload so no consumer can render this feed
       // without the caveat being available to it (same contract as /api/firms).
       caveat:
