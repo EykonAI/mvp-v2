@@ -19,6 +19,8 @@ interface MapViewProps {
   mines: any[];
   /** NASA FIRMS thermal-anomaly detections (hot pixels — NOT confirmed fires). */
   thermal: any[];
+  /** Black Marble clear-night radiance + significance events (measured light — NOT power state). */
+  nightlights: any[];
   /** Fired ~500ms after the user stops panning/zooming, with the visible bbox. */
   onViewportChange?: (bbox: BBox) => void;
 }
@@ -146,6 +148,39 @@ function thermalRadius(d: any): number {
   return 30000 + thermalIntensity(d.frp) * 90000;
 }
 
+// ─── Night-lights (VIIRS Black Marble) styling ───
+// Radiance in nW·cm⁻²·sr⁻¹ is long-tailed like FRP (median ~9, p99.9 ~1,464,
+// flaring refineries ~200–700), so size and alpha run on a log ramp against a
+// 1,000 reference. Colour is deliberately LIGHT — warm gold → near-white —
+// so the layer reads as "emitted light", nothing like the thermal heat ramp
+// or the conflict red. A dot is a measurement, never an event.
+//   went_dark_lights → desaturated slate — light that VANISHED, cool and
+//                      muted on purpose (an inferred absence, not an alarm).
+//   surge/first_light → bright white, slightly larger.
+function nightlightsIntensity(d: any): number {
+  const r = Number(d.radiance_3x3 ?? d.radiance);
+  if (!Number.isFinite(r) || r <= 0) return 0;
+  return Math.max(0, Math.min(1, Math.log10(r + 1) / 3));
+}
+
+function nightlightsColor(d: any): [number, number, number, number] {
+  if (d.event_type === 'went_dark_lights') return [130, 145, 175, 235];
+  if (d.event_type === 'surge' || d.event_type === 'first_light') return [255, 255, 240, 245];
+  const t = nightlightsIntensity(d);
+  // warm gold (var(--wheat) #D4A24C) → pale warm white
+  return [
+    Math.round(212 + (255 - 212) * t),
+    Math.round(162 + (248 - 162) * t),
+    Math.round(76 + (215 - 76) * t),
+    Math.round(120 + 115 * t),
+  ];
+}
+
+function nightlightsRadius(d: any): number {
+  if (d.event_type) return 110000; // events must be findable at world zoom
+  return 20000 + nightlightsIntensity(d) * 80000;
+}
+
 const VIEWPORT_DEBOUNCE_MS = 500;
 
 export default function MapView({
@@ -159,6 +194,7 @@ export default function MapView({
   refineries,
   mines,
   thermal,
+  nightlights,
   onViewportChange,
 }: MapViewProps) {
   const [viewState, setViewState] = useState(MAP_CONFIG.INITIAL_VIEW);
@@ -270,6 +306,24 @@ export default function MapView({
     onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'thermal' } : null),
     updateTriggers: { getPosition: thermal.length, getFillColor: thermal.length, getRadius: thermal.length },
   }), [thermal]);
+
+  // ─── Night-lights Layer (Black Marble radiance, log ramp) ───
+  // HONESTY: each dot is measured emitted light on a confidently-clear night
+  // at a watched facility. Not power state, not an outage, not an event.
+  // Tooltips below must carry the inference caveat.
+  const nightlightsLayer = useMemo(() => new ScatterplotLayer({
+    id: 'nightlights',
+    data: nightlights,
+    getPosition: (d: any) => [Number(d.longitude), Number(d.latitude)],
+    getFillColor: nightlightsColor,
+    getRadius: nightlightsRadius,
+    radiusMinPixels: 1.5,
+    radiusMaxPixels: 12,
+    stroked: false,
+    pickable: true,
+    onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'nightlights' } : null),
+    updateTriggers: { getPosition: nightlights.length, getFillColor: nightlights.length, getRadius: nightlights.length },
+  }), [nightlights]);
 
   // ─── Refineries Layer (⚗ alembic glyph, orange — OSM Overpass) ───
   const refineryLayer = useMemo(() => new TextLayer({
@@ -456,7 +510,7 @@ export default function MapView({
   // Pipelines render under everything else (lines as background); LNG
   // terminals sit alongside other point markers. Hover-pick order is
   // last → first, so terminals win over pipelines when overlapping.
-  const layers = [pipelineLayer, vesselLayer, aircraftLayer, thermalLayer, conflictLayer, refineryLayer, mineLayer, powerPlantLayer, nuclearLayer, airportLayer, portLayer, lngTerminalLayer];
+  const layers = [pipelineLayer, vesselLayer, aircraftLayer, nightlightsLayer, thermalLayer, conflictLayer, refineryLayer, mineLayer, powerPlantLayer, nuclearLayer, airportLayer, portLayer, lngTerminalLayer];
 
   // ─── Tooltip Renderer ───
   const renderTooltip = useCallback(() => {
@@ -529,6 +583,48 @@ export default function MapView({
               Hot pixel measured from orbit — not a confirmed fire, and not a
               strike. Often industrial gas flaring or agricultural burning.
               Any cause is inference.
+            </div>
+          </div>
+        );
+        break;
+      }
+      case 'nightlights': {
+        const rad = object.radiance != null ? Number(object.radiance) : null;
+        const rad3 = object.radiance_3x3 != null ? Number(object.radiance_3x3) : null;
+        const ev = object.event_type as string | null;
+        const evLabel =
+          ev === 'went_dark_lights' ? 'Went dark vs own baseline' :
+          ev === 'surge' ? 'Radiance surge vs own baseline' :
+          ev === 'first_light' ? 'First light at a normally-dark site' : null;
+        content = (
+          <div>
+            {/* Never "Outage at X": this is measured light, not power state. */}
+            <div className="font-semibold" style={{ color: 'rgb(240, 230, 200)' }}>
+              {evLabel ?? 'Night-lights radiance'}
+            </div>
+            <div className="text-xs text-gray-400 mt-0.5">
+              {object.facility_name || 'Watched facility'}
+              {object.country ? ` · ${object.country}` : ''}
+            </div>
+            <div className="text-xs mt-1">
+              Radiance: {rad != null ? `${rad.toFixed(1)} nW/cm²·sr` : '—'}
+              {rad3 != null ? ` (3×3 mean ${rad3.toFixed(1)})` : ''}
+            </div>
+            {ev && object.baseline_mean != null && (
+              <div className="text-xs">
+                Own clear-night baseline: {Number(object.baseline_mean).toFixed(1)}
+                {object.deviation_sigma != null ? ` · ${Number(object.deviation_sigma).toFixed(1)}σ` : ''}
+                {ev === 'went_dark_lights' && object.dark_nights != null
+                  ? ` · dark ${object.dark_nights} clear nights` : ''}
+              </div>
+            )}
+            <div className="text-xs text-gray-400 mt-1">
+              Night of {object.period || '—'} · confidently clear sky
+            </div>
+            <div className="text-xs text-gray-500 mt-1.5 max-w-[250px] leading-snug">
+              Emitted light measured from orbit (VIIRS Black Marble) — not power
+              state and not a confirmed outage. Clear nights only; a cloudy
+              facility simply has no reading. Any cause is inference.
             </div>
           </div>
         );

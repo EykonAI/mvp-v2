@@ -105,4 +105,8 @@ export const POLL_INTERVALS = {
   energy: 300_000,
   weather: 600_000,
   infrastructure: null, // static, loaded once
+  // Black Marble is a NIGHTLY product that lands days behind realtime —
+  // polling would only re-download an unchanged night. Fetch on load and
+  // on viewport change, like infrastructure.
+  nightlights: null,
 };

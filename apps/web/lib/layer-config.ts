@@ -67,6 +67,23 @@ export const CATEGORIES: CategoryDef[] = [
     ],
   },
   {
+    key: 'nightlights',
+    label: 'Night lights',
+    color: 'var(--ink)',
+    icon: '✦',
+    // Surfaced verbatim in the layer panel. Radiance is a measurement of
+    // emitted light, never a power-state claim — see app/api/nightlights/route.ts.
+    note: 'VIIRS Black Marble radiance at FIRMS-watched facilities, clear nights only (~3–4 days behind realtime). A dot is measured light, not power state; a cloudy facility has no dot — absence of a dot is absence of a look, never darkness. Events are departures from a facility\'s own baseline and remain inferences.',
+    sublayers: [
+      { key: 'nightlights.radiance', label: 'Clear-night radiance', status: 'live',
+        dataKey: 'nightlights', predicate: (d: any) => !d.event_type },
+      { key: 'nightlights.dark', label: 'Went dark (events)', status: 'live',
+        dataKey: 'nightlights', predicate: (d: any) => d.event_type === 'went_dark_lights' },
+      { key: 'nightlights.bright', label: 'Surge / first light (events)', status: 'live',
+        dataKey: 'nightlights', predicate: (d: any) => d.event_type === 'surge' || d.event_type === 'first_light' },
+    ],
+  },
+  {
     key: 'imagery',
     label: 'Imagery',
     color: 'var(--violet)',
@@ -100,9 +117,9 @@ export const CATEGORIES: CategoryDef[] = [
   },
 ];
 
-export type DataKey = 'aircraft' | 'vessels' | 'conflicts' | 'airports' | 'ports' | 'power-plants' | 'pipelines' | 'refineries' | 'mines' | 'firms';
+export type DataKey = 'aircraft' | 'vessels' | 'conflicts' | 'airports' | 'ports' | 'power-plants' | 'pipelines' | 'refineries' | 'mines' | 'firms' | 'nightlights';
 
-export const DATA_KEYS: DataKey[] = ['aircraft', 'vessels', 'conflicts', 'airports', 'ports', 'power-plants', 'pipelines', 'refineries', 'mines', 'firms'];
+export const DATA_KEYS: DataKey[] = ['aircraft', 'vessels', 'conflicts', 'airports', 'ports', 'power-plants', 'pipelines', 'refineries', 'mines', 'firms', 'nightlights'];
 
 /**
  * Default visibility: live sub-layers on (except those flagged
