@@ -427,13 +427,12 @@ def sample_tile(night: date, tile: str, href: str,
         #                  sniffing to tell from success)
         #   earthdatacloud client PIR2OBoA… , app_type=401 → a clean 401
         # A worker wants the one that says "no" in a status code.
-        doy = night.timetuple().tm_yday
+        # Flat path on the cloud host — no year/doy directories.
         url = f"{CLOUD_BASE}/VNP46A2/{href}"
-        del doy  # path is flat on the cloud host; kept for archive fallback
     r = http_get(url, {"Authorization": f"Bearer {EARTHDATA_TOKEN}"}, stream=True)
     if r.status_code == 404:
         return []
-    assert_not_auth_bounce(r, f"granule {filename}")
+    assert_not_auth_bounce(r, f"granule {tile} {night}")
 
     rows: list[dict] = []
     with tempfile.NamedTemporaryFile(suffix=".h5") as tmp:
