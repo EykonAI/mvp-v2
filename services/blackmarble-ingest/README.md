@@ -49,6 +49,14 @@ exactly like a rejected token. `EarthdataSession` preserves the header across th
 Earthdata auth host (NASA's documented `curl -L -b session` behaviour, in requests
 form). Replacing it with a plain `requests.get` reintroduces a false "bad token".
 
+## Before pushing: `python -m pyflakes main.py`
+`py_compile` only checks SYNTAX. It happily compiles a reference to a variable
+that does not exist — and this worker learned that the expensive way: a rename
+(`filename` → `href`) left one stale reference, which compiled fine, deployed
+fine, and then raised `NameError` once per tile against ~400 real granules.
+pyflakes catches exactly that class in under a second. Treat it as this
+service's equivalent of `npm run build`.
+
 ## Setup (Railway)
 1. Apply migration `091_blackmarble_radiance.sql` in the Supabase SQL Editor
    **before** deploying.
