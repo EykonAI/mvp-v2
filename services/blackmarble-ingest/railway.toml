@@ -1,0 +1,26 @@
+# ══════════════════════════════════════════════════════════════
+# eYKON.ai — Black Marble ingest worker (Railway service config)
+#
+# In the Railway UI: Settings → Config-as-code → set the path to
+# `services/blackmarble-ingest/railway.toml`, and the service Root
+# Directory to `services/blackmarble-ingest`.
+#
+# ⚠ THE §6 LESSON APPLIES: this is a run-to-completion CRON job.
+# cronSchedule below is config-as-code, but VERIFY in the UI that
+# the service shows "Next run in …" — a cron with no schedule shows
+# "Completed" and silently never fires again (the exact failure that
+# hid the 43h NA-shard outage).
+# ══════════════════════════════════════════════════════════════
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "python main.py"
+# Run to completion; never restart on exit. A failed run exits
+# non-zero and shows RED — that is the signal, not a crash loop.
+restartPolicyType = "NEVER"
+# Daily at 09:40 UTC — VNP46A2 lags ~3 days, so the exact hour is
+# uncorrelated with NASA publishing; :40 staggers us off the FIRMS
+# cron minutes (:17–:47) per the thundering-herd convention.
+cronSchedule = "40 9 * * *"
