@@ -55,7 +55,11 @@ import numpy as np
 import requests
 
 # ─── Config ────────────────────────────────────────────────────────
-EARTHDATA_TOKEN = os.environ.get("EARTHDATA_TOKEN")
+# Defensive hygiene: strip whitespace/newlines from a paste, and an
+# accidental "Bearer " prefix (the worker adds that itself).
+EARTHDATA_TOKEN = (os.environ.get("EARTHDATA_TOKEN") or "").strip()
+if EARTHDATA_TOKEN.lower().startswith("bearer "):
+    EARTHDATA_TOKEN = EARTHDATA_TOKEN[7:].strip()
 # Accept either name: the Node workers (ais/adsb) use the web app's
 # NEXT_PUBLIC_SUPABASE_URL convention, so copying variables from an
 # existing Railway service must just work.
@@ -111,15 +115,41 @@ def log(msg: str) -> None:
 
 
 # ─── Small HTTP helpers ────────────────────────────────────────────
+class AuthError(RuntimeError):
+    """The Earthdata token was rejected. Distinct from a transient HTTP
+    fault: retrying cannot fix it, and the remedy is a human action."""
+
+
 def http_get(url: str, headers: dict, stream: bool = False) -> requests.Response:
     last: Exception | None = None
     for attempt in range(RETRIES):
         try:
             r = requests.get(url, headers=headers, timeout=HTTP_TIMEOUT, stream=stream)
+            # A rejected token does not 401 — LAADS 303-redirects to the
+            # Earthdata OAuth page, which may itself return HTML 200 or
+            # (as seen 2026-07-30) crash with 500. Any landing on
+            # urs.earthdata.nasa.gov means the token was not accepted;
+            # retrying is pointless, so fail fast with the real remedy.
+            if "urs.earthdata.nasa.gov" in r.url:
+                raise AuthError(
+                    "EARTHDATA_TOKEN rejected by LAADS (redirected to Earthdata login). "
+                    "Fix: (1) check the variable holds the raw token on ONE line — no "
+                    "'Bearer ' prefix, no quotes, not truncated; (2) log in once at "
+                    "ladsweb.modaps.eosdis.nasa.gov to authorise the app for this "
+                    "Earthdata account; (3) regenerate the token at urs.earthdata.nasa.gov "
+                    "and update the Railway variable."
+                )
+            if r.status_code in (401, 403):
+                raise AuthError(
+                    f"EARTHDATA_TOKEN rejected: HTTP {r.status_code} from {url}. "
+                    "Regenerate the token at urs.earthdata.nasa.gov and update Railway."
+                )
             if r.status_code == 404:
                 return r          # caller decides: 404 is often "not published yet"
             r.raise_for_status()
             return r
+        except AuthError:
+            raise                 # never retry an auth failure
         except Exception as e:            # noqa: BLE001 — collected, not swallowed
             last = e
             time.sleep(2 ** attempt)
@@ -389,7 +419,13 @@ def main() -> int:
         return 1
 
     for night in nights:
-        process_night(night, roster)
+        try:
+            process_night(night, roster)
+        except AuthError as e:
+            # One clear line, not a traceback repeated per night. Nothing
+            # downstream can succeed until a human fixes the token.
+            log(f"FATAL: {e}")
+            return 1
 
     if errors:
         log(f"DONE with {len(errors)} error(s) — failing loud so Railway shows red")
