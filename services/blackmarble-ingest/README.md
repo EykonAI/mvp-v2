@@ -29,8 +29,9 @@ look) rather than a fabricated number.
    - `EARTHDATA_TOKEN` — generate at urs.earthdata.nasa.gov (Profile →
      Generate Token). Tokens expire (~60 days) — rotation is on you; an
      expired token fails loud with "bounced to Earthdata login".
-   - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` — same values as the web
-     service.
+   - `SUPABASE_URL` (or `NEXT_PUBLIC_SUPABASE_URL` — either name works),
+     `SUPABASE_SERVICE_ROLE_KEY` — same values as the web service, so
+     copying the variables from ais-ingest just works.
    - Optional: `BM_LAG_DAYS` (3), `BM_RESCAN_DAYS` (4), `BM_ROSTER_DAYS` (5).
 
 ## Backfill (baselines from day one)
