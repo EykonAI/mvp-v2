@@ -218,6 +218,7 @@ function chipColour(domain: string): string {
     case 'conflict':    return 'var(--red)';
     case 'energy':      return 'var(--green)';
     case 'thermal':     return 'var(--orange, var(--amber))';
+    case 'nightlights': return 'var(--violet)';
     default:            return 'var(--ink-faint)';
   }
 }
