@@ -92,6 +92,13 @@ BACKFILL_END = os.environ.get("BM_BACKFILL_END")
 # returns 200. v001 is retired; CMR lists version 2 only.
 COLLECTION = os.environ.get("BM_COLLECTION", "5200")
 API_DETAILS = f"https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/details/allData/{COLLECTION}/VNP46A2"
+# Downloads come from Earthdata Cloud (flat path: /<product>/<filename>),
+# which answers an unauthorised request with a clean 401 instead of the
+# ladsweb browser-OAuth HTML login page. Listing stays on ladsweb, which
+# needs no token at all.
+CLOUD_BASE = os.environ.get(
+    "BM_CLOUD_BASE", "https://data.laadsdaac.earthdatacloud.nasa.gov/prod-lads"
+)
 
 # ⚠ v002 CHANGED THE FILE'S INTERNAL STRUCTURE. Verified against the
 # v2 filespec (ladsweb …/filespec/VIIRS/2/VNP46A2):
@@ -210,9 +217,21 @@ def http_get(url: str, headers: dict, stream: bool = False) -> requests.Response
                     "and update the Railway variable."
                 )
             if r.status_code in (401, 403):
+                # A 401 here almost never means "bad token string". The
+                # token is account-wide; ACCESS is per-APPLICATION, and a
+                # fresh Earthdata account has approved nothing. Say so,
+                # because regenerating the token cannot fix it — that
+                # mistake has already cost several rounds.
                 raise AuthError(
-                    f"EARTHDATA_TOKEN rejected: HTTP {r.status_code} from {url}. "
-                    "Regenerate the token at urs.earthdata.nasa.gov and update Railway."
+                    f"EARTHDATA_TOKEN rejected: HTTP {r.status_code} from {url}.\n"
+                    "  MOST LIKELY the Earthdata APPLICATION is not authorised for this\n"
+                    "  account — a new token will NOT fix that. Do this once, in a browser:\n"
+                    "    1. https://urs.earthdata.nasa.gov/profile → Applications →\n"
+                    "       Authorized Apps → Approve More Applications\n"
+                    "    2. approve 'LAADS DAAC' / 'LAADS Web' (and accept any EULA)\n"
+                    "    3. re-run — the SAME token then works\n"
+                    "  Only if that is already done: check the variable holds the raw\n"
+                    "  token on one line (no 'Bearer ' prefix, no quotes, not truncated)."
                 )
             if r.status_code == 404:
                 return r          # caller decides: 404 is often "not published yet"
@@ -400,10 +419,17 @@ def sample_tile(night: date, tile: str, href: str,
     if href.startswith("http"):
         url = href
     else:
-        # The path NASA's own EDL-token guide documents.
+        # Earthdata Cloud distribution, not the ladsweb archive. Both
+        # serve the same bytes behind Earthdata Login, but they use
+        # DIFFERENT OAuth applications and different failure modes:
+        #   ladsweb        client A6th7HB-… , browser flow → HTML login
+        #                  page on failure (looks like a 200/303, needs
+        #                  sniffing to tell from success)
+        #   earthdatacloud client PIR2OBoA… , app_type=401 → a clean 401
+        # A worker wants the one that says "no" in a status code.
         doy = night.timetuple().tm_yday
-        url = (f"https://ladsweb.modaps.eosdis.nasa.gov/archive/"
-               f"allData/{COLLECTION}/VNP46A2/{night.year}/{doy:03d}/{href}")
+        url = f"{CLOUD_BASE}/VNP46A2/{href}"
+        del doy  # path is flat on the cloud host; kept for archive fallback
     r = http_get(url, {"Authorization": f"Bearer {EARTHDATA_TOKEN}"}, stream=True)
     if r.status_code == 404:
         return []
