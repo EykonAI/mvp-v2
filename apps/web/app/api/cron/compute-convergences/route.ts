@@ -30,6 +30,13 @@ const SOURCE_CLASS: Record<string, string> = {
   Energy: 'media',
   Maritime: 'sensor-ais',
   Thermal: 'sensor-firms',
+  // VIIRS night-lights. A SEPARATE class from thermal even though both
+  // ride on VIIRS: FIRMS measures mid-infrared radiant power from
+  // combustion, Black Marble measures visible-band emitted light. A
+  // refinery can stop flaring while its grid stays lit, or go dark
+  // while still hot — so the two genuinely corroborate each other
+  // rather than restating one measurement twice.
+  Nightlights: 'sensor-viirs-dnb',
 };
 function sourceClass(domain: string): string {
   return SOURCE_CLASS[domain] ?? `other:${domain}`;
