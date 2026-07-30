@@ -33,9 +33,11 @@ Env:
   EARTHDATA_TOKEN            NASA Earthdata Login bearer token (required)
   SUPABASE_URL               https://<project>.supabase.co     (required)
   SUPABASE_SERVICE_ROLE_KEY  service-role key                  (required)
-  BM_LAG_DAYS                newest night to attempt = today-LAG   (default 3)
-  BM_RESCAN_DAYS             how many nights per run               (default 4)
+  BM_LAG_DAYS                newest night to attempt = today-LAG   (default 4)
+  BM_RESCAN_DAYS             how many nights per run               (default 12)
   BM_ROSTER_DAYS             FIRMS-observation window for roster   (default 5)
+  BM_COLLECTION              LAADS collection id                   (default 5200 = v002)
+  BM_H5_GROUP                HDF5 Data Fields group path override
   BM_BACKFILL_START/END      YYYY-MM-DD inclusive — overrides the
                              rolling window for a manual backfill run
 """
@@ -70,26 +72,50 @@ SUPABASE_URL = (
 ).rstrip("/")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
-LAG_DAYS = int(os.environ.get("BM_LAG_DAYS", "3"))
-RESCAN_DAYS = int(os.environ.get("BM_RESCAN_DAYS", "4"))
+# NASA publishes VNP46A2 in stages: probed 2026-07-30, nights A2026200–203
+# carried ~500 tiles (all our regions), while every night from A2026204 on
+# had only 189 and NONE of our regions. A short lag therefore lands entirely
+# inside the partially-produced zone and writes nothing — "pending" forever,
+# healthy-looking and useless. So: start further back, and rescan a wide
+# window. Cheap, because complete nights are skipped (see night_is_complete).
+LAG_DAYS = int(os.environ.get("BM_LAG_DAYS", "4"))
+RESCAN_DAYS = int(os.environ.get("BM_RESCAN_DAYS", "12"))
 ROSTER_DAYS = int(os.environ.get("BM_ROSTER_DAYS", "5"))
 BACKFILL_START = os.environ.get("BM_BACKFILL_START")
 BACKFILL_END = os.environ.get("BM_BACKFILL_END")
 
-ARCHIVE = "https://ladsweb.modaps.eosdis.nasa.gov/archive/allData/5000/VNP46A2"
-# Directory listings live behind the v2 content API (the bare archive
-# path 303-redirects to Earthdata OAuth; the old `{doy}.json` form is a
-# hard 404 — probed 2026-07-30). Same Bearer token authorizes both.
-API_DETAILS = "https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/details/allData/5000/VNP46A2"
-H5_GROUP = "HDFEOS/GRIDS/VNP_Grid_DNB/Data Fields"
-# Verified against the LAADS VNP46A2 filespec: ushort, fill 65535,
-# scale 0.1, units nW·cm⁻²·sr⁻¹.
-DS_NTL = "DNB_BRDF-Corrected_NTL"
+# ─── Collection 002 ────────────────────────────────────────────────
+# VNP46A2 moved from v001 (allData/5000) to v002 (allData/5200).
+# Probed 2026-07-30: the 5000 path 303-redirects to Earthdata OAuth
+# (LAADS bounces a dead path to login, which is indistinguishable from
+# a rejected token — it cost us three token regenerations), while 5200
+# returns 200. v001 is retired; CMR lists version 2 only.
+COLLECTION = os.environ.get("BM_COLLECTION", "5200")
+API_DETAILS = f"https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/details/allData/{COLLECTION}/VNP46A2"
+
+# ⚠ v002 CHANGED THE FILE'S INTERNAL STRUCTURE. Verified against the
+# v2 filespec (ladsweb …/filespec/VIIRS/2/VNP46A2):
+#   group  HDFEOS/GRIDS/VNP_Grid_DNB/… → VIIRS_Grid_DNB_2d/…
+#   NTL    ushort, fill 65535, scale 0.1 → FLOAT, fill -999.9, scale 1
+# Reading v002 with the v001 contract raises KeyError on the group and
+# would mis-scale every radiance by 10× if it didn't.
+H5_GROUP = os.environ.get("BM_H5_GROUP", "HDFEOS/GRIDS/VIIRS_Grid_DNB_2d/Data Fields")
+# Fallback group paths tried in order — the filespec names the group
+# without the HDFEOS prefix, and h5py needs the real path. Trying a
+# short list is cheaper than guessing wrong and failing the whole run.
+H5_GROUP_CANDIDATES = [
+    H5_GROUP,
+    "VIIRS_Grid_DNB_2d/Data Fields",
+    "HDFEOS/GRIDS/VIIRS_Grid_DNB_2d/Data Fields",
+    "HDFEOS/GRIDS/VNP_Grid_DNB/Data Fields",   # v001, for a pinned-collection run
+]
+DS_NTL = "DNB_BRDF-Corrected_NTL"      # NOT the Gap_Filled twin — see module docstring
 DS_MQF = "Mandatory_Quality_Flag"      # 0 hq-persistent · 1 hq-ephemeral · 2 poor · 255 none
 DS_QF = "QF_Cloud_Mask"                # bit-encoded, see below
 DS_SNOW = "Snow_Flag"                  # 0 none · 1 snow/ice · 255 fill
-NTL_FILL = 65535
-NTL_SCALE = 0.1
+# v002: float radiance in nW·cm⁻²·sr⁻¹, already scaled. Fill is -999.9,
+# so anything at or below this sentinel is "no retrieval", never zero.
+NTL_FILL_BELOW = -999.0
 
 # QF_Cloud_Mask bit layout per the NASA Black Marble user guide:
 #   bits 6–7  cloud detection confidence: 00 confident clear ·
@@ -100,8 +126,9 @@ NTL_SCALE = 0.1
 CLOUD_CONF = {0: "confident_clear", 1: "probably_clear",
               2: "probably_cloudy", 3: "confident_cloudy"}
 
-PX_PER_TILE = 2400          # 10° tile at 15 arc-sec (~500 m)
-PX_PER_DEG = 240
+# Fallback tile size, used only if a granule carries no lat/lon
+# arrays; real dimensions are read from the array shape.
+PX_PER_TILE = 2400
 
 BATCH = 500
 HTTP_TIMEOUT = 120
@@ -202,15 +229,43 @@ def tile_of(lat: float, lon: float) -> str:
     return f"h{h:02d}v{v:02d}"
 
 
-def pixel_of(lat: float, lon: float) -> tuple[int, int]:
-    """(row, col) inside the facility's tile."""
+def pixel_of(lat: float, lon: float, n_rows: int = PX_PER_TILE,
+             n_cols: int = PX_PER_TILE) -> tuple[int, int]:
+    """(row, col) inside the facility's tile — fallback only, used when
+    the granule carries no lat/lon arrays. Derives pixels-per-degree
+    from the actual array shape rather than assuming 2400²."""
     h = int(math.floor((lon + 180.0) / 10.0))
     v = int(math.floor((90.0 - lat) / 10.0))
     lat_max = 90.0 - 10.0 * v
     lon_min = -180.0 + 10.0 * h
-    row = int((lat_max - lat) * PX_PER_DEG)
-    col = int((lon - lon_min) * PX_PER_DEG)
-    return (min(max(row, 0), PX_PER_TILE - 1), min(max(col, 0), PX_PER_TILE - 1))
+    row = int((lat_max - lat) * (n_rows / 10.0))
+    col = int((lon - lon_min) * (n_cols / 10.0))
+    return (min(max(row, 0), n_rows - 1), min(max(col, 0), n_cols - 1))
+
+
+def open_group(f: "h5py.File"):
+    """Return the Data Fields group, trying the known layouts.
+
+    v002 renamed the group (VNP_Grid_DNB → VIIRS_Grid_DNB_2d). Rather
+    than hardcode one guess and fail every granule, try the candidates
+    and, failing that, search the file — then say plainly which layout
+    was found so a future rename is diagnosable from the logs."""
+    for path in H5_GROUP_CANDIDATES:
+        if path in f:
+            return f[path]
+    found: list[str] = []
+
+    def visit(name, obj):
+        if isinstance(obj, h5py.Group) and DS_NTL in obj:
+            found.append(name)
+
+    f.visititems(visit)
+    if found:
+        log(f"NOTE: Data Fields group found at unexpected path '{found[0]}' — update H5_GROUP")
+        return f[found[0]]
+    raise RuntimeError(
+        f"no group containing {DS_NTL} in granule; tried {H5_GROUP_CANDIDATES}"
+    )
 
 
 # ─── Roster: the facilities FIRMS actually watched ─────────────────
@@ -273,23 +328,36 @@ def list_night_files(night: date) -> dict[str, str]:
         payload = r.json()
         entries = payload.get("content", payload) if isinstance(payload, dict) else payload
         for e in entries or []:
-            name = e.get("name") if isinstance(e, dict) else str(e)
-            if not name or not name.endswith(".h5"):
+            if not isinstance(e, dict):
+                continue
+            name = e.get("name") or ""
+            if not name.endswith(".h5"):
                 continue
             parts = name.split(".")
+            # VNP46A2.A2026204.h03v04.002.2026210181520.h5 → parts[2] = tile
             if len(parts) >= 3 and parts[0] == "VNP46A2":
-                out[parts[2]] = name        # parts[2] = hXXvYY
+                # Prefer the listing's own downloadsLink over composing a
+                # path — it survives the archive-layout changes that broke
+                # the v001 assumption.
+                out[parts[2]] = e.get("downloadsLink") or name
         # The v2 API pages large directories (a full night is ~450
         # global tiles); follow the cursor when present.
         url = payload.get("nextPageLink") if isinstance(payload, dict) else None
     return out
 
 
-def sample_tile(night: date, tile: str, filename: str,
+def sample_tile(night: date, tile: str, href: str,
                 facilities: list[dict]) -> list[dict]:
-    """Download one granule, sample every facility in it, return rows."""
-    doy = night.timetuple().tm_yday
-    url = f"{ARCHIVE}/{night.year}/{doy:03d}/{filename}"
+    """Download one granule, sample every facility in it, return rows.
+
+    `href` is the listing's downloadsLink (absolute) or a bare filename
+    (composed against the archive path as a fallback)."""
+    if href.startswith("http"):
+        url = href
+    else:
+        doy = night.timetuple().tm_yday
+        url = (f"https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/archives/"
+               f"allData/{COLLECTION}/VNP46A2/{night.year}/{doy:03d}/{href}")
     r = http_get(url, {"Authorization": f"Bearer {EARTHDATA_TOKEN}"}, stream=True)
     if r.status_code == 404:
         return []
@@ -301,33 +369,45 @@ def sample_tile(night: date, tile: str, filename: str,
             tmp.write(chunk)
         tmp.flush()
         with h5py.File(tmp.name, "r") as f:
-            g = f[H5_GROUP]
-            ntl = g[DS_NTL]        # NOT the gap-filled band — see module docstring
-            mqf = g[DS_MQF]
-            qf = g[DS_QF]
-            snow = g[DS_SNOW]
+            g = open_group(f)
+            ntl = g[DS_NTL][:]     # NOT the gap-filled band — see module docstring
+            mqf = g[DS_MQF][:]
+            qf = g[DS_QF][:]
+            snow = g[DS_SNOW][:]
+            n_rows, n_cols = ntl.shape
+
+            # Prefer the granule's OWN geolocation arrays over computed
+            # grid math: they make the sampling correct even if the tile
+            # geometry or dimensions change again between collections.
+            lats = g["lat"][:] if "lat" in g else None
+            lons = g["lon"][:] if "lon" in g else None
 
             for fac in facilities:
-                row_i, col_i = pixel_of(fac["lat"], fac["lon"])
+                if lats is not None and lons is not None:
+                    row_i = int(np.abs(lats - fac["lat"]).argmin())
+                    col_i = int(np.abs(lons - fac["lon"]).argmin())
+                else:
+                    row_i, col_i = pixel_of(fac["lat"], fac["lon"], n_rows, n_cols)
 
-                raw = int(ntl[row_i, col_i])
+                raw = float(ntl[row_i, col_i])
                 q = int(mqf[row_i, col_i])
                 qbits = int(qf[row_i, col_i])
                 sn = int(snow[row_i, col_i])
 
-                hq = q in (0, 1) and raw != NTL_FILL
-                radiance = round(raw * NTL_SCALE, 2) if hq else None
+                # v002: float radiance, already in nW·cm⁻²·sr⁻¹, fill -999.9.
+                hq = q in (0, 1) and raw > NTL_FILL_BELOW
+                radiance = round(raw, 2) if hq else None
 
                 # 3×3 window (~1.5 km): mean over high-quality pixels
                 # only, so one bad pixel or an off-by-one coordinate
                 # doesn't decide the reading.
-                r0, r1 = max(row_i - 1, 0), min(row_i + 2, PX_PER_TILE)
-                c0, c1 = max(col_i - 1, 0), min(col_i + 2, PX_PER_TILE)
-                w_ntl = ntl[r0:r1, c0:c1].astype(np.int64)
+                r0, r1 = max(row_i - 1, 0), min(row_i + 2, n_rows)
+                c0, c1 = max(col_i - 1, 0), min(col_i + 2, n_cols)
+                w_ntl = ntl[r0:r1, c0:c1].astype(np.float64)
                 w_mqf = mqf[r0:r1, c0:c1]
-                mask = ((w_mqf == 0) | (w_mqf == 1)) & (w_ntl != NTL_FILL)
+                mask = ((w_mqf == 0) | (w_mqf == 1)) & (w_ntl > NTL_FILL_BELOW)
                 px_hq = int(mask.sum())
-                rad3 = round(float(w_ntl[mask].mean()) * NTL_SCALE, 2) if px_hq else None
+                rad3 = round(float(w_ntl[mask].mean()), 2) if px_hq else None
 
                 rows.append({
                     "facility_type": fac["facility_type"],
@@ -350,6 +430,23 @@ def sample_tile(night: date, tile: str, filename: str,
 
 
 # ─── Per-night driver ──────────────────────────────────────────────
+def completed_nights() -> set[str]:
+    """Nights already ingested with every expected tile present.
+
+    The rescan window is deliberately wide (NASA publishes in stages), so
+    without this every run would re-download nights that are already
+    complete. Skipping them keeps a 12-night window as cheap as a 1-night
+    one in steady state, while still re-checking anything incomplete."""
+    try:
+        rows = sb_get_all(
+            "blackmarble_ingest_runs?select=night,tiles_missing,ok&tiles_missing=eq.0&ok=is.true"
+        )
+        return {r["night"] for r in rows}
+    except Exception as e:                # noqa: BLE001 — non-fatal optimisation
+        log(f"WARN: could not read completed nights ({e}) — will rescan all")
+        return set()
+
+
 def process_night(night: date, roster: dict[str, list[dict]]) -> None:
     published = list_night_files(night)
     expected = list(roster.keys())
@@ -418,7 +515,13 @@ def main() -> int:
         log("FATAL: empty roster — no FIRMS-watched facilities found (is FIRMS ingest healthy?)")
         return 1
 
-    for night in nights:
+    done = completed_nights()
+    todo = [n for n in nights if n.isoformat() not in done]
+    skipped = len(nights) - len(todo)
+    if skipped:
+        log(f"skipping {skipped} night(s) already complete; {len(todo)} to process")
+
+    for night in todo:
         try:
             process_night(night, roster)
         except AuthError as e:
