@@ -54,6 +54,8 @@ export default function Home() {
   const [mines, setMines] = useState<any[]>([]);
   // FIRMS thermal anomalies — satellite hot-pixel DETECTIONS, not fires.
   const [thermal, setThermal] = useState<any[]>([]);
+  // Black Marble night-lights — measured radiance on clear nights, never power state.
+  const [nightlights, setNightlights] = useState<any[]>([]);
 
   // Per-data-source fetch state (one entry per /api/* route).
   const [dataState, setDataState] = useState<Record<DataKey, LayerState>>({
@@ -67,6 +69,7 @@ export default function Home() {
     refineries: initialDataState(),
     mines: initialDataState(),
     firms: initialDataState(),
+    nightlights: initialDataState(),
   });
 
   // Per-sub-layer visibility — independent of fetch state, since one parent
@@ -120,6 +123,7 @@ export default function Home() {
     name === 'pipelines' ? setPipelines :
     name === 'refineries' ? setRefineries :
     name === 'firms' ? setThermal :
+    name === 'nightlights' ? setNightlights :
     setMines;
 
   const fetchLayer = useCallback(
@@ -220,6 +224,7 @@ export default function Home() {
       'power-plants': powerPlants,
       pipelines, refineries, mines,
       firms: thermal,
+      nightlights,
     };
     for (const cat of CATEGORIES) {
       for (const sub of cat.sublayers) {
@@ -231,7 +236,7 @@ export default function Home() {
       }
     }
     return out;
-  }, [aircraft, vessels, conflicts, airports, ports, powerPlants, pipelines, refineries, mines, thermal]);
+  }, [aircraft, vessels, conflicts, airports, ports, powerPlants, pipelines, refineries, mines, thermal, nightlights]);
 
   const visibleAircraft = useMemo(
     () => filterByVisibleSublayers(aircraft, 'aircraft', sublayerVisible),
@@ -275,6 +280,10 @@ export default function Home() {
     () => filterByVisibleSublayers(thermal, 'thermal', sublayerVisible),
     [thermal, sublayerVisible],
   );
+  const visibleNightlights = useMemo(
+    () => filterByVisibleSublayers(nightlights, 'nightlights', sublayerVisible),
+    [nightlights, sublayerVisible],
+  );
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden">
@@ -293,6 +302,7 @@ export default function Home() {
             refineries={visibleRefineries}
             mines={visibleMines}
             thermal={visibleThermal}
+            nightlights={visibleNightlights}
             onViewportChange={setBbox}
           />
           <LayerControls
