@@ -56,7 +56,14 @@ import requests
 
 # ─── Config ────────────────────────────────────────────────────────
 EARTHDATA_TOKEN = os.environ.get("EARTHDATA_TOKEN")
-SUPABASE_URL = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
+# Accept either name: the Node workers (ais/adsb) use the web app's
+# NEXT_PUBLIC_SUPABASE_URL convention, so copying variables from an
+# existing Railway service must just work.
+SUPABASE_URL = (
+    os.environ.get("SUPABASE_URL")
+    or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
+    or ""
+).rstrip("/")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 LAG_DAYS = int(os.environ.get("BM_LAG_DAYS", "3"))
@@ -360,7 +367,7 @@ def process_night(night: date, roster: dict[str, list[dict]]) -> None:
 
 def main() -> int:
     for name, val in [("EARTHDATA_TOKEN", EARTHDATA_TOKEN),
-                      ("SUPABASE_URL", SUPABASE_URL),
+                      ("SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL)", SUPABASE_URL),
                       ("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_KEY)]:
         if not val:
             log(f"FATAL: {name} missing")
