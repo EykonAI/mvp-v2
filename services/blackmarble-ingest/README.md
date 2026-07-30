@@ -38,6 +38,17 @@ lands entirely in the partially-produced zone and writes nothing — "pending"
 forever. Hence `BM_LAG_DAYS=4` + `BM_RESCAN_DAYS=12`; nights already complete
 (`tiles_missing=0`) are skipped, so the wide window costs nothing in steady state.
 
+## The Bearer token survives a redirect chain (do not "simplify" this)
+Downloading with an EDL token is three hops:
+`ladsweb → urs.earthdata.nasa.gov (validates token) → back to ladsweb (session cookie) → file`.
+
+`requests` **strips the Authorization header on cross-host redirects**
+(`SessionRedirectMixin.rebuild_auth`) — which silently removes the credential the
+middle hop exists to check. Earthdata then serves its **login page**, which looks
+exactly like a rejected token. `EarthdataSession` preserves the header across the
+Earthdata auth host (NASA's documented `curl -L -b session` behaviour, in requests
+form). Replacing it with a plain `requests.get` reintroduces a false "bad token".
+
 ## Setup (Railway)
 1. Apply migration `091_blackmarble_radiance.sql` in the Supabase SQL Editor
    **before** deploying.
