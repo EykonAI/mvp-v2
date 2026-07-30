@@ -147,11 +147,54 @@ class AuthError(RuntimeError):
     fault: retrying cannot fix it, and the remedy is a human action."""
 
 
+class EarthdataSession(requests.Session):
+    """A session that keeps the Bearer token across NASA's redirect chain.
+
+    ─── Why this class exists (the 2026-07-30 false "bad token") ──────
+    Downloading from LAADS with an EDL token is a THREE-HOP dance:
+        ladsweb  →  urs.earthdata.nasa.gov (validates the token)
+                 →  back to ladsweb with a session cookie  →  file
+    `requests` strips the Authorization header on any cross-host
+    redirect (SessionRedirectMixin.rebuild_auth) — a sensible default
+    that here silently removes the very credential the middle hop
+    exists to check. Earthdata then sees an anonymous request and
+    serves its login page, which reads exactly like a rejected token.
+    Two good tokens were regenerated chasing this.
+
+    NASA's documented remedy is `curl -L -b session`: follow redirects
+    AND keep cookies. This is that, in requests form — preserve the
+    header whenever the hop involves the Earthdata auth host, and let
+    the inherited cookie jar carry the session cookie back to ladsweb.
+    """
+
+    AUTH_HOST = "urs.earthdata.nasa.gov"
+
+    def rebuild_auth(self, prepared_request, response):
+        headers = prepared_request.headers
+        if "Authorization" not in headers:
+            return
+        original = requests.utils.urlparse(response.request.url).hostname
+        redirect = requests.utils.urlparse(prepared_request.url).hostname
+        # Keep the token only while we are entering or leaving the
+        # Earthdata auth host; drop it on any unrelated host change, so
+        # this stays as safe as the default it replaces.
+        if (
+            original != redirect
+            and redirect != self.AUTH_HOST
+            and original != self.AUTH_HOST
+        ):
+            del headers["Authorization"]
+
+
+SESSION = EarthdataSession()
+
+
 def http_get(url: str, headers: dict, stream: bool = False) -> requests.Response:
     last: Exception | None = None
     for attempt in range(RETRIES):
         try:
-            r = requests.get(url, headers=headers, timeout=HTTP_TIMEOUT, stream=stream)
+            r = SESSION.get(url, headers=headers, timeout=HTTP_TIMEOUT,
+                            stream=stream, allow_redirects=True)
             # A rejected token does not 401 — LAADS 303-redirects to the
             # Earthdata OAuth page, which may itself return HTML 200 or
             # (as seen 2026-07-30) crash with 500. Any landing on
@@ -336,10 +379,12 @@ def list_night_files(night: date) -> dict[str, str]:
             parts = name.split(".")
             # VNP46A2.A2026204.h03v04.002.2026210181520.h5 → parts[2] = tile
             if len(parts) >= 3 and parts[0] == "VNP46A2":
-                # Prefer the listing's own downloadsLink over composing a
-                # path — it survives the archive-layout changes that broke
-                # the v001 assumption.
-                out[parts[2]] = e.get("downloadsLink") or name
+                # Keep the FILENAME, not the listing's downloadsLink.
+                # The link points at api/v2/content/archives (the browser
+                # download route); NASA's EDL-token guide documents the
+                # /archive/allData/... path, which is what sample_tile
+                # composes. Same bytes, documented auth behaviour.
+                out[parts[2]] = name
         # The v2 API pages large directories (a full night is ~450
         # global tiles); follow the cursor when present.
         url = payload.get("nextPageLink") if isinstance(payload, dict) else None
@@ -355,8 +400,9 @@ def sample_tile(night: date, tile: str, href: str,
     if href.startswith("http"):
         url = href
     else:
+        # The path NASA's own EDL-token guide documents.
         doy = night.timetuple().tm_yday
-        url = (f"https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/archives/"
+        url = (f"https://ladsweb.modaps.eosdis.nasa.gov/archive/"
                f"allData/{COLLECTION}/VNP46A2/{night.year}/{doy:03d}/{href}")
     r = http_get(url, {"Authorization": f"Bearer {EARTHDATA_TOKEN}"}, stream=True)
     if r.status_code == 404:
