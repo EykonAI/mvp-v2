@@ -102,28 +102,46 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: `Supabase error: ${evErr.message}` }, { status: 502 });
     }
 
-    // 4 · Coordinates, PAGED. The registry view is ~13k rows and PostgREST
-    //     caps an unpaged response at ~1,000 — an unpaged read silently
-    //     returns a fraction, the join then misses, and the layer renders a
-    //     healthy-looking 18% of the data (measured: 756 of 4,234 points,
-    //     with the rest counted as skipped_no_geo). Page explicitly, and
-    //     surface any shortfall in the payload rather than hiding it.
-    const PAGE = 1000;
+    // 4 · Coordinates, fetched ONLY for the facilities we actually plot.
+    //
+    //     The first cut paged the whole registry with a 40k stop, on the
+    //     belief that firms_monitored_facilities holds ~13k rows. It does
+    //     not: the view unions refineries with EVERY power plant (~183k
+    //     rows — the capacity filter lives in the rollup function, not the
+    //     view). So the stop tripped at 42k, every facility past it failed
+    //     to join, and the globe rendered a healthy-looking 39% of the data
+    //     (measured on prod: count 1,666 vs skipped_no_geo 2,568).
+    //
+    //     Downloading a 183k-row registry to place ~4k points was the wrong
+    //     shape anyway. Ask for exactly the keys in hand instead: bounded,
+    //     far fewer rows, and correct by construction rather than by a
+    //     guessed ceiling.
+    const wanted = new Map<string, Set<string>>();   // facility_type → ids
+    for (const r of [...radRows, ...(eventRows ?? [])] as Array<{ facility_type: string; facility_id: string }>) {
+      if (!r?.facility_type || r.facility_id == null) continue;
+      if (!wanted.has(r.facility_type)) wanted.set(r.facility_type, new Set());
+      wanted.get(r.facility_type)!.add(String(r.facility_id));
+    }
+
+    // PostgREST puts the .in() list in the URL, so chunk it well under the
+    // URL-length limit rather than sending one enormous filter.
+    const ID_CHUNK = 300;
     const coords = new Map<string, CoordRow>();
-    for (let offset = 0; ; offset += PAGE) {
-      const { data, error } = await supabase
-        .from('firms_monitored_facilities')
-        .select('facility_type,facility_id,facility_name,facility_country,latitude,longitude')
-        .range(offset, offset + PAGE - 1);
-      if (error) {
-        return NextResponse.json({ error: `Supabase error: ${error.message}` }, { status: 502 });
+    for (const [ftype, idSet] of wanted) {
+      const ids = Array.from(idSet);
+      for (let i = 0; i < ids.length; i += ID_CHUNK) {
+        const { data, error } = await supabase
+          .from('firms_monitored_facilities')
+          .select('facility_type,facility_id,facility_name,facility_country,latitude,longitude')
+          .eq('facility_type', ftype)
+          .in('facility_id', ids.slice(i, i + ID_CHUNK));
+        if (error) {
+          return NextResponse.json({ error: `Supabase error: ${error.message}` }, { status: 502 });
+        }
+        for (const c of (data ?? []) as CoordRow[]) {
+          coords.set(`${c.facility_type}|${c.facility_id}`, c);
+        }
       }
-      const page = (data ?? []) as CoordRow[];
-      for (const c of page) coords.set(`${c.facility_type}|${c.facility_id}`, c);
-      if (page.length < PAGE) break;
-      // Hard stop: the registry is ~13k rows; 40k means something is wrong
-      // upstream and we should not spin forever.
-      if (offset > 40_000) break;
     }
 
     // Optional viewport bbox (same snake_case contract as /api/firms).
@@ -208,6 +226,10 @@ export async function GET(req: NextRequest) {
       // under-serving (the PostgREST 1,000-row cap) and the layer is
       // rendering a fraction of the data while looking healthy.
       skipped_no_geo: skippedNoGeo,
+      // Coordinates resolved for the facilities in THIS response (not a
+      // registry size). facilities_wanted - facilities_indexed is the
+      // genuine unresolvable set, and should be 0.
+      facilities_wanted: Array.from(wanted.values()).reduce((n, s) => n + s.size, 0),
       facilities_indexed: coords.size,
       // Shipped with the payload so no consumer can render this feed
       // without the caveat being available to it (same contract as /api/firms).
