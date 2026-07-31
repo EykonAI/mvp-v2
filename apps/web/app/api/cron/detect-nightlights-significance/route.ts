@@ -92,10 +92,64 @@ async function handle(req: NextRequest) {
   const results: Array<{ day: string; events: number }> = [];
 
   const today = new Date();
-  const days: string[] = [];
-  for (let i = 1; i <= DETECT_DAYS; i++) {
-    days.push(ymd(new Date(today.getTime() - i * 86_400_000)));
+
+  // ─── The detection window is anchored to the DATA, not the clock ───
+  //
+  // The first cut judged today−1…today−3. That is only correct if last
+  // night's radiance exists, and with VNP46A2 it routinely does not:
+  // NASA publishes in stages and, measured 2026-07-31, had not published
+  // our tiles since 2026-07-22 — nine days. The detector therefore spent
+  // every run judging nights that hold no rows, returning ok:true,
+  // events:0, eligible_facilities:4,147 while being STRUCTURALLY UNABLE
+  // TO FIRE. Green cron, honest-looking zero, no possible signal: the
+  // exact failure mode this platform keeps re-learning.
+  //
+  // Anchor on max(period) instead. The newest night that actually has
+  // rows is the newest night that can be judged, whether that is
+  // yesterday or a fortnight ago, so the detector self-heals when NASA
+  // catches up rather than waiting for the calendar to agree with it.
+  const { data: newestRow, error: newestErr } = await supabase
+    .from('blackmarble_facility_radiance')
+    .select('period')
+    .order('period', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (newestErr) {
+    return NextResponse.json(
+      { ok: false, errors: [`newest-night probe: ${newestErr.message}`] },
+      { status: 500 },
+    );
   }
+
+  const newestNight: string | null = (newestRow as { period?: string } | null)?.period ?? null;
+
+  // No radiance at all: nothing to judge, and saying so is the honest
+  // answer. Not an error — the ingest may simply not have run yet.
+  if (!newestNight) {
+    return NextResponse.json({
+      ok: true,
+      days: [],
+      events: 0,
+      newest_night: null,
+      note:
+        'No radiance rows exist yet, so there is nothing to judge. This is ' +
+        'not an absence of activity — it is an absence of data.',
+    });
+  }
+
+  const anchor = new Date(`${newestNight}T00:00:00Z`);
+  const days: string[] = [];
+  for (let i = 0; i < DETECT_DAYS; i++) {
+    days.push(ymd(new Date(anchor.getTime() - i * 86_400_000)));
+  }
+
+  // How far behind the wall clock the newest usable night is. Surfaced
+  // in the response so a large NASA publication gap is visible here
+  // rather than having to be inferred from an unexplained zero.
+  const lagDays = Math.round(
+    (Date.parse(`${ymd(today)}T00:00:00Z`) - anchor.getTime()) / 86_400_000,
+  );
 
   let totalEvents = 0;
   for (const day of days) {
@@ -240,6 +294,11 @@ async function handle(req: NextRequest) {
     {
       ok,
       days,
+      // The night the window is anchored to (newest with radiance rows),
+      // and how far behind today that is. A large lag_days is NASA
+      // publication latency, not a fault here — but it must be visible.
+      newest_night: newestNight,
+      lag_days: lagDays,
       events: totalEvents,
       by_day: results,
       by_type: byType,
