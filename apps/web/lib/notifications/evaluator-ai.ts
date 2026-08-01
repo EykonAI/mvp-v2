@@ -57,6 +57,35 @@ interface BucketSpec {
 }
 
 const BUCKET_SPECS: ReadonlyArray<BucketSpec> = [
+  // ─── Satellite sensors (Phase 2) ───────────────────────────────
+  // Site-level views, so one multi-unit plant is one line rather than
+  // five identical ones eating the token budget. recencyColumn is
+  // first_seen_at (detection time), not period (event date) — see
+  // BUCKET_TABLES. The format strings carry BOTH, plus the honesty
+  // caveat inline, so Claude cannot read a hot pixel as a confirmed
+  // strike or a dark pixel as a confirmed outage.
+  {
+    bucket: 'Thermal',
+    table: 'firms_significant_sites',
+    columns: 'site_name, country, period, event_type, observed_count, observed_max_frp, dark_days, first_seen_at',
+    recencyColumn: 'first_seen_at',
+    countryColumn: 'country',
+    format: r =>
+      `[Thermal @${r.first_seen_at ?? '?'}] ${r.event_type ?? '?'} at ${r.site_name ?? '?'} (${r.country ?? '?'}) on ${r.period ?? '?'} · ${r.observed_count ?? 0} detections, max FRP ${r.observed_max_frp ?? '?'} MW` +
+      (r.event_type === 'went_dark' ? ` · ${r.dark_days ?? '?'} consecutive covered dark days` : '') +
+      ' · hot pixel vs the facility\'s own baseline, NOT a confirmed fire or strike',
+  },
+  {
+    bucket: 'Nightlights',
+    table: 'nightlights_significant_sites',
+    columns: 'site_name, country, period, event_type, observed_radiance, baseline_mean, dark_nights, first_seen_at',
+    recencyColumn: 'first_seen_at',
+    countryColumn: 'country',
+    format: r =>
+      `[Nightlights @${r.first_seen_at ?? '?'}] ${r.event_type ?? '?'} at ${r.site_name ?? '?'} (${r.country ?? '?'}) on night ${r.period ?? '?'} · radiance ${r.observed_radiance ?? '?'} vs baseline ${r.baseline_mean ?? '?'} nW` +
+      (r.event_type === 'went_dark_lights' ? ` · ${r.dark_nights ?? '?'} consecutive CLEAR dark nights` : '') +
+      ' · radiance is NOT power state; observation night is typically ~1-2 weeks before detection',
+  },
   {
     bucket: 'Conflict',
     table: 'conflict_events',
