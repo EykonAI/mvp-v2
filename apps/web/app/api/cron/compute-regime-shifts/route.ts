@@ -30,15 +30,16 @@ export async function POST(req: NextRequest) {
     const bbox = t.bbox;
     if (!bbox) continue;
 
-    for (const [signal, table] of [
-      ['vessel_count',  'vessel_positions']   as const,
-      ['flight_count',  'aircraft_positions'] as const,
-      ['acled_events',  'conflict_events']    as const,
-    ]) {
+    for (const spec of SIGNALS) {
       const [o, n] = await Promise.all([
-        windowStats(supabase, table, bbox, oldSince, oldUntil),
-        windowStats(supabase, table, bbox, newSince, now.toISOString()),
+        spec.kind === 'nightlights_radiance'
+          ? nightlightsRadianceStats(supabase, bbox, oldSince, oldUntil)
+          : windowStats(supabase, spec.table!, bbox, oldSince, oldUntil),
+        spec.kind === 'nightlights_radiance'
+          ? nightlightsRadianceStats(supabase, bbox, newSince, now.toISOString())
+          : windowStats(supabase, spec.table!, bbox, newSince, now.toISOString()),
       ]);
+      const signal = spec.signal;
 
       const effect_size = o.std > 0 ? (n.mean - o.mean) / o.std : 0;
       const z = Math.abs(effect_size);
@@ -73,6 +74,86 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ ok: true, inserted });
+}
+
+
+/**
+ * Signals the detector watches per theatre.
+ *
+ * The three original signals are COUNTS of rows arriving in a feed. The
+ * two sensor signals are deliberately different in kind:
+ *
+ *  • thermal_detections reads RAW firms_thermal_anomalies, not
+ *    firms_significant_events. Counting our own significance output
+ *    would be circular — it depends on baselines we chose. A hot-pixel
+ *    count is a physical measurement.
+ *  • nightlights_radiance is a MEAN OF A VALUE, not a count. Counting
+ *    radiance rows would just count how many facilities we sampled,
+ *    which is constant by construction. "This region got dimmer" is the
+ *    regime shift; the number of observations is not.
+ */
+interface SignalSpec {
+  signal: string;
+  /** Table for the generic count-per-day path. */
+  table?: string;
+  /** Non-count signals that need their own query. */
+  kind?: 'nightlights_radiance';
+}
+
+const SIGNALS: ReadonlyArray<SignalSpec> = [
+  { signal: 'vessel_count',       table: 'vessel_positions' },
+  { signal: 'flight_count',       table: 'aircraft_positions' },
+  { signal: 'acled_events',       table: 'conflict_events' },
+  // Raw hot pixels. firms_thermal_anomalies already carries latitude,
+  // longitude and ingested_at, so it drops straight into windowStats.
+  { signal: 'thermal_detections', table: 'firms_thermal_anomalies' },
+  { signal: 'nightlights_radiance', kind: 'nightlights_radiance' },
+];
+
+/**
+ * Mean clear-night radiance per night inside the bbox, via the
+ * migration-096 RPC.
+ *
+ * Aggregated in the database, not in JS: the naive lat/lon BETWEEN join
+ * measured 695 ms per window on prod (seq scan over power_plants), while
+ * ST_Intersects against the geography GiST indexes plus a GROUP BY
+ * returns ~30 rows in 77 ms. The cron issues two of these per theatre,
+ * so the difference compounds.
+ *
+ * Returns the same {count, mean, std} contract as windowStats, but over
+ * NIGHTLY MEAN RADIANCE rather than per-day row counts — so a downward
+ * effect_size here means the region dimmed, not that fewer rows arrived.
+ */
+async function nightlightsRadianceStats(
+  supabase: any,
+  bbox: { lat_min: number; lat_max: number; lon_min: number; lon_max: number },
+  fromIso: string,
+  toIso: string,
+): Promise<{ count: number; mean: number; std: number }> {
+  const { data, error } = await supabase.rpc('nightlights_bbox_nightly_radiance', {
+    p_lat_min: bbox.lat_min,
+    p_lat_max: bbox.lat_max,
+    p_lon_min: bbox.lon_min,
+    p_lon_max: bbox.lon_max,
+    p_from: fromIso.slice(0, 10),
+    p_to: toIso.slice(0, 10),
+  });
+  // Fail soft to an empty window rather than throwing: one signal
+  // erroring must not cost the other four for every theatre. An empty
+  // window yields effect_size 0, which reads as "no shift detected" —
+  // and count:0 in the stored window makes the thinness visible.
+  if (error || !data) return { count: 0, mean: 0, std: 0 };
+
+  const nightly = (data as Array<{ mean_radiance: number | string }>)
+    .map(r => Number(r.mean_radiance))
+    .filter(v => Number.isFinite(v));
+  if (nightly.length === 0) return { count: 0, mean: 0, std: 0 };
+
+  const mean = nightly.reduce((a, b) => a + b, 0) / nightly.length;
+  const std = Math.sqrt(
+    nightly.reduce((a, b) => a + (b - mean) ** 2, 0) / nightly.length,
+  );
+  return { count: nightly.length, mean: round3(mean), std: round3(std) };
 }
 
 async function windowStats(

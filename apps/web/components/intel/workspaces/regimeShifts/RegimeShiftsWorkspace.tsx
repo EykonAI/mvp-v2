@@ -214,6 +214,25 @@ function Head({ children, accent = 'var(--teal)' }: { children: React.ReactNode;
   );
 }
 
+/**
+ * Signal labels. The two sensor signals carry their caveat inline
+ * because the reading is not self-evident from the name:
+ *
+ *  • a thermal DETECTION is a hot pixel, never a confirmed fire;
+ *  • night-lights is a MEAN RADIANCE, not a count, so a downward
+ *    effect means the region got DIMMER — the interesting direction —
+ *    whereas for the count signals a rise is what draws attention.
+ *    Saying "mean, clear nights" in the label stops a reader treating
+ *    a fall as missing data.
+ */
+const SIGNAL_LABELS: Record<string, string> = {
+  vessel_count: 'Vessel traffic',
+  flight_count: 'Flight activity',
+  acled_events: 'Conflict events',
+  thermal_detections: 'Thermal detections · hot pixels',
+  nightlights_radiance: 'Night-lights radiance · mean, clear nights',
+};
+
 function prettySignal(s: string): string {
-  return s.replaceAll('_', ' ');
+  return SIGNAL_LABELS[s] ?? s.replaceAll('_', ' ');
 }
