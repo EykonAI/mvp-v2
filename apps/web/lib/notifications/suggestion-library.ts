@@ -34,7 +34,8 @@ export type SuggestionRuleType =
   | 'single_event'
   | 'multi_event'
   | 'outcome_ai'
-  | 'cross_data_ai';
+  | 'cross_data_ai'
+  | 'firms_proximity';
 
 export interface SingleEventSuggestionConfig {
   rule_type: 'single_event';
@@ -67,11 +68,35 @@ export interface CrossDataAiSuggestionConfig {
   country?: string;
 }
 
+/** Thermal proximity (rule_type='firms_proximity', migration 084).
+ *  Watches NASA FIRMS satellite thermal detections near a filtered set
+ *  of monitored facilities. Unlike the tool/bucket rule types this one
+ *  has its own evaluator (lib/notifications/firms-proximity.ts) and its
+ *  own builder tab — the API refuses to save a rule whose filters match
+ *  zero monitored facilities, so a card here can never create a rule
+ *  that silently never fires. */
+export interface FirmsProximitySuggestionConfig {
+  rule_type: 'firms_proximity';
+  facility_type?: 'refinery' | 'power_plant' | null;
+  country?: string | null;
+  facility_name?: string | null;
+  radius_km: number;
+  min_frp?: number;
+  min_detections?: number;
+  /** Gate on migration-085 significance (ignition / elevated /
+   *  went_dark) rather than raw detections. Strongly preferred: a
+   *  working refinery flares EVERY day, so an ungated rule fires
+   *  forever and trains the reader to ignore the channel. */
+  significant_only?: boolean;
+}
+
+
 export type SuggestionConfig =
   | SingleEventSuggestionConfig
   | MultiEventSuggestionConfig
   | OutcomeAiSuggestionConfig
-  | CrossDataAiSuggestionConfig;
+  | CrossDataAiSuggestionConfig
+  | FirmsProximitySuggestionConfig;
 
 /**
  * Feed-availability gating for the self-healing library (PR honesty
@@ -647,6 +672,66 @@ export const PERSONA_SUGGESTIONS: Record<PersonaId, Suggestion[]> = {
 // the AI Chat Suggested tab.
 
 export const CROSS_DATA_SUGGESTIONS: Suggestion[] = [
+  // ─── Thermal proximity (rule_type='firms_proximity') ─────────────
+  // The FIRMS evaluator, its coverage pre-check and its atomic dedup
+  // shipped with migration 084 and have been live since. Until the
+  // builder gained a Thermal-proximity tab there was no way for a user
+  // to reach any of it, so these are the first cards that surface a
+  // capability the platform already had.
+  //
+  // Every one sets significant_only: a working refinery flares daily,
+  // so a raw-detection rule fires forever and the reader mutes the
+  // channel — which reads as coverage while providing none.
+  //
+  // Note on filters: FIRMS ingest is REGIONAL (Russia/Ukraine, Arabian
+  // Gulf, Europe), and the API refuses to save a rule matching zero
+  // monitored facilities. Cards therefore lean on facility_type and
+  // name rather than countries outside those boxes, so a click cannot
+  // land on a rejection.
+  {
+    id: 'firms-refinery-significant',
+    title: 'Unusual thermal activity at a refinery (not routine flaring)',
+    config: {
+      rule_type: 'firms_proximity',
+      facility_type: 'refinery',
+      radius_km: 5,
+      min_detections: 1,
+      significant_only: true,
+    },
+  },
+  {
+    id: 'firms-power-plant-significant',
+    title: 'Power plant lights up, burns harder, or goes dark',
+    config: {
+      rule_type: 'firms_proximity',
+      facility_type: 'power_plant',
+      radius_km: 5,
+      min_detections: 1,
+      significant_only: true,
+    },
+  },
+  {
+    id: 'firms-high-energy',
+    title: 'High-energy thermal event at any monitored facility (FRP \u2265 50 MW)',
+    config: {
+      rule_type: 'firms_proximity',
+      radius_km: 5,
+      min_frp: 50,
+      min_detections: 1,
+      significant_only: true,
+    },
+  },
+  {
+    id: 'firms-named-facility',
+    title: 'Watch one named facility \u2014 edit the name before saving',
+    config: {
+      rule_type: 'firms_proximity',
+      facility_name: 'Ryazan',
+      radius_km: 5,
+      min_detections: 1,
+      significant_only: true,
+    },
+  },
   {
     id: 'xd-conflict-refinery-maritime',
     title: 'Co-occurring signals across conflict + refinery + maritime feeds',
