@@ -83,6 +83,31 @@ function ymd(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * The physical site a facility row belongs to: its exact coordinates.
+ *
+ * The registry stores one row per GENERATING UNIT — Az Zour South is
+ * five rows at byte-identical coordinates (measured spread 0.00 km).
+ * Black Marble samples a ~500 m pixel, so every unit returns THE SAME
+ * RADIANCE NUMBER: five rows, one observation, one physical event.
+ * Emitting five flags would put five identical dots in one convergence
+ * cell and inflate every user-facing count ~4x.
+ *
+ * Exact coordinates, not proximity clustering, and that is deliberate:
+ *   Az Zour South  28.7055, 48.3701
+ *   Az Zour North  28.7135, 48.3806   ← ~1.2 km away, a DIFFERENT plant
+ * Rounding to ~1 km would merge two stations that darkened
+ * independently. The real duplicates are not near each other, they are
+ * at the SAME POINT, so exact matching collapses all of them and can
+ * never over-merge.
+ *
+ * MIRRORS the site_key expression in migration 094. Change both or
+ * neither, or this dedupe and the reporting views disagree.
+ */
+function siteKey(lat: number, lon: number): string {
+  return `${lat.toFixed(4)}:${lon.toFixed(4)}`;
+}
+
 async function handle(req: NextRequest) {
   const unauth = requireCronSecret(req);
   if (unauth) return unauth;
@@ -186,6 +211,12 @@ async function handle(req: NextRequest) {
     else eligibleFacilities = typeof data === 'number' ? data : null;
   }
 
+  // Site-level counts. `events` counts ROWS, and the registry stores one
+  // row per generating unit, so rows over-state physical reality ~4x.
+  // Anything user-facing should quote sites.
+  let siteEvents: number | null = null;
+  let byTypeSites: Record<string, number> | null = null;
+
   const byType: Record<string, number> = {};
   if (totalEvents > 0) {
     const { data, error } = await supabase
@@ -198,6 +229,21 @@ async function handle(req: NextRequest) {
         byType[row.event_type] = (byType[row.event_type] ?? 0) + 1;
       }
     }
+
+    // The same breakdown, counted by physical site (migration 094).
+    const { data: siteRows, error: siteErr } = await supabase
+      .from('nightlights_significant_sites')
+      .select('event_type')
+      .in('period', days);
+    if (siteErr) errors.push(`site breakdown: ${siteErr.message}`);
+    else if (siteRows) {
+      const acc: Record<string, number> = {};
+      for (const row of siteRows as Array<{ event_type: string }>) {
+        acc[row.event_type] = (acc[row.event_type] ?? 0) + 1;
+      }
+      byTypeSites = acc;
+      siteEvents = (siteRows as unknown[]).length;
+    }
   }
 
   // ─── Emit Nightlights anomaly_flags for the convergence engine ───
@@ -208,6 +254,10 @@ async function handle(req: NextRequest) {
   // re-fire on the same event.
   let flagsInserted = 0;
   let flagsSkippedNoGeo = 0;
+  // Registry rows collapsed into an already-emitted site this run —
+  // reported so the gap between event rows and physical sites is
+  // visible rather than silently absorbed.
+  let flagsCollapsedToSite = 0;
   try {
     const { data: located, error: locErr } = await supabase.rpc(
       'nightlights_significant_events_located',
@@ -228,9 +278,21 @@ async function handle(req: NextRequest) {
       if (exErr) {
         errors.push(`nl-flags existing: ${exErr.message}`);
       } else {
-        for (const row of (existing ?? []) as Array<{ payload: LocatedEvent | null }>) {
+        for (const row of (existing ?? []) as Array<
+          { payload: (LocatedEvent & { site_key?: string }) | null }
+        >) {
           const p = row.payload;
-          if (p) seen.add(`${p.facility_type}|${p.facility_id}|${p.period}|${p.event_type}`);
+          if (!p) continue;
+          // Flags written before migration 094 carry no site_key, but do
+          // carry coordinates — derive the same key from those so a
+          // pre-094 flag still suppresses a duplicate rather than being
+          // re-emitted once under the new scheme.
+          const site =
+            p.site_key ??
+            (Number.isFinite(p.latitude) && Number.isFinite(p.longitude)
+              ? siteKey(p.latitude as number, p.longitude as number)
+              : null);
+          if (site) seen.add(`${site}|${p.period}|${p.event_type}`);
         }
       }
 
@@ -242,8 +304,16 @@ async function handle(req: NextRequest) {
           flagsSkippedNoGeo++;
           continue;
         }
-        const key = `${e.facility_type}|${e.facility_id}|${e.period}|${e.event_type}`;
-        if (seen.has(key)) continue;
+        // Keyed on SITE, not facility id: the five registry rows for one
+        // plant are one observation from one pixel, and five identical
+        // flags in a convergence cell would be five copies of a single
+        // fact. See siteKey().
+        const site = siteKey(e.latitude as number, e.longitude as number);
+        const key = `${site}|${e.period}|${e.event_type}`;
+        if (seen.has(key)) {
+          flagsCollapsedToSite++;
+          continue;
+        }
         seen.add(key);
         toInsert.push({
           source: NL_FLAG_SOURCE,
@@ -251,6 +321,7 @@ async function handle(req: NextRequest) {
           flag_type: `nightlights_${e.event_type}`,
           severity: NL_SEVERITY[e.event_type] ?? 'low',
           payload: {
+            site_key: site,
             facility_type: e.facility_type,
             facility_id: e.facility_id,
             facility_name: e.facility_name,
@@ -299,14 +370,23 @@ async function handle(req: NextRequest) {
       // publication latency, not a fault here — but it must be visible.
       newest_night: newestNight,
       lag_days: lagDays,
+      // events counts registry ROWS; site_events counts PHYSICAL SITES.
+      // Quote site_events in anything user-facing — one plant is many
+      // rows (one per generating unit) at identical coordinates.
       events: totalEvents,
+      site_events: siteEvents,
       by_day: results,
       by_type: byType,
+      by_type_sites: byTypeSites,
       // inserted counts only NEW flags (idempotent re-runs → 0);
       // skipped_no_geo = events whose facility lacked coordinates.
       nightlights_flags: {
         inserted: flagsInserted,
         skipped_no_geo: flagsSkippedNoGeo,
+        // Registry rows that folded into a site already flagged this run.
+        // One plant is many rows (one per generating unit) at identical
+        // coordinates; this is how many were correctly NOT re-emitted.
+        collapsed_to_site: flagsCollapsedToSite,
       },
       // Null = the probe failed. Zero = no facility has enough CLEAR
       // history yet, so `events: 0` means "cannot yet judge", NOT
