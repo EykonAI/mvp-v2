@@ -38,12 +38,44 @@ interface VerifiedChannel {
   label: string | null;
 }
 
-type RuleMode = 'single_event' | 'multi_event' | 'outcome_ai' | 'cross_data_ai';
+type RuleMode = 'single_event' | 'multi_event' | 'outcome_ai' | 'cross_data_ai' | 'firms_proximity';
 
 interface PredicateState {
   tool: SingleEventToolId;
   filters: Record<string, FilterValue>;
 }
+
+/** Thermal-proximity config, mirroring FirmsProximityConfig in
+ *  lib/notifications/firms-proximity.ts. Bounds here are the SAME
+ *  bounds the API enforces (0.1-5 km): the roll-up is pre-computed at
+ *  a fixed radius, so a larger request cannot be answered and would
+ *  silently under-report. */
+interface FirmsState {
+  facilityType: '' | 'refinery' | 'power_plant';
+  country: string;
+  facilityName: string;
+  radiusKm: number;
+  minFrp: number;
+  minDetections: number;
+  significantOnly: boolean;
+}
+
+const FIRMS_RADIUS_MIN_KM = 0.1;
+const FIRMS_RADIUS_MAX_KM = 5;
+
+const DEFAULT_FIRMS: FirmsState = {
+  facilityType: '',
+  country: '',
+  facilityName: '',
+  radiusKm: 5,
+  minFrp: 0,
+  minDetections: 1,
+  // TRUE by default, deliberately. A working refinery flares every
+  // single day; an ungated rule fires forever and trains the reader to
+  // mute the channel, which is worse than no alert because it reads as
+  // coverage while providing none.
+  significantOnly: true,
+};
 
 interface RuleBuilderProps {
   persona: PersonaId;
@@ -67,6 +99,12 @@ export function RuleBuilder({ persona, onCreated, onCancel, prefill }: RuleBuild
   // Multi-event state
   const [predicates, setPredicates] = useState<PredicateState[]>(initial.predicates);
   const [windowHours, setWindowHours] = useState<number>(initial.windowHours);
+
+  // Thermal-proximity state (rule_type='firms_proximity', migration 084).
+  // significant_only defaults TRUE: a working refinery flares every day,
+  // so an ungated rule fires forever and trains the reader to ignore the
+  // channel. The user can turn it off deliberately.
+  const [firms, setFirms] = useState<FirmsState>(initial.firms);
 
   // AI rules state
   const [outcomeStatement, setOutcomeStatement] = useState(initial.outcomeStatement);
@@ -120,8 +158,18 @@ export function RuleBuilder({ persona, onCreated, onCancel, prefill }: RuleBuild
         predicates: predicates.map(p => ({ tool: p.tool, filters: p.filters })),
         window_hours: windowHours,
       });
+    if (mode === 'firms_proximity') {
+      const what =
+        firms.facilityName.trim() ||
+        (firms.facilityType === 'refinery'
+          ? 'refineries'
+          : firms.facilityType === 'power_plant'
+          ? 'power plants'
+          : 'monitored facilities');
+      return `${firms.significantOnly ? 'Significant thermal' : 'Thermal'} activity — ${what}`;
+    }
     return suggestAiRuleName(mode, outcomeStatement || '(outcome statement)');
-  }, [mode, tool, filters, predicates, windowHours, outcomeStatement]);
+  }, [mode, tool, filters, predicates, windowHours, outcomeStatement, firms]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -129,7 +177,17 @@ export function RuleBuilder({ persona, onCreated, onCancel, prefill }: RuleBuild
     setError(null);
     try {
       const config =
-        mode === 'single_event'
+        mode === 'firms_proximity'
+          ? {
+              facility_type: firms.facilityType || null,
+              country: firms.country.trim() || null,
+              facility_name: firms.facilityName.trim() || null,
+              radius_km: firms.radiusKm,
+              min_frp: firms.minFrp,
+              min_detections: firms.minDetections,
+              significant_only: firms.significantOnly,
+            }
+          : mode === 'single_event'
           ? { tool, filters }
           : mode === 'multi_event'
           ? {
@@ -234,6 +292,10 @@ export function RuleBuilder({ persona, onCreated, onCancel, prefill }: RuleBuild
           }
           onWindowChange={setWindowHours}
         />
+      )}
+
+      {mode === 'firms_proximity' && (
+        <FirmsProximityFields value={firms} onChange={setFirms} />
       )}
 
       {(mode === 'outcome_ai' || mode === 'cross_data_ai') && (
@@ -352,6 +414,7 @@ function ModeSelector({ mode, onChange }: { mode: RuleMode; onChange: (m: RuleMo
       <ModeTab label="Multi-event" active={mode === 'multi_event'} onClick={() => onChange('multi_event')} />
       <ModeTab label="Outcome AI" active={mode === 'outcome_ai'} onClick={() => onChange('outcome_ai')} />
       <ModeTab label="Cross-data AI" active={mode === 'cross_data_ai'} onClick={() => onChange('cross_data_ai')} />
+      <ModeTab label="Thermal proximity" active={mode === 'firms_proximity'} onClick={() => onChange('firms_proximity')} />
     </div>
   );
 }
@@ -679,6 +742,7 @@ interface DerivedPrefill {
   aiBuckets: DataBucket[];
   /** PR 9: pre-baked region narrowing from the suggestion. No UI yet. */
   aiCountry: string;
+  firms: FirmsState;
   name: string;
   cooldown: number;
 }
@@ -705,6 +769,7 @@ function derivePrefill(suggestion: Suggestion | undefined): DerivedPrefill {
     outcomeStatement: '',
     aiBuckets: [],
     aiCountry: '',
+    firms: DEFAULT_FIRMS,
     name: '',
     cooldown: DEFAULT_COOLDOWN_MINUTES,
   };
@@ -755,7 +820,140 @@ function derivePrefill(suggestion: Suggestion | undefined): DerivedPrefill {
         name,
         cooldown,
       };
+    case 'firms_proximity':
+      return {
+        ...base,
+        mode: 'firms_proximity',
+        firms: {
+          facilityType: cfg.facility_type ?? '',
+          country: cfg.country ?? '',
+          facilityName: cfg.facility_name ?? '',
+          radiusKm: cfg.radius_km,
+          minFrp: cfg.min_frp ?? 0,
+          minDetections: cfg.min_detections ?? 1,
+          significantOnly: cfg.significant_only ?? true,
+        },
+        name,
+        cooldown,
+      };
   }
+}
+
+
+/**
+ * Thermal-proximity fields. Deliberately mirrors the API's own bounds
+ * rather than inventing looser ones — the rules endpoint refuses to
+ * save a rule whose filters match zero monitored facilities, so the
+ * honest thing is to make the constrained inputs obvious here rather
+ * than let the user discover them via a rejection.
+ */
+function FirmsProximityFields({
+  value,
+  onChange,
+}: {
+  value: FirmsState;
+  onChange: (v: FirmsState) => void;
+}) {
+  const set = <K extends keyof FirmsState>(k: K, v: FirmsState[K]) =>
+    onChange({ ...value, [k]: v });
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.55, margin: 0 }}>
+        Alerts when NASA FIRMS detects satellite thermal activity near a monitored
+        refinery or power plant. A detection is a hot pixel — not a confirmed fire,
+        strike or outage.
+      </p>
+
+      <label style={fieldLabel}>
+        Facility type
+        <select
+          value={value.facilityType}
+          onChange={e => set('facilityType', e.target.value as FirmsState['facilityType'])}
+          style={inputStyle}
+        >
+          <option value="">Any</option>
+          <option value="refinery">Refineries</option>
+          <option value="power_plant">Power plants</option>
+        </select>
+      </label>
+
+      <label style={fieldLabel}>
+        Country <span style={hintStyle}>reliable for power plants; refinery attribution is sparse — prefer a name</span>
+        <input
+          type="text"
+          value={value.country}
+          onChange={e => set('country', e.target.value)}
+          placeholder="e.g. Russia"
+          style={inputStyle}
+        />
+      </label>
+
+      <label style={fieldLabel}>
+        Facility name contains
+        <input
+          type="text"
+          value={value.facilityName}
+          onChange={e => set('facilityName', e.target.value)}
+          placeholder="e.g. Ryazan"
+          style={inputStyle}
+        />
+      </label>
+
+      <label style={fieldLabel}>
+        Radius (km) <span style={hintStyle}>{FIRMS_RADIUS_MIN_KM}–{FIRMS_RADIUS_MAX_KM}; the roll-up is pre-computed at a fixed radius</span>
+        <input
+          type="number"
+          min={FIRMS_RADIUS_MIN_KM}
+          max={FIRMS_RADIUS_MAX_KM}
+          step={0.1}
+          value={value.radiusKm}
+          onChange={e => set('radiusKm', Number(e.target.value))}
+          style={inputStyle}
+        />
+      </label>
+
+      <label style={fieldLabel}>
+        Minimum detections
+        <input
+          type="number"
+          min={1}
+          step={1}
+          value={value.minDetections}
+          onChange={e => set('minDetections', Number(e.target.value))}
+          style={inputStyle}
+        />
+      </label>
+
+      <label style={fieldLabel}>
+        Minimum FRP (MW) <span style={hintStyle}>fire radiative power; 0 = any</span>
+        <input
+          type="number"
+          min={0}
+          step={1}
+          value={value.minFrp}
+          onChange={e => set('minFrp', Number(e.target.value))}
+          style={inputStyle}
+        />
+      </label>
+
+      <label style={{ ...fieldLabel, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <input
+          type="checkbox"
+          checked={value.significantOnly}
+          onChange={e => set('significantOnly', e.target.checked)}
+        />
+        <span>
+          Significant activity only
+          <span style={{ ...hintStyle, display: 'block' }}>
+            Recommended. A working refinery flares every day — without this the rule
+            fires constantly and the channel becomes noise. Gates on ignition /
+            elevated / went_dark against the facility&rsquo;s own baseline.
+          </span>
+        </span>
+      </label>
+    </div>
+  );
 }
 
 function humanizeCreateError(data: {
