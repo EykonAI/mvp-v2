@@ -81,6 +81,29 @@ const DARK_DAYS = 3;
 // add another unscheduled-cron failure mode (the exact fault §5.1 of
 // the 07-21 brief exists to catch).
 const THERMAL_FLAG_SOURCE = 'thermal_significance_detector_v1';
+
+/**
+ * The physical site a facility row belongs to: its exact coordinates.
+ *
+ * The registry stores one row per GENERATING UNIT at byte-identical
+ * coordinates, and VIIRS resolves ~375 m — so every unit at a plant
+ * falls in one pixel and returns one detection. Five rows are five
+ * copies of a single fact, and emitting five flags puts five identical
+ * dots in one convergence cell.
+ *
+ * Exact coordinates rather than proximity clustering, for the reason
+ * measured in 094: Az Zour North and South sit ~1.2 km apart and
+ * darkened independently, so a ~1 km rounding would have merged two
+ * real, distinct events. True duplicates are not near each other — they
+ * are at the SAME POINT.
+ *
+ * MIRRORS migration 095 and the identical helper in
+ * detect-nightlights-significance. All must agree or the dedupe and the
+ * reporting views disagree about what a site is.
+ */
+function siteKey(lat: number, lon: number): string {
+  return `${lat.toFixed(4)}:${lon.toFixed(4)}`;
+}
 const THERMAL_SEVERITY: Record<string, 'low' | 'medium' | 'high'> = {
   went_dark: 'high',   // habitual burner stops — refinery down / grid hit
   ignition: 'medium',  // a normally-dark facility lights up
@@ -177,6 +200,12 @@ async function handle(req: NextRequest) {
 
   // A breakdown of what was actually written, so the run is legible
   // in Railway logs without a database round-trip by hand.
+  // Site-level counts. `events` counts ROWS, and the registry stores one
+  // row per generating unit, so rows over-state physical reality ~1.9x.
+  // Anything user-facing should quote sites.
+  let siteEvents: number | null = null;
+  let byTypeSites: Record<string, number> | null = null;
+
   const byType: Record<string, number> = {};
   if (totalEvents > 0) {
     const { data, error } = await supabase
@@ -190,6 +219,21 @@ async function handle(req: NextRequest) {
         byType[row.event_type] = (byType[row.event_type] ?? 0) + 1;
       }
     }
+
+    // The same breakdown counted by physical site (migration 095).
+    const { data: siteRows, error: siteErr } = await supabase
+      .from('firms_significant_sites')
+      .select('event_type')
+      .in('period', days);
+    if (siteErr) errors.push(`site breakdown: ${siteErr.message}`);
+    else if (siteRows) {
+      const acc: Record<string, number> = {};
+      for (const row of siteRows as Array<{ event_type: string }>) {
+        acc[row.event_type] = (acc[row.event_type] ?? 0) + 1;
+      }
+      byTypeSites = acc;
+      siteEvents = (siteRows as unknown[]).length;
+    }
   }
 
   // ─── Emit Thermal anomaly_flags for the convergence engine ───────
@@ -200,6 +244,9 @@ async function handle(req: NextRequest) {
   // is left untouched on existing flags so the 72h convergence window
   // doesn't keep re-firing on the same event.
   let thermalFlagsInserted = 0;
+  // Registry rows folded into an already-flagged site — reported so the
+  // gap between event rows and physical sites stays visible.
+  let thermalFlagsCollapsedToSite = 0;
   let thermalFlagsSkippedNoGeo = 0;
   try {
     const { data: located, error: locErr } = await supabase.rpc(
@@ -224,7 +271,16 @@ async function handle(req: NextRequest) {
       } else {
         for (const row of (existing ?? []) as Array<{ payload: LocatedEvent | null }>) {
           const p = row.payload;
-          if (p) seen.add(`${p.facility_type}|${p.facility_id}|${p.period}|${p.event_type}`);
+          if (!p) continue;
+          // Flags written before 095 carry no site_key but do carry
+          // coordinates — derive the same key so a pre-095 flag still
+          // suppresses a duplicate instead of being re-emitted once.
+          const site =
+            (p as { site_key?: string }).site_key ??
+            (Number.isFinite(p.latitude) && Number.isFinite(p.longitude)
+              ? siteKey(p.latitude as number, p.longitude as number)
+              : null);
+          if (site) seen.add(`${site}|${p.period}|${p.event_type}`);
         }
       }
 
@@ -236,8 +292,13 @@ async function handle(req: NextRequest) {
           thermalFlagsSkippedNoGeo++;
           continue;
         }
-        const dedupKey = `${e.facility_type}|${e.facility_id}|${e.period}|${e.event_type}`;
-        if (seen.has(dedupKey)) continue;
+        // Keyed on SITE, not facility id — see siteKey().
+        const site = siteKey(e.latitude as number, e.longitude as number);
+        const dedupKey = `${site}|${e.period}|${e.event_type}`;
+        if (seen.has(dedupKey)) {
+          thermalFlagsCollapsedToSite++;
+          continue;
+        }
         seen.add(dedupKey);
         toInsert.push({
           source: THERMAL_FLAG_SOURCE,
@@ -245,6 +306,7 @@ async function handle(req: NextRequest) {
           flag_type: `firms_${e.event_type}`,
           severity: THERMAL_SEVERITY[e.event_type] ?? 'low',
           payload: {
+            site_key: site,
             facility_type: e.facility_type,
             facility_id: e.facility_id,
             facility_name: e.facility_name,
@@ -330,15 +392,20 @@ async function handle(req: NextRequest) {
     {
       ok,
       days,
+      // events counts registry ROWS; site_events counts PHYSICAL SITES.
+      // Quote site_events in anything user-facing.
       events: totalEvents,
+      site_events: siteEvents,
       by_day: results,
       by_type: byType,
+      by_type_sites: byTypeSites,
       // Thermal flags emitted into anomaly_flags for the convergence
       // engine. inserted counts only NEW flags (idempotent re-runs → 0);
       // skipped_no_geo = significant events whose facility lacked
       // coordinates and so cannot enter a convergence cell.
       thermal_flags: {
         inserted: thermalFlagsInserted,
+        collapsed_to_site: thermalFlagsCollapsedToSite,
         skipped_no_geo: thermalFlagsSkippedNoGeo,
       },
       // Null = the probe itself failed. Zero = no facility has enough
