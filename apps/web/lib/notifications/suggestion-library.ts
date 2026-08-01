@@ -672,6 +672,48 @@ export const PERSONA_SUGGESTIONS: Record<PersonaId, Suggestion[]> = {
 // the AI Chat Suggested tab.
 
 export const CROSS_DATA_SUGGESTIONS: Suggestion[] = [
+  // ─── Sensor buckets (Phase 2) ────────────────────────────────────
+  // These use the AI rule types, whose builder tabs already exist, so
+  // they reach users immediately. The headline card is the first one:
+  // two INDEPENDENT satellites agreeing is the strongest claim the
+  // platform can make, and until now there was no way to ask for it.
+  {
+    id: 'sensor-corroborated-outage',
+    title: 'Outage corroborated by BOTH satellites (thermal + night-lights)',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'A facility shows a thermal went_dark AND a night-lights went_dark_lights within days of each other — ' +
+        'two independent sensors (infrared combustion vs visible light) agreeing on the same site stopping. ' +
+        'Treat agreement as materially stronger evidence than either alone, but still an inference: neither ' +
+        'sensor observes power state directly.',
+      buckets: ['Thermal', 'Nightlights'],
+    },
+  },
+  {
+    id: 'sensor-thermal-near-conflict',
+    title: 'Thermal activity at a facility near conflict events',
+    config: {
+      rule_type: 'cross_data_ai',
+      outcome_statement:
+        'Significant thermal activity at a monitored facility co-occurring with conflict events in the same ' +
+        'area. A hot pixel is not a strike — corroborate before attributing, and say which is observation and ' +
+        'which is inference.',
+      buckets: ['Thermal', 'Conflict'],
+    },
+  },
+  {
+    id: 'sensor-nightlights-grid',
+    title: 'Possible grid disruption — facilities going dark at night',
+    config: {
+      rule_type: 'outcome_ai',
+      outcome_statement:
+        'Power stations or refineries darkening across consecutive clear nights, suggesting a possible grid or ' +
+        'plant outage. Night-lights observations run ~1-2 weeks behind, so report the observation night, not ' +
+        'the detection date.',
+      buckets: ['Nightlights'],
+    },
+  },
   // ─── Thermal proximity (rule_type='firms_proximity') ─────────────
   // The FIRMS evaluator, its coverage pre-check and its atomic dedup
   // shipped with migration 084 and have been live since. Until the

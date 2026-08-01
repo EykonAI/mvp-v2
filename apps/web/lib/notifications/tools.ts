@@ -193,6 +193,19 @@ export const DATA_BUCKETS = [
   // registries (refineries / pipelines / mines / power). Written by
   // /api/cron/ingest-gdelt-energy-events into infrastructure_events.
   'InfrastructureEvents',
+  // Phase 2: the two satellite sensor layers. Bound to the SITE-LEVEL
+  // views (migrations 094/095), never the raw event tables — the
+  // facility registry stores one row per generating unit at identical
+  // coordinates, so counting rows over-states physical reality ~2-4x.
+  //
+  // Both use first_seen_at (when eYKON DETECTED the event) as the
+  // recency column, not period (the night/day it happened). That is
+  // deliberate: a rule fires when we learn something, and Black Marble
+  // publishes ~1-2 weeks behind, so a window over `period` would never
+  // match an hours-scale rule. The observation date travels in the
+  // payload so the reader still sees when it actually happened.
+  'Thermal',
+  'Nightlights',
 ] as const;
 export type DataBucket = (typeof DATA_BUCKETS)[number];
 
@@ -242,6 +255,13 @@ export interface BucketTableSpec {
   /** Default column for metric='count_distinct' when distinct_on is not set. */
   defaultDistinctColumn?: string;
   /**
+   * Column holding the producing detector's domain, when the table
+   * mixes several. Only anomaly_flags does today: Conflict, Energy,
+   * Maritime, Thermal and Nightlights all write into it, so a rule over
+   * that bucket sees everything unless it narrows on this column.
+   */
+  domainColumn?: string;
+  /**
    * When set, country filter resolves via geo_regions (PR 6 — migration
    * 042) using ST_Intersects on this bucket's geom column rather than
    * the ILIKE-on-countryColumn fallback. The string is the Supabase
@@ -267,9 +287,18 @@ export const BUCKET_TABLES: ReadonlyArray<BucketTableSpec> = [
   { bucket: 'Mining',            table: 'mines',             recencyColumn: 'ingested_at', countryColumn: 'country' },
   { bucket: 'AviationInfra',     table: 'airports',          recencyColumn: 'ingested_at', countryColumn: 'iso_country' },
   { bucket: 'MaritimeInfra',     table: 'ports',             recencyColumn: 'ingested_at', countryColumn: 'country' },
-  { bucket: 'AnomalyFlags',      table: 'anomaly_flags',     recencyColumn: 'created_at' },
+  // domainColumn lets a rule narrow to one detector's output. Both
+  // sensor detectors already write here, so without it their rows
+  // arrived in this bucket unlabelled and unfilterable — data leaking
+  // in with no way to ask for it.
+  { bucket: 'AnomalyFlags',      table: 'anomaly_flags',     recencyColumn: 'created_at', domainColumn: 'domain' },
   { bucket: 'ConvergenceEvents', table: 'convergence_events',recencyColumn: 'created_at',  countryColumn: 'location' },
   { bucket: 'InfrastructureEvents', table: 'infrastructure_events', recencyColumn: 'ingested_at', countryColumn: 'country', defaultDistinctColumn: 'gkg_record_id' },
+  // Site-level significance views. defaultDistinctColumn is site_key so
+  // count_distinct answers "how many physical sites", which is the only
+  // honest unit for these feeds.
+  { bucket: 'Thermal',     table: 'firms_significant_sites',       recencyColumn: 'first_seen_at', countryColumn: 'country', defaultDistinctColumn: 'site_key' },
+  { bucket: 'Nightlights', table: 'nightlights_significant_sites',  recencyColumn: 'first_seen_at', countryColumn: 'country', defaultDistinctColumn: 'site_key' },
   // Weather has no persistent table — intentionally excluded so the
   // aggregate evaluator rejects 'Weather' as a bucket choice.
 ];
@@ -316,6 +345,12 @@ export type AggregateThresholdKind =
  */
 export interface AggregateFilter {
   country?: string;
+  /**
+   * Narrow a mixed-source bucket to one detector's domain (currently
+   * only AnomalyFlags: 'Conflict' | 'Energy' | 'Maritime' | 'Thermal' |
+   * 'Nightlights'). Ignored for buckets whose spec has no domainColumn.
+   */
+  domain?: string;
   /** Forward-compat. Ignored by the PR 5 evaluator. */
   event_type?: string;
   vessel_class?: string;

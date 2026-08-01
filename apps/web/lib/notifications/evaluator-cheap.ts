@@ -360,15 +360,26 @@ function applyAggregateFilters<T>(
   cfg: AggregateConfig,
   meta: BucketTableSpec,
 ): T {
+  let out = q;
+
+  // Domain narrowing for mixed-source buckets (Phase 2). anomaly_flags
+  // is written by five detectors, so without this a rule over that
+  // bucket silently counts all of them together. Equality, not ILIKE:
+  // domain values are a closed set written by our own code.
+  const domain = typeof cfg.filter?.domain === 'string' ? cfg.filter.domain.trim() : '';
+  if (domain && meta.domainColumn) {
+    out = (out as { eq: (col: string, val: string) => T }).eq(meta.domainColumn, domain);
+  }
+
   const country = typeof cfg.filter?.country === 'string' ? cfg.filter.country.trim() : '';
   if (country && meta.countryColumn) {
     // ILIKE handles both ISO-2 and short-name values, matching PR 2.
-    return (q as { ilike: (col: string, pat: string) => T }).ilike(
+    out = (out as { ilike: (col: string, pat: string) => T }).ilike(
       meta.countryColumn,
       `%${country}%`,
     );
   }
-  return q;
+  return out;
 }
 
 function checkAggregateThreshold(
