@@ -22,6 +22,7 @@ export async function executeToolCall(toolName: string, toolInput: Record<string
       case 'query_ports':               return await queryPorts(toolInput);
       case 'query_weather':             return await queryWeather(toolInput);
       case 'query_thermal_anomalies':   return await queryThermalAnomalies(toolInput);
+      case 'query_nightlights':        return await queryNightlights(toolInput);
       case 'query_agent_reports':       return await queryAgentReports(toolInput);
 
       // Intelligence Center
@@ -563,6 +564,186 @@ async function queryThermalAnomalies(input: Record<string, any>): Promise<string
     });
   } catch (err: any) {
     return JSON.stringify({ error: err?.message ?? 'unknown', caveat: FIRMS_CAVEAT });
+  }
+}
+
+
+// ─── Night-lights (NASA Black Marble VNP46A2) ──────────────────────
+const NIGHTLIGHTS_CAVEAT =
+  'Radiance is NOT power state. A dark pixel is not a confirmed outage: cloud, snow, moon geometry and the ' +
+  '~500 m footprint all hide light, so went_dark_lights requires sustained absence across multiple ' +
+  'confidently-CLEAR nights and remains an inference. Judgements use confident_clear observations only ' +
+  '(cloud scatters city light back at the sensor and would fake both surges and collapses). Absence of a ' +
+  'row is absence of a LOOK, never darkness. Counts are per PHYSICAL SITE, not per registry row. NASA ' +
+  'publishes ~1-2 weeks behind: check coverage.lag_days and present findings as describing that week, not ' +
+  'last night. Thermal (FIRMS) and night-lights are independent sensors - corroborate across both before ' +
+  'characterising an outage.';
+
+/**
+ * Coverage for night-lights answers. Anchored on the newest night that
+ * actually holds rows, NOT the wall clock: NASA publishes VNP46A2 in
+ * stages (~1-2 weeks behind), so "the last 14 days" from today is often
+ * mostly empty. Every claim downstream is relative to newest_night.
+ */
+async function nightlightsCoverage(supabase: any) {
+  const { data: newestRow, error } = await supabase
+    .from('blackmarble_facility_radiance')
+    .select('period')
+    .order('period', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !newestRow?.period) {
+    return {
+      newest_night: null,
+      lag_days: null,
+      note: error
+        ? 'Coverage probe failed - treat any zero result as unverified coverage.'
+        : 'No radiance rows exist yet - nothing has been observed. Absence of data, not absence of activity.',
+    };
+  }
+  const newest = String(newestRow.period);
+  const lagDays = Math.round((Date.now() - Date.parse(`${newest}T00:00:00Z`)) / 86_400_000);
+  return {
+    newest_night: newest,
+    lag_days: lagDays,
+    roster: 'FIRMS-watched facilities only (~10,556 refineries + power plants) - not global.',
+    note:
+      `Newest observed night is ${newest} (${lagDays} days behind today - normal NASA staged publishing). ` +
+      'Answers describe that week, not last night. A facility outside the FIRMS-watched roster is not ' +
+      'observed at all; within it, a night with no row means the tile was not processed, not that it was dark.',
+  };
+}
+
+async function queryNightlights(input: Record<string, any>): Promise<string> {
+  try {
+    const supabase = createServerSupabase();
+    const mode = String(input.mode ?? 'events').toLowerCase() === 'radiance' ? 'radiance' : 'events';
+    const days = Math.min(60, Math.max(1, Number(input.days ?? 14)));
+    const limit = Math.min(500, Math.max(1, Number(input.limit ?? 50)));
+    const provider = 'NASA Black Marble (VIIRS VNP46A2, moonlight/atmosphere-corrected nighttime radiance, ~500 m)';
+    const attribution = 'NASA Black Marble - data courtesy of NASA/LAADS DAAC';
+
+    const coverage = await nightlightsCoverage(supabase);
+    if (!coverage.newest_night) {
+      return JSON.stringify({ mode, count: 0, provider, attribution, caveat: NIGHTLIGHTS_CAVEAT, coverage });
+    }
+    // Window ends at the newest DATA night, not today (see coverage).
+    const since = new Date(Date.parse(`${coverage.newest_night}T00:00:00Z`) - days * 86_400_000)
+      .toISOString().slice(0, 10);
+
+    if (mode === 'events') {
+      // Site-level view (migration 094): one row per physical site per
+      // night per event type - the honest unit for any count.
+      let q = supabase
+        .from('nightlights_significant_sites')
+        .select('site_key, site_name, country, period, event_type, unit_rows, latitude, longitude, observed_radiance, baseline_mean, baseline_nights, deviation_sigma, dark_nights')
+        .gte('period', since)
+        .order('period', { ascending: false })
+        .limit(limit);
+      if (input.event_type) q = q.eq('event_type', String(input.event_type));
+      if (input.country) q = q.ilike('country', `%${String(input.country)}%`);
+      if (input.facility_name) q = q.ilike('site_name', `%${String(input.facility_name)}%`);
+      const { data, error } = await q;
+      if (error) return JSON.stringify({ error: error.message, caveat: NIGHTLIGHTS_CAVEAT, coverage });
+      const rows = data ?? [];
+      return JSON.stringify({
+        mode: 'events',
+        window_days: days,
+        since,
+        count: rows.length,
+        counting_unit: 'physical sites (one row per site per night per event type - NOT registry rows)',
+        provider,
+        attribution,
+        caveat: NIGHTLIGHTS_CAVEAT,
+        coverage,
+        events: rows.map((e: any) => ({
+          site_name: e.site_name,
+          country: e.country,
+          night: e.period,
+          event_type: e.event_type,
+          observed_radiance_nw: e.observed_radiance === null ? null : Number(e.observed_radiance),
+          baseline_mean_nw: e.baseline_mean === null ? null : Number(e.baseline_mean),
+          baseline_clear_nights: e.baseline_nights,
+          deviation_sigma: e.deviation_sigma === null ? null : Number(e.deviation_sigma),
+          consecutive_dark_clear_nights: e.dark_nights,
+          registry_unit_rows: e.unit_rows,
+          lat: e.latitude === null ? null : Number(e.latitude),
+          lon: e.longitude === null ? null : Number(e.longitude),
+        })),
+      });
+    }
+
+    // radiance mode - per-facility nightly rollup. Rows are per registry
+    // UNIT: multi-unit plants repeat with identical values (same pixel).
+    let q = supabase
+      .from('blackmarble_facility_radiance')
+      .select('facility_type, facility_id, facility_name, country, period, radiance, radiance_3x3, cloud_confidence')
+      .gte('period', since)
+      .limit(5000);
+    if (input.facility_type) q = q.eq('facility_type', String(input.facility_type));
+    if (input.country) q = q.ilike('country', `%${String(input.country)}%`);
+    if (input.facility_name) q = q.ilike('facility_name', `%${String(input.facility_name)}%`);
+    const { data, error } = await q;
+    if (error) return JSON.stringify({ error: error.message, caveat: NIGHTLIGHTS_CAVEAT, coverage });
+
+    const rows = data ?? [];
+    const byFacility = new Map<string, any>();
+    for (const r of rows) {
+      const key = `${r.facility_type}:${r.facility_id}`;
+      let f = byFacility.get(key);
+      if (!f) {
+        f = {
+          facility_type: r.facility_type,
+          facility_id: r.facility_id,
+          facility_name: r.facility_name,
+          country: r.country,
+          nights_observed: 0,
+          clear_nights: 0,
+          mean_clear_radiance_nw: null as number | null,
+          max_clear_radiance_nw: null as number | null,
+          latest_clear_night: null as string | null,
+          latest_clear_radiance_nw: null as number | null,
+          _sum: 0,
+        };
+        byFacility.set(key, f);
+      }
+      f.nights_observed += 1;
+      const rad = r.radiance === null ? null : Number(r.radiance);
+      if (rad !== null && r.cloud_confidence === 'confident_clear') {
+        f.clear_nights += 1;
+        f._sum += rad;
+        if (f.max_clear_radiance_nw === null || rad > f.max_clear_radiance_nw) f.max_clear_radiance_nw = rad;
+        if (f.latest_clear_night === null || r.period > f.latest_clear_night) {
+          f.latest_clear_night = r.period;
+          f.latest_clear_radiance_nw = rad;
+        }
+      }
+    }
+    const facilities = Array.from(byFacility.values())
+      .map(f => {
+        f.mean_clear_radiance_nw = f.clear_nights > 0 ? Math.round((f._sum / f.clear_nights) * 100) / 100 : null;
+        delete f._sum;
+        return f;
+      })
+      .sort((a, b) => (b.mean_clear_radiance_nw ?? -1) - (a.mean_clear_radiance_nw ?? -1))
+      .slice(0, limit);
+
+    return JSON.stringify({
+      mode: 'radiance',
+      window_days: days,
+      since,
+      count: facilities.length,
+      counting_unit:
+        'registry facility rows (one per generating unit) - multi-unit plants repeat with IDENTICAL values ' +
+        'because they share one ~500 m pixel. Merge same-name/same-value rows before quoting site counts.',
+      provider,
+      attribution,
+      caveat: NIGHTLIGHTS_CAVEAT,
+      coverage,
+      facilities,
+    });
+  } catch (err: any) {
+    return JSON.stringify({ error: err?.message ?? 'unknown', caveat: NIGHTLIGHTS_CAVEAT });
   }
 }
 
