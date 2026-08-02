@@ -1,11 +1,48 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ScenarioLayout from '@/components/intel/shared/ScenarioLayout';
 import IllustrativeBadge from '@/components/intel/shared/IllustrativeBadge';
 import infra from '@/lib/fixtures/infra_edges.json';
 import type { CascadeOutput } from '@/lib/intel/cascade';
 
 const CLASS_FILTERS = ['refinery', 'pipeline', 'port', 'lng'] as const;
+
+/**
+ * Observed sensor state per node, from /api/intel/cascade/node-status.
+ * Replaces the fixture's hardcoded ok/warn/crit — nine of fifteen nodes
+ * said "ok", including hubs no sensor has ever looked at.
+ *
+ * The three states are deliberately NOT a severity ramp:
+ *   not_observed  no coverage near this hub. NOT a claim of health —
+ *                 the opposite. This is the state the fixture hid.
+ *   observed      we are watching and nothing has left its baseline.
+ *   significant   a thermal or night-lights event fired.
+ *
+ * detections_7d never drives the state. Basra logs ~185 hot pixels a
+ * week and Port Arthur ~122 — routine flaring at working infrastructure.
+ */
+interface NodeObservation {
+  status: 'not_observed' | 'observed' | 'significant';
+  facilities_nearby: number;
+  facilities_watched: number;
+  detections_7d: number;
+  thermal_events: number;
+  nightlights_events: number;
+  latest_event_type: string | null;
+  latest_event_at: string | null;
+}
+
+const OBS_COLOUR: Record<NodeObservation['status'], string> = {
+  significant: 'var(--red)',
+  observed: 'var(--teal)',
+  not_observed: 'var(--ink-faint)',
+};
+
+const OBS_LABEL: Record<NodeObservation['status'], string> = {
+  significant: 'signal',
+  observed: 'watched',
+  not_observed: 'no cover',
+};
 
 export default function CascadeWorkspace() {
   const [seed, setSeed] = useState<string[]>(['rotterdam']);
@@ -14,6 +51,23 @@ export default function CascadeWorkspace() {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<CascadeOutput | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [obs, setObs] = useState<Record<string, NodeObservation>>({});
+  const [obsMeta, setObsMeta] = useState<{ degraded: boolean; radius_km?: number; window_days?: number } | null>(null);
+
+  // Observed sensor state is additive: if it fails, the scenario model
+  // still runs on the fixture topology exactly as before.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/intel/cascade/node-status')
+      .then(r => (r.ok ? r.json() : null))
+      .then(j => {
+        if (cancelled || !j) return;
+        setObs(j.nodes ?? {});
+        setObsMeta({ degraded: !!j.degraded, radius_km: j.radius_km, window_days: j.window_days });
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
 
   async function run() {
     setRunning(true);
@@ -75,8 +129,21 @@ export default function CascadeWorkspace() {
             <div className="flex flex-col" style={{ gap: 4 }}>
               {infra.nodes.filter((n: any) => n.tier !== 'transit').map((n: any) => {
                 const active = seed.includes(n.id);
-                const statusColour =
-                  n.status === 'crit' ? 'var(--red)' : n.status === 'warn' ? 'var(--amber)' : 'var(--green)';
+                const o = obs[n.id];
+                // Prefer OBSERVED state over the fixture's hardcoded
+                // status. Falling back to the fixture only while the
+                // observed layer is loading or degraded keeps the panel
+                // from flashing an unexplained blank.
+                const statusColour = o
+                  ? OBS_COLOUR[o.status]
+                  : n.status === 'crit' ? 'var(--red)' : n.status === 'warn' ? 'var(--amber)' : 'var(--green)';
+                const statusText = o ? OBS_LABEL[o.status] : n.status;
+                const statusTitle = o
+                  ? `${o.facilities_watched}/${o.facilities_nearby} facilities watched within ${obsMeta?.radius_km ?? 25} km · ` +
+                    `${o.detections_7d} hot pixels in ${obsMeta?.window_days ?? 7}d (mostly routine flaring) · ` +
+                    `${o.thermal_events} thermal + ${o.nightlights_events} night-lights significance events` +
+                    (o.status === 'not_observed' ? ' · NO SENSOR COVERAGE — not a claim of health' : '')
+                  : 'fixture status (observed layer unavailable)';
                 return (
                   <label
                     key={n.id}
@@ -103,8 +170,9 @@ export default function CascadeWorkspace() {
                         textTransform: 'uppercase',
                         color: statusColour,
                       }}
+                      title={statusTitle}
                     >
-                      {n.status}
+                      {statusText}
                     </span>
                   </label>
                 );
