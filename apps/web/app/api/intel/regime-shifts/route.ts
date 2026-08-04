@@ -31,16 +31,33 @@ const LABELS = new Map<string, string>(seed.theatres.map(t => [t.slug, t.label] 
 const BBOXES = new Map<string, any>(seed.theatres.map(t => [t.slug, t.bbox] as [string, any]));
 
 /**
- * Signals whose daily counts ride a best-effort stream and therefore
- * confound ingest throughput with real-world activity. Verified
- * 2026-08-04: Taiwan Strait vessel positions ran 8–25/day in the old
- * window (with 141/127 reconnection-burst spikes) vs 1–7/day trailing
- * — the free-tier AISStream connection degraded, not the strait. These
- * signals still display with their full statistics, but they can never
- * flag a theatre-level SHIFT or drive the headline. Remove
- * vessel_count from this set when the paid AIS tier lands.
+ * Signals whose daily counts confound INGEST THROUGHPUT with
+ * real-world activity. They still display with their full statistics,
+ * but can never flag a theatre-level SHIFT or drive the headline.
+ *
+ * Both entries were established by measuring the signal's share of the
+ * GLOBAL feed across the same two windows — the test that separates
+ * "this place changed" from "our pipe changed", because a share is
+ * invariant to how much we ingested:
+ *
+ *  • vessel_count (2026-08-04): free-tier AISStream connection
+ *    DEGRADED. Taiwan Strait ran 8–25 positions/day in the old window
+ *    vs 1–7/day trailing.
+ *  • flight_count (2026-08-04): our ADS-B ingest GREW 4.7× — global
+ *    222 → 1,043 positions/day — while Red Sea's share moved only
+ *    0.98% → 1.22% and Malacca's 7.19% → 8.12%. The KS truthfully
+ *    detected the distribution moving; almost all of that motion is
+ *    the collector, not the sky. Four of six theatres were flagging
+ *    SHIFT on it.
+ *
+ * By contrast conflict is NOT here and must not be added casually:
+ * global GDELT grew 24% while Red Sea's share TRIPLED (0.24% → 0.77%)
+ * and Black Sea's rose 62%. That is concentration, not throughput.
+ *
+ * Remove an entry when its confound is fixed — paid AIS for vessels,
+ * share-of-global normalisation (the proper fix for both) for flight.
  */
-const INGEST_SENSITIVE = new Set(['vessel_count']);
+const INGEST_SENSITIVE = new Set(['vessel_count', 'flight_count']);
 
 const DEMO = {
   regions: [

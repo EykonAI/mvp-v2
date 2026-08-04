@@ -100,6 +100,16 @@ function theatreCode(slug: string): string {
   return slug.slice(0, 2).toUpperCase();
 }
 
+/**
+ * Why a signal is ingest-sensitive, in the row itself — "ingest-sensitive"
+ * alone tells a reader the number is discounted but not why, and the two
+ * causes are opposite: the AIS feed degraded, the ADS-B feed grew.
+ */
+const INGEST_NOTE: Record<string, string> = {
+  vessel_count: 'free-tier AIS · ingest-sensitive',
+  flight_count: 'ADS-B coverage growing · ingest-sensitive',
+};
+
 /** Unit shown next to the window means. */
 const SIGNAL_UNIT: Record<string, string> = {
   vessel_count: '/day',
@@ -362,7 +372,7 @@ function SignalRow({ s, selected, onSelect }: { s: Signal; selected: boolean; on
           <Tag>lags ~9d (NASA)</Tag>
         )}
         {s.ingest_sensitive && (
-          <Tag>free-tier AIS · ingest-sensitive</Tag>
+          <Tag>{INGEST_NOTE[s.signal] ?? 'ingest-sensitive'}</Tag>
         )}
         {s.p_value !== null && s.p_value < 0.01 && !s.ingest_sensitive && (
           <span
