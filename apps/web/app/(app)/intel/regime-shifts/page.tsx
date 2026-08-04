@@ -11,7 +11,7 @@ export default async function RegimeShiftsPage() {
       accent="var(--amber)"
       eyebrow="Analytics · Regime Change"
       title="Regime Change Detector"
-      subtitle="Feature 25 · KS-test on 30d vs 60d windows"
+      subtitle="Feature 25 · two-sample KS on trailing 30d vs preceding 60d"
     >
       <RegimeShiftsWorkspace />
     </WorkspaceShell>

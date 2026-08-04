@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
+import { ksStatistic, ksPValue, type DailyPoint } from '@/lib/intel/ks';
 import seed from '@/lib/fixtures/posture_seed.json';
 
 export const dynamic = 'force-dynamic';
@@ -8,10 +9,13 @@ export const maxDuration = 300;
 
 /**
  * Compute-regime-shifts · nightly.
- * Pairwise Mann-Whitney-style test on 60d vs 30d windows per signal
- * per pinned theatre. V1 uses a lightweight z-test on the means so
- * the migration does not require simple-statistics yet — upgrade to
- * Mann-Whitney once the dep is installed.
+ * Two-sample Kolmogorov-Smirnov test on the trailing 30d vs the
+ * preceding 60d (days 90→30 ago) of DAILY values, per signal per
+ * pinned theatre. The daily arrays are persisted inside the window
+ * JSONB so the workspace renders the distributions the test actually
+ * compared. effect_size stays the standardized mean difference — it
+ * carries direction/magnitude for display; the KS p carries
+ * significance. They answer different questions.
  */
 export async function POST(req: NextRequest) {
   const unauth = requireCronSecret(req);
@@ -42,17 +46,33 @@ export async function POST(req: NextRequest) {
       const signal = spec.signal;
 
       const effect_size = o.std > 0 ? (n.mean - o.mean) / o.std : 0;
-      const z = Math.abs(effect_size);
-      const p_value = Math.max(0.0001, Math.min(0.5, 2 * (1 - normCdf(z))));
+
+      // KS needs enough days on both sides to compare distributions at
+      // all — below 8, a null p that can never flag a shift is the
+      // honest output, and the row says why.
+      let test_statistic: number | null = null;
+      let p_value: number | null = null;
+      let reason: string | undefined;
+      if (o.daily.length >= 8 && n.daily.length >= 8) {
+        const D = ksStatistic(o.daily.map(x => x.v), n.daily.map(x => x.v));
+        test_statistic = round3(D);
+        p_value = round4(ksPValue(D, o.daily.length, n.daily.length));
+      } else {
+        reason = 'thin-window';
+      }
 
       writes.push({
         region: t.slug,
         signal,
-        test_statistic: round3(z),
-        p_value: round3(p_value),
+        test_statistic,
+        p_value,
         effect_size: round3(effect_size),
-        old_window: { start: oldSince, end: oldUntil, mean: o.mean, std: o.std, count: o.count },
-        new_window: { start: newSince, end: now.toISOString(), mean: n.mean, std: n.std, count: n.count },
+        old_window: { start: oldSince, end: oldUntil, mean: o.mean, std: o.std, count: o.count, daily: o.daily },
+        new_window: {
+          start: newSince, end: now.toISOString(), mean: n.mean, std: n.std, count: n.count, daily: n.daily,
+          test: 'ks',
+          ...(reason ? { reason } : {}),
+        },
         detected_at: now.toISOString(),
       });
     }
@@ -120,16 +140,20 @@ const SIGNALS: ReadonlyArray<SignalSpec> = [
  * returns ~30 rows in 77 ms. The cron issues two of these per theatre,
  * so the difference compounds.
  *
- * Returns the same {count, mean, std} contract as windowStats, but over
- * NIGHTLY MEAN RADIANCE rather than per-day row counts — so a downward
- * effect_size here means the region dimmed, not that fewer rows arrived.
+ * Returns the same {count, mean, std, daily} contract as windowStats,
+ * but over NIGHTLY MEAN RADIANCE rather than per-day row counts — so a
+ * downward effect_size here means the region dimmed, not that fewer
+ * rows arrived. Nights are NOT zero-filled: an absent night is an
+ * absent LOOK (cloud, no clear pixel, NASA not yet published), never
+ * darkness — the exact opposite of the count signals, where an empty
+ * day is a real zero. That asymmetry is the honesty invariant.
  */
 async function nightlightsRadianceStats(
   supabase: any,
   bbox: { lat_min: number; lat_max: number; lon_min: number; lon_max: number },
   fromIso: string,
   toIso: string,
-): Promise<{ count: number; mean: number; std: number }> {
+): Promise<{ count: number; mean: number; std: number; daily: DailyPoint[] }> {
   const { data, error } = await supabase.rpc('nightlights_bbox_nightly_radiance', {
     p_lat_min: bbox.lat_min,
     p_lat_max: bbox.lat_max,
@@ -140,20 +164,20 @@ async function nightlightsRadianceStats(
   });
   // Fail soft to an empty window rather than throwing: one signal
   // erroring must not cost the other four for every theatre. An empty
-  // window yields effect_size 0, which reads as "no shift detected" —
-  // and count:0 in the stored window makes the thinness visible.
-  if (error || !data) return { count: 0, mean: 0, std: 0 };
+  // window has too few days for KS, so it lands in the thin-window
+  // gate and can never fake a shift.
+  if (error || !data) return { count: 0, mean: 0, std: 0, daily: [] };
 
-  const nightly = (data as Array<{ mean_radiance: number | string }>)
-    .map(r => Number(r.mean_radiance))
-    .filter(v => Number.isFinite(v));
-  if (nightly.length === 0) return { count: 0, mean: 0, std: 0 };
+  const daily = (data as Array<{ period: string; mean_radiance: number | string }>)
+    .map(r => ({ d: String(r.period).slice(0, 10), v: Number(r.mean_radiance) }))
+    .filter(p => Number.isFinite(p.v))
+    .sort((a, b) => (a.d < b.d ? -1 : 1));
+  if (daily.length === 0) return { count: 0, mean: 0, std: 0, daily: [] };
 
-  const mean = nightly.reduce((a, b) => a + b, 0) / nightly.length;
-  const std = Math.sqrt(
-    nightly.reduce((a, b) => a + (b - mean) ** 2, 0) / nightly.length,
-  );
-  return { count: nightly.length, mean: round3(mean), std: round3(std) };
+  const values = daily.map(p => p.v);
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  const std = Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length);
+  return { count: daily.length, mean: round3(mean), std: round3(std), daily };
 }
 
 async function windowStats(
@@ -162,8 +186,7 @@ async function windowStats(
   bbox: { lat_min: number; lat_max: number; lon_min: number; lon_max: number },
   fromIso: string,
   toIso: string,
-): Promise<{ count: number; mean: number; std: number }> {
-  // Pull counts per day then compute mean / std. 90 days is safe for a 5k limit.
+): Promise<{ count: number; mean: number; std: number; daily: DailyPoint[] }> {
   const { data } = await supabase
     .from(table)
     .select('ingested_at')
@@ -173,27 +196,43 @@ async function windowStats(
     .gte('longitude', bbox.lon_min).lte('longitude', bbox.lon_max)
     .limit(20_000);
 
+  // Zero-fill the full day range: for a COUNT signal a day with no rows
+  // in the bbox is a real observed zero — leaving it out biased the old
+  // mean upward and blinded the test to quiet periods. The current UTC
+  // day is excluded everywhere: it is partial and would read as a false
+  // collapse.
   const perDay = new Map<string, number>();
+  for (const d of utcDays(fromIso, toIso)) perDay.set(d, 0);
   for (const r of data ?? []) {
     const d = new Date(r.ingested_at).toISOString().slice(0, 10);
-    perDay.set(d, (perDay.get(d) ?? 0) + 1);
+    if (perDay.has(d)) perDay.set(d, (perDay.get(d) ?? 0) + 1);
   }
-  const counts = Array.from(perDay.values());
+  const daily = Array.from(perDay, ([d, v]) => ({ d, v }));
+  const counts = daily.map(p => p.v);
   const mean = counts.length ? counts.reduce((a, b) => a + b, 0) / counts.length : 0;
   const std = counts.length
     ? Math.sqrt(counts.reduce((a, b) => a + (b - mean) ** 2, 0) / counts.length)
     : 0;
-  return { count: counts.length, mean: round3(mean), std: round3(std) };
+  return { count: counts.length, mean: round3(mean), std: round3(std), daily };
 }
 
-function normCdf(z: number): number {
-  // Abramowitz & Stegun approx
-  const t = 1 / (1 + 0.2316419 * Math.abs(z));
-  const d = 0.3989423 * Math.exp((-z * z) / 2);
-  const p = d * t * (0.31938153 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
-  return z >= 0 ? 1 - p : p;
+/** UTC dates in [from, to), additionally excluding the partial current day. */
+function utcDays(fromIso: string, toIso: string): string[] {
+  const out: string[] = [];
+  const today = new Date().toISOString().slice(0, 10);
+  const end = Date.parse(toIso.slice(0, 10) + 'T00:00:00Z');
+  for (let t = Date.parse(fromIso.slice(0, 10) + 'T00:00:00Z'); t < end; t += 86_400_000) {
+    const d = new Date(t).toISOString().slice(0, 10);
+    if (d >= today) break;
+    out.push(d);
+  }
+  return out;
 }
 
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
+}
+
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000;
 }
