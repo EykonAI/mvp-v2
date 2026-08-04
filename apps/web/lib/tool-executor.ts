@@ -921,6 +921,22 @@ async function queryRegimeShiftsTool(input: Record<string, any>): Promise<string
     matched_query: input.region ? String(input.region) : null,
     computed_at: j.computed_at ?? null,
     regions: slim,
+    // The markers carry meaning the field names alone do not, and
+    // getting them wrong produces a confident WRONG answer — e.g.
+    // narrating a vessel "collapse" that is really our own AIS
+    // connection degrading. Stated here so the reasoning is grounded
+    // in what each flag actually licenses.
+    field_notes: {
+      p_value: 'Two-sample Kolmogorov-Smirnov on daily values, trailing 30d vs preceding 60d. Shift threshold p < 0.01.',
+      effect: 'Standardized mean difference in units of the OLD window standard deviation (sigma), NOT a percentage.',
+      thin: 'true = fewer than 8 data days in a window; p is null and NO shift can be claimed. Absence of data, not absence of activity.',
+      test: "'ks' = current test; 'z' = pre-2026-08-04 rows scored by an older z-test on means. Never present a z p-value as a KS result.",
+      ingest_sensitive:
+        'true = the signal rides a best-effort feed (free-tier AIS) whose daily counts confound INGEST THROUGHPUT with real-world activity. A change here is NOT evidence about the world and must never be attributed to the theatre. Say so plainly when asked.',
+      history: 'One entry per calendar day: how the same test scored on previous nights. Consecutive shift nights = persistence; a single night is weaker evidence.',
+      nightlights_radiance: 'Mean clear-night radiance (nW), not a count. NASA publication lags ~9 days, so it describes last week.',
+      thermal_detections: 'Raw hot-pixel counts. A detection is a hot pixel, never a confirmed fire.',
+    },
   });
 }
 
