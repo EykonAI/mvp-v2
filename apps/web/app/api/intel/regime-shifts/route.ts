@@ -3,6 +3,14 @@ import { createServerSupabase } from '@/lib/supabase-server';
 import seed from '@/lib/fixtures/posture_seed.json';
 
 export const dynamic = 'force-dynamic';
+// force-dynamic alone does NOT stop Next 14 from caching the
+// supabase-js GET in the Data Cache: after the 2026-08-04 deploy this
+// route served a byte-identical payload for hours while regime_shifts
+// provably held newer rows (first post-deploy request filled the cache
+// for the new PostgREST URL; every later response replayed it). The
+// platform's daily deploy cadence masks this class of staleness —
+// each deploy clears the cache — so it looked live historically.
+export const fetchCache = 'force-no-store';
 
 /**
  * Fixed display order — the panel must read identically across
