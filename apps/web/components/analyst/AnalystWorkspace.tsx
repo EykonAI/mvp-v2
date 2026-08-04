@@ -103,6 +103,15 @@ export default function AnalystWorkspace({ tier }: { tier: string }) {
   const [toolSteps, setToolSteps] = useState<ToolStep[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+
+  // ?q= prefills the composer WITHOUT sending. Other workspaces (the
+  // regime-shift detector's evidence hand-off) link here with a
+  // question already framed; the user still reads and presses send, so
+  // no tokens are spent on a navigation they may not have meant.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get('q');
+    if (q) setInput(q);
+  }, []);
   const [persona, setPersona] = useState<PersonaId>(DEFAULT_PERSONA);
   const [deepOn, setDeepOn] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);

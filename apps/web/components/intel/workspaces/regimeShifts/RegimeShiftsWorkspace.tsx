@@ -29,13 +29,18 @@ interface Signal {
    * reader enforces the exclusion; this flag drives the disclosure tag.
    */
   ingest_sensitive?: boolean;
+  /** One entry per calendar day, oldest first — drives the persistence strip. */
+  history?: Array<{ d: string; p: number | null; test: string }>;
   old_window?: WindowStats;
   new_window?: WindowStats;
 }
 
+interface Bbox { lat_min: number; lat_max: number; lon_min: number; lon_max: number }
+
 interface Region {
   region: string;
   label: string;
+  bbox?: Bbox | null;
   detected: boolean;
   shifted: string[];
   driving: string | null;
@@ -78,6 +83,22 @@ const SIGNAL_SHORT: Record<string, string> = {
   thermal_detections: 'thermal',
   nightlights_radiance: 'lights',
 };
+
+/** Single-letter column heads for the shift matrix. */
+const SIGNAL_INITIAL: Record<string, string> = {
+  vessel_count: 'V',
+  flight_count: 'F',
+  acled_events: 'C',
+  thermal_detections: 'T',
+  nightlights_radiance: 'N',
+};
+
+/** Two-letter theatre codes for the matrix rows. */
+function theatreCode(slug: string): string {
+  const parts = slug.split('-').filter(w => !['of', 'the', 'strait'].includes(w));
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return slug.slice(0, 2).toUpperCase();
+}
 
 /** Unit shown next to the window means. */
 const SIGNAL_UNIT: Record<string, string> = {
@@ -210,6 +231,13 @@ export default function RegimeShiftsWorkspace() {
             </button>
           ))}
         </div>
+        <ShiftMatrix
+          regions={data.regions}
+          selectedRegion={active?.region ?? null}
+          selectedSignal={activeSignal?.signal ?? null}
+          onPick={(region, signal) => { setSelected(region); setSelectedSignal(signal); }}
+        />
+
         {/* 5 signals × N theatres tested nightly: at p<0.01 an occasional
             single-signal flag is EXPECTED, not news. Disclosure beats a
             silently tightened threshold; corroboration is Convergence's job. */}
@@ -264,6 +292,8 @@ export default function RegimeShiftsWorkspace() {
             </div>
             <Histograms signal={activeSignal} />
             <Timeline signal={activeSignal} />
+            <PersistenceStrip signals={active.signals} />
+            <HandOff region={active} signal={activeSignal} />
           </>
         )}
       </section>
@@ -280,6 +310,7 @@ export default function RegimeShiftsWorkspace() {
             />
           ))}
         </div>
+        <EcdfInset signal={activeSignal} />
       </aside>
     </div>
   );
@@ -378,7 +409,303 @@ function SignalRow({ s, selected, onSelect }: { s: Signal; selected: boolean; on
           )}
         </span>
       )}
+      <Sparkline signal={s} />
     </button>
+  );
+}
+
+/**
+ * 90-day shape of the signal's daily values, in the row itself: grey
+ * preceding window, amber trailing — the same encoding as the big
+ * Timeline, so no new visual language.
+ *
+ * Absent, never faked, when the row has no daily arrays (legacy rows)
+ * or is thin. A sparkline is a claim like any other pixel here.
+ */
+function Sparkline({ signal: s }: { signal: Signal }) {
+  const od = s.old_window?.daily ?? [];
+  const nd = s.new_window?.daily ?? [];
+  if (s.thin || od.length === 0 || nd.length === 0) return null;
+
+  const all = [...od, ...nd];
+  const vmax = Math.max(...all.map(p => p.v)) || 1;
+  const W = 200;
+  const H = 14;
+  const bw = W / all.length;
+
+  return (
+    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ marginTop: 4 }} aria-hidden>
+      {all.map((p, i) => (
+        <rect
+          key={p.d + i}
+          x={i * bw}
+          y={H - (p.v / vmax) * H}
+          width={Math.max(bw - 0.4, 0.5)}
+          height={(p.v / vmax) * H}
+          fill={i < od.length ? 'var(--ink-faint)' : 'var(--amber)'}
+          opacity={0.8}
+        />
+      ))}
+    </svg>
+  );
+}
+
+/**
+ * ① Shift matrix — every theatre × every signal, one glance.
+ *
+ * The workspace otherwise forces serial clicking through theatres to
+ * answer "what shifted anywhere tonight?". Cell states inherit the
+ * payload's honesty markers exactly: only attribution-eligible shifts
+ * are red, thin/no-data is hollow, and the ingest-sensitive column is
+ * permanently demoted regardless of its p.
+ */
+function ShiftMatrix({
+  regions, selectedRegion, selectedSignal, onPick,
+}: {
+  regions: Region[];
+  selectedRegion: string | null;
+  selectedSignal: string | null;
+  onPick: (region: string, signal: string) => void;
+}) {
+  if (regions.length === 0) return null;
+  const signalOrder = regions[0].signals.map(s => s.signal);
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <Head accent="var(--amber)">All theatres × signals</Head>
+      <table style={{ borderCollapse: 'separate', borderSpacing: 3, marginTop: 8 }}>
+        <thead>
+          <tr>
+            <th />
+            {signalOrder.map(sig => (
+              <th
+                key={sig}
+                title={prettySignal(sig)}
+                style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--ink-faint)', fontWeight: 400 }}
+              >
+                {SIGNAL_INITIAL[sig] ?? sig[0].toUpperCase()}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {regions.map(r => (
+            <tr key={r.region}>
+              <td
+                title={r.label}
+                style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--ink-faint)', paddingRight: 2 }}
+              >
+                {theatreCode(r.region)}
+              </td>
+              {signalOrder.map(sig => {
+                const s = r.signals.find(x => x.signal === sig);
+                const isSel = selectedRegion === r.region && selectedSignal === sig;
+                const shifted = !!s && s.p_value !== null && s.p_value < 0.01 && !s.ingest_sensitive;
+                const style: React.CSSProperties = {
+                  width: 15, height: 15, padding: 0, cursor: 'pointer',
+                  outline: isSel ? '1px solid var(--amber)' : 'none',
+                  outlineOffset: 1,
+                };
+                if (!s || s.thin) {
+                  Object.assign(style, { background: 'transparent', border: '1px dashed var(--rule-soft)' });
+                } else if (s.ingest_sensitive) {
+                  Object.assign(style, { background: 'transparent', border: '1px solid var(--rule-soft)' });
+                } else if (shifted) {
+                  Object.assign(style, { background: 'var(--red)', border: '1px solid var(--red)' });
+                } else {
+                  Object.assign(style, { background: 'var(--bg-panel)', border: '1px solid var(--rule-soft)' });
+                }
+                const state = !s ? 'no data'
+                  : s.thin ? 'thin — not scored'
+                  : s.ingest_sensitive ? 'ingest-sensitive — never attributes'
+                  : shifted ? `shift · p=${s.p_value?.toFixed(4)}`
+                  : `quiet · p=${s.p_value?.toFixed(2)}`;
+                return (
+                  <td key={sig} style={{ padding: 0 }}>
+                    <button
+                      onClick={() => onPick(r.region, sig)}
+                      title={`${r.label} · ${prettySignal(sig)} — ${state}`}
+                      aria-label={`${r.label} ${prettySignal(sig)} ${state}`}
+                      style={style}
+                    />
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p style={{ marginTop: 8, fontFamily: 'var(--f-mono)', fontSize: 9, lineHeight: 1.6, color: 'var(--ink-faint)' }}>
+        filled red = shift · filled = quiet · dashed = thin/no data · outlined = ingest-sensitive
+      </p>
+    </div>
+  );
+}
+
+/**
+ * ② Persistence strip — the nightly p per signal over the last runs.
+ *
+ * Answers the question the multiple-comparisons footer raises: a flag
+ * that has held for several consecutive nights is different evidence
+ * from one that appeared tonight. Nights scored under the pre-2026-08-04
+ * z-test render hollow rather than colored — showing the method change
+ * honestly instead of implying continuity.
+ */
+function PersistenceStrip({ signals }: { signals: Signal[] }) {
+  const any = signals.some(s => (s.history?.length ?? 0) > 0);
+  if (!any) return null;
+  const width = Math.max(...signals.map(s => s.history?.length ?? 0));
+
+  return (
+    <div style={{ border: '1px solid var(--rule-soft)', background: 'var(--bg-panel)', padding: 12, marginTop: 8 }}>
+      <div className="eyebrow" style={{ marginBottom: 8, color: 'var(--ink-faint)' }}>
+        Nightly p per signal · last {width} runs · hollow = pre-KS or thin
+      </div>
+      <div className="flex flex-col" style={{ gap: 4 }}>
+        {signals.map(s => {
+          const h = s.history ?? [];
+          // Consecutive shift nights, counting back from the newest.
+          let held = 0;
+          for (let i = h.length - 1; i >= 0; i--) {
+            if (h[i].test === 'ks' && h[i].p !== null && (h[i].p as number) < 0.01) held++;
+            else break;
+          }
+          return (
+            <div key={s.signal} className="flex items-center" style={{ gap: 6, fontFamily: 'var(--f-mono)', fontSize: 10 }}>
+              <span style={{ width: 62, color: 'var(--ink-faint)' }}>{SIGNAL_SHORT[s.signal] ?? s.signal}</span>
+              <span className="flex" style={{ gap: 3 }}>
+                {h.map(n => {
+                  const legacy = n.test !== 'ks';
+                  const thin = n.p === null;
+                  const shift = !legacy && !thin && (n.p as number) < 0.01 && !s.ingest_sensitive;
+                  const st: React.CSSProperties = { width: 11, height: 11, display: 'inline-block' };
+                  if (legacy || thin || s.ingest_sensitive) {
+                    Object.assign(st, { background: 'transparent', border: `1px ${legacy || thin ? 'dashed' : 'solid'} var(--rule-soft)` });
+                  } else if (shift) {
+                    Object.assign(st, { background: 'var(--red)' });
+                  } else {
+                    Object.assign(st, { background: 'var(--rule-soft)' });
+                  }
+                  const label = legacy ? 'pre-KS run' : thin ? 'thin — not scored' : `p=${(n.p as number).toFixed(4)}`;
+                  return <i key={n.d} title={`${n.d} · ${label}`} style={st} />;
+                })}
+              </span>
+              {s.ingest_sensitive ? (
+                <span style={{ color: 'var(--ink-faint)' }}>never attributes</span>
+              ) : held >= 2 ? (
+                <span style={{ color: 'var(--amber)' }}>held {held} nights</span>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ③ Evidence hand-off — the detector stops being a cul-de-sac.
+ *
+ * The convergence count is computed client-side over the LATEST N
+ * events (the convergences API has no bbox filter) and the label says
+ * so — "2 of latest 25" is a checkable claim; a bare "2" would imply
+ * an exhaustive search that did not happen. The Globe button the
+ * design sketched was dropped: the globe takes no URL parameters, and
+ * inventing one is out of scope for this workspace.
+ */
+function HandOff({ region, signal }: { region: Region; signal: Signal | undefined }) {
+  const [conv, setConv] = useState<{ hits: number; scanned: number } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const bbox = region.bbox;
+    if (!bbox) { setConv(null); return; }
+    fetch('/api/intel/convergences?latest=25')
+      .then(r => r.json())
+      .then((j: { events?: Array<{ bounding_box?: Bbox }> }) => {
+        if (!alive) return;
+        const events = j.events ?? [];
+        const hits = events.filter(e => {
+          const b = e.bounding_box;
+          if (!b) return false;
+          return b.lat_min <= bbox.lat_max && b.lat_max >= bbox.lat_min
+            && b.lon_min <= bbox.lon_max && b.lon_max >= bbox.lon_min;
+        }).length;
+        setConv({ hits, scanned: events.length });
+      })
+      .catch(() => { if (alive) setConv(null); });
+    return () => { alive = false; };
+  }, [region.region, region.bbox]);
+
+  const q = signal && signal.old_window && signal.new_window && !signal.thin
+    ? `Explain the regime shift in ${region.label}: ${prettySignal(signal.signal)} moved from ${fmtMean(signal.old_window.mean)} to ${fmtMean(signal.new_window.mean)}${SIGNAL_UNIT[signal.signal] ?? ''} (KS p = ${signal.p_value}). What plausibly drives it? Use live data.`
+    : `What is currently driving activity in ${region.label}? Use live data.`;
+
+  const linkStyle: React.CSSProperties = {
+    fontFamily: 'var(--f-mono)', fontSize: 10.5, color: 'var(--ink-dim)',
+    border: '1px solid var(--rule-soft)', padding: '5px 10px', textDecoration: 'none',
+  };
+
+  return (
+    <div className="flex items-center" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+      <a href="/briefs/convergence" style={linkStyle}>
+        convergences{conv ? ` · ${conv.hits} of latest ${conv.scanned} here` : ''} →
+      </a>
+      <a href={`/analyst?q=${encodeURIComponent(q)}`} style={linkStyle}>
+        ask AI Analyst →
+      </a>
+    </div>
+  );
+}
+
+/**
+ * ⑤ ECDF inset — the two empirical CDFs with the D gap marked, i.e.
+ * literally what the KS statistic measures. KS rows with real windows
+ * only; anything else renders nothing rather than a decorative curve.
+ */
+function EcdfInset({ signal: s }: { signal: Signal | undefined }) {
+  const od = s?.old_window?.daily ?? [];
+  const nd = s?.new_window?.daily ?? [];
+  if (!s || s.test !== 'ks' || s.thin || od.length < 8 || nd.length < 8) return null;
+
+  const a = od.map(p => p.v).sort((x, y) => x - y);
+  const b = nd.map(p => p.v).sort((x, y) => x - y);
+  const lo = Math.min(a[0], b[0]);
+  const hi = Math.max(a[a.length - 1], b[b.length - 1]);
+  const span = hi - lo || 1;
+  const W = 280, H = 96, PAD = 6;
+  const x = (v: number) => PAD + ((v - lo) / span) * (W - 2 * PAD);
+  const y = (f: number) => H - PAD - f * (H - 2 * PAD);
+  const ecdf = (arr: number[], v: number) => arr.filter(z => z <= v).length / arr.length;
+
+  const path = (arr: number[]) => {
+    const pts: string[] = [`${PAD},${y(0)}`];
+    for (const v of arr) { pts.push(`${x(v)},${y(ecdf(arr, v) - 1 / arr.length)}`); pts.push(`${x(v)},${y(ecdf(arr, v))}`); }
+    pts.push(`${W - PAD},${y(1)}`);
+    return pts.join(' ');
+  };
+
+  // Where the two ECDFs are furthest apart — the D the test reports.
+  let dv = lo, d = 0;
+  for (const v of [...a, ...b]) {
+    const gap = Math.abs(ecdf(a, v) - ecdf(b, v));
+    if (gap > d) { d = gap; dv = v; }
+  }
+
+  return (
+    <div style={{ border: '1px solid var(--rule-soft)', background: 'var(--bg-panel)', padding: 12, marginTop: 10 }}>
+      <div className="eyebrow" style={{ marginBottom: 6, color: 'var(--ink-faint)' }}>
+        What KS measures · D = {d.toFixed(2)}
+      </div>
+      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden>
+        <polyline points={path(a)} fill="none" stroke="var(--ink-faint)" strokeWidth={1.5} />
+        <polyline points={path(b)} fill="none" stroke="var(--amber)" strokeWidth={1.5} />
+        <line x1={x(dv)} y1={y(ecdf(a, dv))} x2={x(dv)} y2={y(ecdf(b, dv))} stroke="var(--red)" strokeWidth={1.5} strokeDasharray="3 2" />
+      </svg>
+      <p style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--ink-faint)', margin: 0 }}>
+        grey = preceding 60d · amber = trailing 30d · red = largest gap
+      </p>
+    </div>
   );
 }
 
