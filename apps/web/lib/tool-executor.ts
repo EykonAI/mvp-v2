@@ -883,8 +883,61 @@ async function queryRegimeShiftsTool(input: Record<string, any>): Promise<string
   const res = await fetch(`${APP_URL()}/api/intel/regime-shifts`);
   const j = await res.json();
   const regions: any[] = j.regions ?? [];
-  const filtered = input.region ? regions.filter(r => r.region.toLowerCase().includes(String(input.region).toLowerCase())) : regions;
-  return JSON.stringify({ count: filtered.length, regions: filtered });
+
+  // Match the slug OR the display label, separator-insensitively: the
+  // model naturally passes "Red Sea" or "Strait of Hormuz", while the
+  // stored region is "red-sea" / "hormuz". A raw substring test on the
+  // slug alone silently returned ZERO regions for those queries — the
+  // analyst then reported no regime shifts for a theatre that had two.
+  // Falling back to the full set beats answering "none" from a failed
+  // match: a wrong filter must never look like an empty world.
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  let filtered = regions;
+  if (input.region) {
+    const q = norm(String(input.region));
+    const hit = (v: string) => {
+      const n = norm(v);
+      return n.includes(q) || q.includes(n);
+    };
+    const matched = regions.filter(r => hit(r.region ?? '') || hit(r.label ?? ''));
+    filtered = matched.length > 0 ? matched : regions;
+  }
+
+  // Daily arrays are ~10 KB per region and the model never needs the
+  // raw series to reason about a shift — it has the means, the KS p,
+  // the effect size and the persistence history. Strip them so a
+  // six-theatre answer costs a fraction of the tokens.
+  const slim = filtered.map(r => ({
+    ...r,
+    signals: (r.signals ?? []).map(({ old_window, new_window, ...s }: any) => ({
+      ...s,
+      old_window: old_window ? { ...old_window, daily: undefined } : null,
+      new_window: new_window ? { ...new_window, daily: undefined } : null,
+    })),
+  }));
+
+  return JSON.stringify({
+    count: slim.length,
+    matched_query: input.region ? String(input.region) : null,
+    computed_at: j.computed_at ?? null,
+    regions: slim,
+    // The markers carry meaning the field names alone do not, and
+    // getting them wrong produces a confident WRONG answer — e.g.
+    // narrating a vessel "collapse" that is really our own AIS
+    // connection degrading. Stated here so the reasoning is grounded
+    // in what each flag actually licenses.
+    field_notes: {
+      p_value: 'Two-sample Kolmogorov-Smirnov on daily values, trailing 30d vs preceding 60d. Shift threshold p < 0.01.',
+      effect: 'Standardized mean difference in units of the OLD window standard deviation (sigma), NOT a percentage.',
+      thin: 'true = fewer than 8 data days in a window; p is null and NO shift can be claimed. Absence of data, not absence of activity.',
+      test: "'ks' = current test; 'z' = pre-2026-08-04 rows scored by an older z-test on means. Never present a z p-value as a KS result.",
+      ingest_sensitive:
+        'true = the signal rides a best-effort feed (free-tier AIS) whose daily counts confound INGEST THROUGHPUT with real-world activity. A change here is NOT evidence about the world and must never be attributed to the theatre. Say so plainly when asked.',
+      history: 'One entry per calendar day: how the same test scored on previous nights. Consecutive shift nights = persistence; a single night is weaker evidence.',
+      nightlights_radiance: 'Mean clear-night radiance (nW), not a count. NASA publication lags ~9 days, so it describes last week.',
+      thermal_detections: 'Raw hot-pixel counts. A detection is a hot pixel, never a confirmed fire.',
+    },
+  });
 }
 
 async function queryEntities(input: Record<string, any>): Promise<string> {
