@@ -27,6 +27,9 @@ const SIGNAL_ORDER = [
 /** slug → display label ("taiwan-strait" → "Taiwan Strait"). */
 const LABELS = new Map<string, string>(seed.theatres.map(t => [t.slug, t.label] as [string, string]));
 
+/** slug → bbox, so the client can count convergences inside a theatre. */
+const BBOXES = new Map<string, any>(seed.theatres.map(t => [t.slug, t.bbox] as [string, any]));
+
 /**
  * Signals whose daily counts ride a best-effort stream and therefore
  * confound ingest throughput with real-world activity. Verified
@@ -107,23 +110,49 @@ const DEMO = {
 export async function GET(_req: NextRequest) {
   try {
     const supabase = createServerSupabase();
-    // 400 ≈ 6 theatres × 5 signals × ~13 nights of headroom; covered
-    // by idx_regime_region_time.
+    // 500 ≈ 6 theatres × 5 signals × ~16 nights — enough to fill the
+    // 14-day persistence strip with headroom for same-day double runs.
+    // Covered by idx_regime_region_time.
     const { data, error } = await supabase
       .from('regime_shifts')
       .select('*')
       .order('detected_at', { ascending: false })
-      .limit(400);
+      .limit(500);
 
     if (error || !data || data.length === 0) {
       return NextResponse.json(DEMO);
     }
 
     // Newest-first, so the first row seen per (region, signal) wins.
+    //
+    // The same pass builds the PERSISTENCE HISTORY the strip renders:
+    // one entry per (region, signal, calendar day), newest run of that
+    // day winning — the cron can run twice in a day (it did on
+    // 2026-08-04) and two squares for one night would misread as two
+    // nights of evidence. Entries are STRIPPED to date/p/test: shipping
+    // the windows again would multiply the payload by ~14 for data the
+    // strip never reads.
+    const HISTORY_DAYS = 14;
     const latest = new Map<string, any>();
+    const history = new Map<string, Array<{ d: string; p: number | null; test: string }>>();
+    const seenDay = new Set<string>();
     for (const row of data) {
       const key = `${row.region}:${row.signal}`;
       if (!latest.has(key)) latest.set(key, row);
+
+      const day = String(row.detected_at).slice(0, 10);
+      const dayKey = `${key}:${day}`;
+      if (seenDay.has(dayKey)) continue;
+      seenDay.add(dayKey);
+      const arr = history.get(key) ?? [];
+      if (arr.length < HISTORY_DAYS) {
+        arr.push({
+          d: day,
+          p: row.p_value === null || row.p_value === undefined ? null : Number(row.p_value),
+          test: row.new_window?.test === 'ks' ? 'ks' : 'z',
+        });
+        history.set(key, arr);
+      }
     }
 
     let computed_at: string | null = null;
@@ -134,6 +163,7 @@ export async function GET(_req: NextRequest) {
       const r = regions.get(row.region) ?? {
         region: row.region,
         label: LABELS.get(row.region) ?? row.region,
+        bbox: BBOXES.get(row.region) ?? null,
         detected: false,
         shifted: [] as string[],
         signals: [] as any[],
@@ -162,6 +192,8 @@ export async function GET(_req: NextRequest) {
         test: row.new_window?.test === 'ks' ? 'ks' : 'z',
         thin: p === null,
         ingest_sensitive,
+        // Oldest-first so the strip reads left-to-right as time.
+        history: (history.get(`${row.region}:${row.signal}`) ?? []).slice().reverse(),
         old_window: row.old_window,
         new_window: row.new_window,
       });
