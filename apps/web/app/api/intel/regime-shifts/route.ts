@@ -27,6 +27,18 @@ const SIGNAL_ORDER = [
 /** slug → display label ("taiwan-strait" → "Taiwan Strait"). */
 const LABELS = new Map<string, string>(seed.theatres.map(t => [t.slug, t.label] as [string, string]));
 
+/**
+ * Signals whose daily counts ride a best-effort stream and therefore
+ * confound ingest throughput with real-world activity. Verified
+ * 2026-08-04: Taiwan Strait vessel positions ran 8–25/day in the old
+ * window (with 141/127 reconnection-burst spikes) vs 1–7/day trailing
+ * — the free-tier AISStream connection degraded, not the strait. These
+ * signals still display with their full statistics, but they can never
+ * flag a theatre-level SHIFT or drive the headline. Remove
+ * vessel_count from this set when the paid AIS tier lands.
+ */
+const INGEST_SENSITIVE = new Set(['vessel_count']);
+
 const DEMO = {
   regions: [
     {
@@ -40,7 +52,7 @@ const DEMO = {
       old_window: { start: '2026-01-20', end: '2026-03-20', mean: 18, std: 4 },
       new_window: { start: '2026-03-21', end: '2026-04-19', mean: 27, std: 5 },
       signals: [
-        { signal: 'vessel_count', effect: 0.54, direction: 'up',   p_value: 0.02,   thin: false, test: 'z' },
+        { signal: 'vessel_count', effect: 0.54, direction: 'up',   p_value: 0.02,   thin: false, test: 'z', ingest_sensitive: true },
         { signal: 'flight_count', effect: 0.22, direction: 'up',   p_value: 0.31,   thin: false, test: 'z' },
         { signal: 'acled_events', effect: 0.61, direction: 'up',   p_value: 0.0042, thin: false, test: 'z' },
       ],
@@ -56,7 +68,7 @@ const DEMO = {
       old_window: { start: '2026-01-20', end: '2026-03-20', mean: 32, std: 6 },
       new_window: { start: '2026-03-21', end: '2026-04-19', mean: 58, std: 8 },
       signals: [
-        { signal: 'vessel_count', effect: 0.31, direction: 'up', p_value: 0.09,   thin: false, test: 'z' },
+        { signal: 'vessel_count', effect: 0.31, direction: 'up', p_value: 0.09,   thin: false, test: 'z', ingest_sensitive: true },
         { signal: 'flight_count', effect: 0.78, direction: 'up', p_value: 0.006,  thin: false, test: 'z' },
         { signal: 'acled_events', effect: 0.82, direction: 'up', p_value: 0.0008, thin: false, test: 'z' },
       ],
@@ -72,7 +84,7 @@ const DEMO = {
       old_window: { start: '2026-01-20', end: '2026-03-20', mean: 41, std: 5 },
       new_window: { start: '2026-03-21', end: '2026-04-19', mean: 43, std: 6 },
       signals: [
-        { signal: 'vessel_count', effect: 0.06, direction: 'flat', p_value: 0.72, thin: false, test: 'z' },
+        { signal: 'vessel_count', effect: 0.06, direction: 'flat', p_value: 0.72, thin: false, test: 'z', ingest_sensitive: true },
         { signal: 'flight_count', effect: 0.11, direction: 'up',   p_value: 0.18, thin: false, test: 'z' },
         { signal: 'acled_events', effect: 0.02, direction: 'flat', p_value: 0.91, thin: false, test: 'z' },
       ],
@@ -128,9 +140,12 @@ export async function GET(_req: NextRequest) {
       };
 
       // p_value is NULL on thin windows (< 8 data days) — a null p can
-      // never flag a shift.
+      // never flag a shift. Ingest-sensitive signals can never flag
+      // either: their p is real but attributes to the feed, not the
+      // theatre.
       const p = row.p_value === null || row.p_value === undefined ? null : Number(row.p_value);
-      if (p !== null && p < 0.01) {
+      const ingest_sensitive = INGEST_SENSITIVE.has(row.signal);
+      if (p !== null && p < 0.01 && !ingest_sensitive) {
         r.detected = true;
         r.shifted.push(row.signal);
       }
@@ -146,6 +161,7 @@ export async function GET(_req: NextRequest) {
         // not — the UI must not label a z p-value as a KS p-value.
         test: row.new_window?.test === 'ks' ? 'ks' : 'z',
         thin: p === null,
+        ingest_sensitive,
         old_window: row.old_window,
         new_window: row.new_window,
       });
@@ -159,9 +175,17 @@ export async function GET(_req: NextRequest) {
     for (const r of regions.values()) {
       r.signals.sort((a: any, b: any) => sigRank(a.signal) - sigRank(b.signal));
       r.shifted.sort((a: string, b: string) => sigRank(a) - sigRank(b));
-      // The driving signal — lowest non-null p — anchors the region
-      // headline and the default histogram selection.
-      const scored = r.signals.filter((s: any) => s.p_value !== null);
+      // The driving signal — lowest non-null p among signals that are
+      // allowed to attribute — anchors the region headline and the
+      // default histogram selection. Ingest-sensitive signals are
+      // excluded here too: "driven by vessel" would contradict their
+      // exclusion from detection. Fall back to any scored signal, then
+      // to the first row, so the middle panel always has something.
+      const scored = r.signals.filter((s: any) => s.p_value !== null && !s.ingest_sensitive);
+      if (scored.length === 0) {
+        const anyScored = r.signals.filter((s: any) => s.p_value !== null);
+        scored.push(...anyScored);
+      }
       const driving = scored.length
         ? scored.reduce((m: any, s: any) => (s.p_value < m.p_value ? s : m))
         : r.signals[0];

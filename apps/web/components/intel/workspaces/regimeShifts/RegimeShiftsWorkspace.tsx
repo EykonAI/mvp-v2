@@ -22,6 +22,13 @@ interface Signal {
   test_statistic?: number | null;
   test: string;
   thin: boolean;
+  /**
+   * True for signals riding a best-effort stream (free-tier AIS) whose
+   * daily counts confound ingest throughput with real activity. They
+   * display fully but never flag a SHIFT or drive the headline — the
+   * reader enforces the exclusion; this flag drives the disclosure tag.
+   */
+  ingest_sensitive?: boolean;
   old_window?: WindowStats;
   new_window?: WindowStats;
 }
@@ -323,7 +330,10 @@ function SignalRow({ s, selected, onSelect }: { s: Signal; selected: boolean; on
         {s.signal === 'nightlights_radiance' && (
           <Tag>lags ~9d (NASA)</Tag>
         )}
-        {s.p_value !== null && s.p_value < 0.01 && (
+        {s.ingest_sensitive && (
+          <Tag>free-tier AIS · ingest-sensitive</Tag>
+        )}
+        {s.p_value !== null && s.p_value < 0.01 && !s.ingest_sensitive && (
           <span
             style={{
               fontSize: 8.5,
