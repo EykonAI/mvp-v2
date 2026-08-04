@@ -28,6 +28,30 @@ export async function POST(req: NextRequest) {
   const oldUntil = new Date(now.getTime() - 30 * 24 * 3600_000).toISOString();
   const newSince = oldUntil;
 
+  // FEED ONSET, per count-signal table: the first ingested row's date.
+  // A day BEFORE a feed existed is an absent look, never a zero — the
+  // first real run flagged SHIFT on all six theatres at once because
+  // 38 of the old window's 60 days predate the ADS-B feed (2026-06-13)
+  // and the whole old window predates FIRMS ingest (2026-07-18); the KS
+  // was truthfully detecting the sensors being switched on. Days before
+  // onset are excluded from zero-fill; an old window left with < 8 real
+  // days lands in the thin gate and cannot flag. Known residual: a feed
+  // OUTAGE mid-window (e.g. the July AIS cert failure) still reads as
+  // zeros — distinguishing "live and quiet" from "down" needs the
+  // mig-089 liveness history and is deliberately not guessed at here.
+  // Measured: worst onset probe (conflict_events, no ingested_at index)
+  // is a 93 ms top-1 seq scan, once per signal per nightly run.
+  const onsets = new Map<string, string | null>();
+  for (const spec of SIGNALS) {
+    if (!spec.table) continue;
+    const { data } = await supabase
+      .from(spec.table)
+      .select('ingested_at')
+      .order('ingested_at', { ascending: true })
+      .limit(1);
+    onsets.set(spec.table, data?.[0]?.ingested_at ? String(data[0].ingested_at).slice(0, 10) : null);
+  }
+
   const writes: any[] = [];
 
   for (const t of seed.theatres) {
@@ -35,13 +59,14 @@ export async function POST(req: NextRequest) {
     if (!bbox) continue;
 
     for (const spec of SIGNALS) {
+      const onset = spec.table ? onsets.get(spec.table) ?? null : null;
       const [o, n] = await Promise.all([
         spec.kind === 'nightlights_radiance'
           ? nightlightsRadianceStats(supabase, bbox, oldSince, oldUntil)
-          : windowStats(supabase, spec.table!, bbox, oldSince, oldUntil),
+          : windowStats(supabase, spec.table!, bbox, oldSince, oldUntil, onset),
         spec.kind === 'nightlights_radiance'
           ? nightlightsRadianceStats(supabase, bbox, newSince, now.toISOString())
-          : windowStats(supabase, spec.table!, bbox, newSince, now.toISOString()),
+          : windowStats(supabase, spec.table!, bbox, newSince, now.toISOString(), onset),
       ]);
       const signal = spec.signal;
 
@@ -186,6 +211,7 @@ async function windowStats(
   bbox: { lat_min: number; lat_max: number; lon_min: number; lon_max: number },
   fromIso: string,
   toIso: string,
+  onset: string | null,
 ): Promise<{ count: number; mean: number; std: number; daily: DailyPoint[] }> {
   const { data } = await supabase
     .from(table)
@@ -196,13 +222,20 @@ async function windowStats(
     .gte('longitude', bbox.lon_min).lte('longitude', bbox.lon_max)
     .limit(20_000);
 
-  // Zero-fill the full day range: for a COUNT signal a day with no rows
-  // in the bbox is a real observed zero — leaving it out biased the old
-  // mean upward and blinded the test to quiet periods. The current UTC
-  // day is excluded everywhere: it is partial and would read as a false
-  // collapse.
+  // Zero-fill the day range, but only from FEED ONSET onward: while the
+  // feed is live, a day with no rows in the bbox is a real observed
+  // zero — leaving it out would bias the mean upward and blind the test
+  // to quiet periods. Days before the feed's first row are absent
+  // looks and are excluded entirely (see the onset comment in POST).
+  // The current UTC day is excluded everywhere: it is partial and would
+  // read as a false collapse. An empty onset (empty table) yields no
+  // days at all → thin gate.
   const perDay = new Map<string, number>();
-  for (const d of utcDays(fromIso, toIso)) perDay.set(d, 0);
+  if (onset !== null) {
+    for (const d of utcDays(fromIso, toIso)) {
+      if (d >= onset) perDay.set(d, 0);
+    }
+  }
   for (const r of data ?? []) {
     const d = new Date(r.ingested_at).toISOString().slice(0, 10);
     if (perDay.has(d)) perDay.set(d, (perDay.get(d) ?? 0) + 1);
