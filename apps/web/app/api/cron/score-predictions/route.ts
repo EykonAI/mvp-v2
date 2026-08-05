@@ -96,6 +96,11 @@ async function materialiseSummary(supabase: any) {
       .select('brier, calibration_bin, observed_at, predictions_register!inner(feature, predicted_distribution)')
       .gte('observed_at', since);
     if (w.feature) query = query.eq('predictions_register.feature', w.feature);
+    // House track ONLY (migration 098). The strip is the benchmark
+    // line; blending creator or machine claims into it would put the
+    // platform's own number on top of scores that belong to people, and
+    // the machine firehose would swamp both.
+    query = query.eq('predictions_register.track', 'house');
     const { data } = await query.limit(5000);
     const briers = (data ?? []).map((r: any) => Number(r.brier)).filter((x: number) => Number.isFinite(x));
     const avgBrier = briers.length ? briers.reduce((a: number, b: number) => a + b, 0) / briers.length : null;
@@ -131,13 +136,25 @@ async function materialiseSummary(supabase: any) {
     );
 }
 
+/**
+ * Every label states the WINDOW, and no label claims a quantity the
+ * code does not compute.
+ *
+ * 'precision' read "Alerts Precision@10" while computing a 7-day mean
+ * BRIER — a different quantity entirely (precision@10 is the share of
+ * the top-10 ranked alerts that were correct; nothing here ranks
+ * alerts). It now says what it is. The strip and the ledger page also
+ * disagreed by construction — 0.273 against 0.252 — because one is a
+ * 30-day mean and the other all-time, and neither said so. Same
+ * numbers, stated windows, no contradiction.
+ */
 function labelFor(key: string): string {
   switch (key) {
-    case 'brier':     return 'Aggregate Brier';
-    case 'posture':   return 'Posture-Shift Monitor';
-    case 'conflict':  return 'Conflict Escalation';
-    case 'trade':     return 'Trade-Flow Horizon';
-    case 'precision': return 'Alerts Precision@10';
+    case 'brier':     return 'Brier · house · 30d';
+    case 'posture':   return 'Posture-Shift · 30d';
+    case 'conflict':  return 'Conflict Escalation · 30d';
+    case 'trade':     return 'Trade-Flow Horizon · 30d';
+    case 'precision': return 'Brier · house · 7d';
     default:          return key;
   }
 }

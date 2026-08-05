@@ -161,7 +161,10 @@ export default function CalibrationWorkspace() {
       {/* ── MIDDLE ── */}
       <section style={{ background: 'var(--bg-navy)', padding: 16 }}>
         <div className="grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-          <Tile label={`Brier · ${track.label.toLowerCase()}`} value={fmt(track.headline?.brier)} sub={`n=${track.resolved} · lower is better`} calibrating={track.calibrating} />
+          {/* The window is part of the number. The global strip reports a
+              30-day mean; this page reports all-time. Both are correct and
+              they differ — unlabelled, they read as a contradiction. */}
+          <Tile label={`Brier · ${track.label.toLowerCase()}`} value={fmt(track.headline?.brier)} sub={`all resolved · n=${track.resolved}`} calibrating={track.calibrating} />
           <Tile label="Skill vs base rate" value={fmtSigned(track.headline?.skill)} sub={track.headline?.base_rate == null ? 'no base rate yet' : `base rate ${track.headline.base_rate}`} calibrating={track.calibrating} accent />
           <Tile label="Resolution" value={`${track.resolved} / ${track.resolved + track.void}`} sub={`${track.void} void · ${track.open} open`} />
           <Tile label="Sharpness" value={fmt(track.headline?.sharpness)} sub="avg distance from 0.5" calibrating={track.calibrating} />

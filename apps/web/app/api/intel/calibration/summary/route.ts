@@ -48,9 +48,16 @@ async function fetchResolvedCount(
   supabase: ReturnType<typeof createServerSupabase>,
 ): Promise<number> {
   try {
+    // House track only, and scored only. The badge sits in the global
+    // nav next to the house Brier; counting creator claims or machine
+    // observables there would inflate the platform's own record with
+    // other people's work and with automated detections. Void rows are
+    // excluded — an unobservable claim is not a resolved one.
     const { count } = await supabase
       .from('prediction_outcomes')
-      .select('prediction_id', { count: 'exact', head: true });
+      .select('prediction_id, predictions_register!inner(track)', { count: 'exact', head: true })
+      .is('void_reason', null)
+      .eq('predictions_register.track', 'house');
     return count ?? 0;
   } catch {
     return 0;
