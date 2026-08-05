@@ -9,7 +9,7 @@ export default function CalibrationPage() {
       accent="var(--teal)"
       eyebrow="Epistemic Anchor · Calibration"
       title="Calibration Ledger"
-      subtitle="Feature 22 · Predictions Register + Reliability diagrams"
+      subtitle="Feature 22 · commit-reveal register · Brier + reliability, per track"
     >
       <CalibrationWorkspace />
     </WorkspaceShell>
