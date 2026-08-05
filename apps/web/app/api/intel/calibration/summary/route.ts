@@ -29,10 +29,12 @@ export async function GET(_req: NextRequest) {
     const resolvedCount = await fetchResolvedCount(supabase);
 
     if (error || !data) {
-      return jsonWithCache({ ...seed, resolved_count: resolvedCount });
+      // The seed's labels go through the same derivation — a fallback
+      // must not be the one path that still claims a precision metric.
+      return jsonWithCache({ ...seed, metrics: relabel(seed.metrics), resolved_count: resolvedCount });
     }
 
-    const metrics = Array.isArray(data.metrics) ? data.metrics : seed.metrics;
+    const metrics = relabel(Array.isArray(data.metrics) ? data.metrics : seed.metrics);
     return jsonWithCache({
       metrics,
       generated_at: data.generated_at ?? new Date().toISOString(),
@@ -42,6 +44,36 @@ export async function GET(_req: NextRequest) {
   } catch {
     return jsonWithCache({ ...seed, resolved_count: 0 });
   }
+}
+
+/**
+ * Labels are derived HERE, from the metric key, and the stored label is
+ * ignored.
+ *
+ * They used to be persisted inside calibration_summary.metrics by the
+ * scoring cron, which meant a corrected label only reached the screen
+ * on the cron's next run — "Alerts Precision@10" (which was really a
+ * 7-day Brier) stayed live on production after the fix had shipped.
+ * A display string is not state: deriving it at read time makes the
+ * label change the moment the code does, and removes a whole class of
+ * stale-copy bug. The stored `key` and `value` remain the source of
+ * truth for what the number IS.
+ */
+const LABELS: Record<string, string> = {
+  brier: 'Brier · house · 30d',
+  posture: 'Posture-Shift · 30d',
+  conflict: 'Conflict Escalation · 30d',
+  trade: 'Trade-Flow Horizon · 30d',
+  // Never "Precision@10": nothing in the platform ranks alerts, so
+  // that quantity is not computed. This is a 7-day mean Brier.
+  precision: 'Brier · house · 7d',
+};
+
+function relabel(metrics: unknown[]): unknown[] {
+  return (metrics as Array<Record<string, unknown>>).map(m => {
+    const key = typeof m?.key === 'string' ? m.key : '';
+    return LABELS[key] ? { ...m, label: LABELS[key] } : m;
+  });
 }
 
 async function fetchResolvedCount(
