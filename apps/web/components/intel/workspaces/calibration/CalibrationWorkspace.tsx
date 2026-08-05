@@ -28,7 +28,10 @@ interface Integrity {
   resolved_total: number; median_lead_days: number | null;
 }
 interface Bin { bin: number; predicted: number; observed: number | null; n: number }
-interface Family { feature: string; n: number; brier: number | null; log_loss: number | null; thin: boolean }
+interface Family {
+  feature: string; n: number; brier: number | null; log_loss: number | null;
+  base_rate: number | null; skill: number | null; degenerate: boolean; thin: boolean;
+}
 interface TrackData {
   key: string; label: string; sublabel: string;
   issued: number; resolved: number; void: number; open: number; calibrating: boolean;
@@ -206,12 +209,26 @@ export default function CalibrationWorkspace() {
                   {f.brier == null ? '—' : f.brier.toFixed(3)}
                 </span>
               </div>
+              {/* Skill, not just Brier: a family whose event almost never
+                  happens scores a flattering Brier by predicting "no"
+                  forever, so Brier alone is not comparable across
+                  families. Skill is measured against each family's OWN
+                  base rate. */}
               <div className="flex items-center" style={{ justifyContent: 'space-between', gap: 6, marginTop: 2 }}>
                 <span style={{ fontSize: 9, color: 'var(--ink-faint)' }}>
-                  n={f.n}{f.log_loss != null ? ` · log-loss ${f.log_loss.toFixed(3)}` : ''}
+                  n={f.n}{f.base_rate != null ? ` · base ${f.base_rate}` : ''}
                 </span>
-                {f.thin && <Tag>thin · n&lt;{data.min_sample}</Tag>}
+                {f.degenerate ? (
+                  <Tag>base 0/1 · skill undefined</Tag>
+                ) : f.skill != null ? (
+                  <span style={{ fontSize: 9.5, color: f.skill >= 0 ? 'var(--teal)' : 'var(--amber)' }}>
+                    skill {f.skill >= 0 ? '+' : ''}{f.skill.toFixed(2)}
+                  </span>
+                ) : null}
               </div>
+              {f.thin && (
+                <div style={{ marginTop: 2 }}><Tag>thin · n&lt;{data.min_sample}</Tag></div>
+              )}
             </div>
           ))}
         </div>

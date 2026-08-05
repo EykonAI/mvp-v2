@@ -42,6 +42,35 @@ export const resolveEia: Resolver = async (row, supabase) => {
 
   if (error || !obs) return null;
 
+  // THE PRINT MUST BE NEWER THAN THE BASELINE.
+  //
+  // Without this check the resolver silently scored "no draw" every
+  // single week. EIA publishes Wednesday morning and our ingest lands
+  // later, so at scoring time the newest row in the table was still
+  // the BASELINE row itself — and `observedValue < baseline` on two
+  // identical numbers is false. Eleven of eleven claims resolved 0
+  // while the real data shows nine genuine draws; the register
+  // recorded a 0.000 base rate for an event that happens ~82% of the
+  // time, and the house track's skill went negative on the strength
+  // of it.
+  //
+  // This is the calibration form of the invariant the platform applies
+  // everywhere else: ABSENCE OF AN OBSERVATION IS NOT A RESULT. A
+  // missing print means "not published yet" — defer, and void once the
+  // wait becomes unreasonable — never "the thing did not happen".
+  const baselinePeriod = readBaselinePeriod(row.context);
+  if (baselinePeriod && String(obs.period) <= baselinePeriod) {
+    const overdueDays = (Date.now() - resolvesAtMs) / 86_400_000;
+    if (overdueDays > VOID_AFTER_DAYS) {
+      return {
+        observed: 0,
+        source_url: 'https://www.eia.gov/petroleum/supply/weekly/',
+        void_reason: `no print newer than baseline ${baselinePeriod} within ${VOID_AFTER_DAYS} days of resolution`,
+      };
+    }
+    return null; // not published/ingested yet — retry on the next tick
+  }
+
   const observedValue = Number(obs.value);
   if (!Number.isFinite(observedValue)) return null;
 
@@ -51,6 +80,19 @@ export const resolveEia: Resolver = async (row, supabase) => {
     source_url: 'https://www.eia.gov/petroleum/supply/weekly/',
   };
 };
+
+/**
+ * How long to keep waiting for a print before the claim voids. EIA's
+ * weekly report is published the Wednesday after the report week; 10
+ * days absorbs holiday-week delays and an ingest outage without
+ * leaving claims unresolved forever.
+ */
+const VOID_AFTER_DAYS = 10;
+
+function readBaselinePeriod(context: Record<string, unknown> | null): string | null {
+  const raw = context?.baseline_period;
+  return typeof raw === 'string' && raw.length >= 10 ? raw.slice(0, 10) : null;
+}
 
 function parseTargetObservable(t: string): { series_id: string } | null {
   if (!t.startsWith('eia:')) return null;

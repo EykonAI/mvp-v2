@@ -58,7 +58,8 @@ export async function GET(_req: NextRequest) {
         .select('id, feature, track, issued_at, resolves_at, commit_hash, revealed_at, source'),
       supabase
         .from('prediction_outcomes')
-        .select('prediction_id, observed_value, observed_at, brier, log_loss, calibration_bin, void_reason'),
+        .select('prediction_id, observed_value, observed_at, brier, log_loss, calibration_bin, void_reason')
+        .limit(5000),
       supabase.from('firms_significant_events').select('event_type'),
       supabase.from('nightlights_significant_events').select('event_type'),
     ]);
@@ -234,26 +235,53 @@ function historyFor(scored: Array<{ observed_at: string | null; brier: number | 
 }
 
 /** Per claim family, within the track. */
+/**
+ * Per claim family, within the track — INCLUDING per-family skill.
+ *
+ * Brier alone cannot be compared across families, because each family
+ * has its own base rate: a family whose event happens 5% of the time
+ * scores a flattering Brier by predicting "no" forever. Skill against
+ * each family's OWN base rate is the comparable number, and it is what
+ * stops one broken family hiding behind a working one — the aggregate
+ * read −0.10 while AIS was at +0.05 and a single mis-resolved family
+ * carried the whole deficit.
+ */
 function familiesFor(
-  scored: Array<{ prediction_id: string; brier: number | null; log_loss: number | null }>,
+  scored: Array<{ prediction_id: string; brier: number | null; log_loss: number | null; observed_value: number | null }>,
   byId: Map<string, { feature: string }>,
 ) {
-  const groups = new Map<string, { brier: number[]; ll: number[] }>();
+  const groups = new Map<string, { brier: number[]; ll: number[]; obs: number[] }>();
   for (const o of scored) {
     const feature = byId.get(o.prediction_id)?.feature ?? 'unknown';
-    const g = groups.get(feature) ?? { brier: [], ll: [] };
+    const g = groups.get(feature) ?? { brier: [], ll: [], obs: [] };
     if (o.brier != null) g.brier.push(Number(o.brier));
     if (o.log_loss != null) g.ll.push(Number(o.log_loss));
+    if (o.observed_value != null && Number.isFinite(Number(o.observed_value))) g.obs.push(Number(o.observed_value));
     groups.set(feature, g);
   }
   return Array.from(groups.entries())
-    .map(([feature, g]) => ({
-      feature,
-      n: g.brier.length,
-      brier: g.brier.length ? round3(g.brier.reduce((a, b) => a + b, 0) / g.brier.length) : null,
-      log_loss: g.ll.length ? round3(g.ll.reduce((a, b) => a + b, 0) / g.ll.length) : null,
-      thin: g.brier.length < MIN_SAMPLE,
-    }))
+    .map(([feature, g]) => {
+      const brier = g.brier.length ? g.brier.reduce((a, b) => a + b, 0) / g.brier.length : null;
+      const baseRate = g.obs.length ? g.obs.reduce((a, b) => a + b, 0) / g.obs.length : null;
+      const baselineBrier = baseRate == null ? null : baseRate * (1 - baseRate);
+      // A degenerate family (base rate 0 or 1) has a baseline Brier of
+      // 0 — nothing can beat it, so skill is undefined rather than
+      // infinitely negative. Reported as null, and the base rate next
+      // to it tells the reader why.
+      const skill = brier != null && baselineBrier != null && baselineBrier > 0.001
+        ? 1 - brier / baselineBrier
+        : null;
+      return {
+        feature,
+        n: g.brier.length,
+        brier: brier == null ? null : round3(brier),
+        log_loss: g.ll.length ? round3(g.ll.reduce((a, b) => a + b, 0) / g.ll.length) : null,
+        base_rate: baseRate == null ? null : round3(baseRate),
+        skill: skill == null ? null : round3(skill),
+        degenerate: baselineBrier != null && baselineBrier <= 0.001,
+        thin: g.brier.length < MIN_SAMPLE,
+      };
+    })
     .sort((a, b) => b.n - a.n);
 }
 
