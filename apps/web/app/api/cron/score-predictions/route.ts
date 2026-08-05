@@ -52,11 +52,32 @@ export async function POST(req: NextRequest) {
       deferred++;
       continue;
     }
+    // A VOID claim closes with NO score. Writing a Brier here would
+    // convert "we never saw the outcome" into evidence about how good
+    // the forecast was, which is precisely the fault that put a 0.000
+    // base rate on the EIA feature.
+    if (resolution.void_reason) {
+      writes.push({
+        prediction_id: r.id,
+        observed_value: null,
+        observed_at: now.toISOString(),
+        brier: null,
+        log_loss: null,
+        calibration_bin: null,
+        resolution_source_url: resolution.source_url,
+        void_reason: resolution.void_reason,
+      });
+      continue;
+    }
+
     const observed = resolution.observed;
     const predicted = Number((r.predicted_distribution as any)?.mean ?? 0);
     const brier = (predicted - observed) ** 2;
     const logLoss = -Math.log(Math.max(1e-6, 1 - Math.abs(predicted - observed)));
-    const bin = Math.max(0, Math.min(9, Math.floor(predicted * 10)));
+    // Bins are 1..10 to match the reliability reader (bin midpoint
+    // (bin-0.5)/10). Flooring to 0..9 shifted every point half a bin
+    // left of where it was scored.
+    const bin = Math.max(1, Math.min(10, Math.floor(predicted * 10) + 1));
     writes.push({
       prediction_id: r.id,
       observed_value: observed,

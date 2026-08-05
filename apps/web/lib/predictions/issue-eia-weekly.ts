@@ -94,8 +94,14 @@ export async function issueEiaWeekly(opts: { now?: Date } = {}): Promise<IssueEi
         series_id: EIA_CUSHING_CRUDE_STOCKS,
         baseline_kbbl: baseline,
         baseline_period: latest.period,
-        forecast_basis: draw == null ? 'flat_prior_insufficient_history' : 'wow_draw_base_rate',
+        forecast_basis: draw == null ? 'flat_prior_insufficient_history' : 'wow_draw_rate_regime_blend',
         forecast_sample_weeks: draw?.transitions ?? 0,
+        // Both inputs are recorded so a reader can see WHY the forecast
+        // sits where it does, and so a future audit can tell a regime
+        // call apart from a climatology call.
+        forecast_recent_rate: draw?.recent_rate ?? null,
+        forecast_long_rate: draw?.long_rate ?? null,
+        forecast_recent_weeks: RECENT_WEEKS,
       },
       predicted_distribution: { mean: predictedMean, type: 'point' },
       target_observable: targetObservable,
@@ -158,9 +164,28 @@ function formatThousands(n: number): string {
  * by period. Returns null when there are fewer than MIN_HISTORY prints (too
  * little to estimate an informative rate; the caller keeps the 0.5 prior).
  */
+/**
+ * Week-over-week draw rate, weighted toward the RECENT regime.
+ *
+ * The long-run rate over ~120 weeks was the previous forecast, and it
+ * cost real skill: it emitted ~0.5–0.59 through a stretch in which
+ * Cushing drew in nine of eleven weeks (~82%). The platform sells a
+ * regime-shift detector and its own forecaster was using a window long
+ * enough to average the regime away.
+ *
+ * The fix is a blend, not a swap: the recent window alone would be
+ * jumpy on a handful of transitions, and the long window alone is what
+ * we just diagnosed. Weighting the recent window by its own sample size
+ * (n/(n+K), the same credibility shrinkage the Reputation Note uses)
+ * lets the forecast follow a regime once there is enough evidence for
+ * one, and fall back toward climatology when there is not.
+ */
+const RECENT_WEEKS = 12;
+const SHRINKAGE_K = 6;
+
 function weekOverWeekDrawRate(
   rows: { period: string; value: number | string }[],
-): { rate: number; transitions: number } | null {
+): { rate: number; transitions: number; recent_rate: number | null; long_rate: number } | null {
   const MIN_HISTORY = 8;
   const vals = rows
     .slice()
@@ -168,11 +193,28 @@ function weekOverWeekDrawRate(
     .map((r) => Number(r.value))
     .filter((n) => Number.isFinite(n));
   if (vals.length < MIN_HISTORY) return null;
-  let draws = 0;
-  let transitions = 0;
-  for (let i = 1; i < vals.length; i++) {
-    transitions++;
-    if (vals[i] < vals[i - 1]) draws++;
-  }
-  return transitions ? { rate: draws / transitions, transitions } : null;
+
+  const rate = (series: number[]) => {
+    let draws = 0, transitions = 0;
+    for (let i = 1; i < series.length; i++) {
+      transitions++;
+      if (series[i] < series[i - 1]) draws++;
+    }
+    return transitions ? { r: draws / transitions, n: transitions } : null;
+  };
+
+  const long = rate(vals);
+  if (!long) return null;
+  const recent = rate(vals.slice(-(RECENT_WEEKS + 1)));
+
+  // Credibility blend: the recent window earns its weight.
+  const w = recent ? recent.n / (recent.n + SHRINKAGE_K) : 0;
+  const blended = recent ? w * recent.r + (1 - w) * long.r : long.r;
+
+  return {
+    rate: blended,
+    transitions: long.n,
+    recent_rate: recent ? Number(recent.r.toFixed(3)) : null,
+    long_rate: Number(long.r.toFixed(3)),
+  };
 }

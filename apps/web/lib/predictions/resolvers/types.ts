@@ -16,6 +16,15 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 export interface Resolution {
   observed: number;
   source_url: string | null;
+  /**
+   * Set when the outcome could NOT be observed and the claim has waited
+   * long enough that deferring forever is worse than closing it. A void
+   * claim is excluded from every aggregate — it is neither a win nor a
+   * loss, because nothing was seen. Scoring a claim on the absence of an
+   * observation is how the EIA feature recorded a 0.000 base rate for an
+   * event that happens ~82% of the time.
+   */
+  void_reason?: string;
 }
 
 export interface PredictionRow {
