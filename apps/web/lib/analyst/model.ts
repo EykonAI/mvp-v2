@@ -39,6 +39,15 @@ export const UTILITY_MODEL =
 export const EVALUATOR_MODEL =
   process.env.NOTIF_EVALUATOR_MODEL || 'claude-sonnet-5';
 
+// The editorial path — the persisted daily brief and the legacy
+// per-persona briefing. Plain prose from structured evidence, no
+// tools. Kept separate from the analyst default so the writing voice
+// can be tuned without touching the interactive workspace.
+//
+// Env override: EDITORIAL_MODEL.
+export const EDITORIAL_MODEL =
+  process.env.EDITORIAL_MODEL || 'claude-sonnet-5';
+
 // Models a session row may carry. Anything else is rejected on write.
 export function allowedSessionModels(): string[] {
   return [DEFAULT_ANALYST_MODEL, DEEP_ANALYSIS_MODEL];

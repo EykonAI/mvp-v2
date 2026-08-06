@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { EDITORIAL_MODEL } from '@/lib/analyst/model';
 import { getAnthropic } from '@/lib/anthropic';
 import { createServerSupabase } from '@/lib/supabase-server';
 
@@ -58,8 +59,10 @@ export async function POST(req: NextRequest) {
 
     const anthropic = getAnthropic();
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5',
+      model: EDITORIAL_MODEL,
       max_tokens: 1600,
+      // See generate-daily-brief: thinking would eat the prose budget.
+      ...({ thinking: { type: 'disabled' } } as any),
       system: `You are the eYKON.ai briefing generator. Produce a briefing tailored to the requested persona. Cite sources (provider + timestamp) in every factual claim.\n\nPersona frame: ${frame}`,
       messages: [
         {
