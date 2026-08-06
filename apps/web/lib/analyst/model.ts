@@ -24,6 +24,21 @@ export const DEEP_ANALYSIS_MODEL =
 export const UTILITY_MODEL =
   process.env.ANALYST_UTILITY_MODEL || 'claude-haiku-4-5';
 
+// ─── Beyond the analyst ──────────────────────────────────────────
+// The NOTIF AI rule evaluator (lib/notifications/evaluator-ai.ts)
+// used to carry its own literal — claude-opus-4-7, left behind when
+// the analyst path was consolidated. That put the most expensive
+// tier on the most repetitive job: an hourly cron, up to 50 events
+// per rule, returning a single boolean.
+//
+// The evaluator makes ONE forced tool call and reads back a
+// {fire, rationale} pair. That is orchestration, not deep synthesis
+// — the same shape the analyst runs on Sonnet 5.
+//
+// Env override: NOTIF_EVALUATOR_MODEL.
+export const EVALUATOR_MODEL =
+  process.env.NOTIF_EVALUATOR_MODEL || 'claude-sonnet-5';
+
 // Models a session row may carry. Anything else is rejected on write.
 export function allowedSessionModels(): string[] {
   return [DEFAULT_ANALYST_MODEL, DEEP_ANALYSIS_MODEL];
