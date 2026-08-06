@@ -71,7 +71,12 @@ function CenterSurface() {
     );
   }
   return (
-    <PanelSection index="03" title="Posture Shift · Live" meta="5 theatres pinned">
+    // No theatre count here on purpose. PostureViewport already renders the
+    // live `theatres.length`; a second, hardcoded copy in this header drifted
+    // out of date the moment Malacca was pinned as the 6th theatre (#334) and
+    // read "5 theatres pinned" next to a panel correctly showing 6.
+    // A label belongs to whoever computes it.
+    <PanelSection index="03" title="Posture Shift · Live">
       <PostureViewport />
     </PanelSection>
   );
