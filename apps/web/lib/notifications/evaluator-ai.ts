@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getAnthropic } from '@/lib/anthropic';
+import { EVALUATOR_MODEL } from '@/lib/analyst/model';
 import {
   DATA_BUCKETS,
   AI_K_EVENTS_DEFAULT,
@@ -26,9 +27,10 @@ import { fetchWeatherForRegion } from './weather';
 // Decision shape: { fire: boolean, rationale: string } returned via
 // a single-tool tool_use call (more reliable than free-text JSON).
 
-// Match the Intelligence Center cron pattern: claude-opus-4-7 for
-// the main reasoning, fall back to a smaller model in a future tune.
-const MODEL = 'claude-opus-4-7';
+// Model id lives in lib/analyst/model.ts with every other one, so a
+// swap is a config change rather than a code hunt. See EVALUATOR_MODEL
+// there for why this runs Sonnet 5 rather than the old Opus literal.
+const MODEL = EVALUATOR_MODEL;
 const MAX_TOKENS_OUT = 400;
 
 // ─── Bucket → table mapping ──────────────────────────────────────
@@ -568,6 +570,13 @@ Decide via the report_decision tool.`;
     tools: [REPORT_DECISION_TOOL],
     tool_choice: { type: 'tool', name: 'report_decision' },
     messages: [{ role: 'user' as const, content: userText }],
+    // Sonnet 5 runs adaptive thinking by DEFAULT; the old Opus 4.7
+    // literal did not. Thinking cannot be combined with a FORCED
+    // tool_choice, and this call forces report_decision — so leaving
+    // it on would 400 every evaluation. It would also eat the
+    // 400-token output budget before the decision was written.
+    // Same disable the analyst engine applies, for the same reason.
+    thinking: { type: 'disabled' },
   };
   const response = await anthropic.messages.create(
     requestBody as unknown as Anthropic.Messages.MessageCreateParamsNonStreaming,
