@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { EDITORIAL_MODEL } from '@/lib/analyst/model';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { getAnthropic } from '@/lib/anthropic';
@@ -30,7 +31,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
-const MODEL = 'claude-sonnet-4-5';
+// Model id lives in lib/analyst/model.ts with every other one.
+const MODEL = EDITORIAL_MODEL;
 
 const QUIET_COPY =
   'A quiet period. Over the last 24 hours the monitored feeds produced no anomaly ' +
@@ -101,6 +103,11 @@ export async function POST(req: NextRequest) {
     const response = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 1024,
+      // Sonnet 5 runs adaptive thinking by default and thinking tokens
+      // count against max_tokens — on a 1024 budget that can swallow
+      // the brief itself. This is straight prose from structured
+      // evidence; it does not need it.
+      ...({ thinking: { type: 'disabled' } } as any),
       system:
         'You are the eYKON.ai daily briefing writer. You turn structured intelligence ' +
         'evidence into a calm, sourced, plain-language brief for a general reader.',

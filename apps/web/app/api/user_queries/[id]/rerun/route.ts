@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { DEFAULT_ANALYST_MODEL } from '@/lib/analyst/model';
 import {
   getAnthropic,
   CLAUDE_TOOLS,
@@ -108,11 +109,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const allMessages = [...seedMessages];
     const capturedToolCalls: ToolCallRecord[] = [];
     let response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5',
+      model: DEFAULT_ANALYST_MODEL,
       max_tokens: 4096,
       system: systemPrompt,
       tools: CLAUDE_TOOLS,
       messages: seedMessages,
+      // This is a tool-use loop that echoes assistant content back on
+      // the next leg. New-generation Claude runs adaptive thinking by
+      // DEFAULT, and a display:"omitted" thinking block replays with
+      // empty text — the API rejects it with 400 "each thinking block
+      // must contain thinking" (the #303 failure). Disable it here and
+      // strip the blocks from the echo below; both are required.
+      ...({ thinking: { type: 'disabled' } } as any),
     });
     let iterations = 0;
     const maxIterations = 5;
@@ -122,7 +130,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         (b): b is { type: 'tool_use'; id: string; name: string; input: unknown } =>
           b.type === 'tool_use',
       );
-      allMessages.push({ role: 'assistant', content: response.content });
+      // Echo the assistant turn with thinking/redacted_thinking blocks
+      // stripped — belt and braces alongside the disable above.
+      allMessages.push({
+        role: 'assistant',
+        content: response.content.filter(
+          (b: any) => b.type !== 'thinking' && b.type !== 'redacted_thinking',
+        ),
+      });
       const toolResults: any[] = [];
       for (const toolUse of toolUseBlocks) {
         const result = await executeToolCall(toolUse.name, toolUse.input as Record<string, any>);
@@ -135,11 +150,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       }
       allMessages.push({ role: 'user', content: toolResults });
       response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-5',
+        model: DEFAULT_ANALYST_MODEL,
         max_tokens: 4096,
         system: systemPrompt,
         tools: CLAUDE_TOOLS,
         messages: allMessages,
+        ...({ thinking: { type: 'disabled' } } as any),
       });
     }
     const textContent = response.content
