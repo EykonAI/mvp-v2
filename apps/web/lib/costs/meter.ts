@@ -109,21 +109,26 @@ export async function recordCost(input: RecordCostInput): Promise<void> {
  * Price an LLM turn and record it. The engine calls this; callers of
  * the engine only supply the MeterContext.
  *
- * An unknown model id throws inside priceUsage() — caught here and
- * logged loudly rather than recorded at zero, because a zero is a free
- * ride that would make an exhausted balance read as healthy.
+ * Returns the priced USD cost so the caller can debit a wallet with it
+ * WITHOUT re-running priceUsage() — that call throws on an unknown
+ * model id, and doing it a second time outside this try would break a
+ * completed turn over a pricing-table gap.
+ *
+ * Returns null when pricing failed. An unknown model is logged loudly
+ * rather than recorded at zero: a silent zero is a free ride that makes
+ * an exhausted balance read as healthy.
  */
 export async function recordLlmTurn(
   ctx: MeterContext,
   model: string,
   usage: AccUsage,
-): Promise<void> {
+): Promise<number | null> {
   let usdCost: number;
   try {
     usdCost = priceUsage(model, usage);
   } catch (err: any) {
     console.error('[costs] pricing failed, NOT recording:', err?.message);
-    return;
+    return null;
   }
   await recordCost({
     ...ctx,
@@ -132,4 +137,5 @@ export async function recordLlmTurn(
     model,
     usage,
   });
+  return usdCost;
 }

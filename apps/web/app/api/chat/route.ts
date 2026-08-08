@@ -4,7 +4,8 @@ import { getCurrentTier, type Tier } from '@/lib/subscription';
 import { safeError } from '@/lib/log';
 import { persistUserQuery } from '@/lib/intelligence-analyst/persistence';
 import { runAnalystTurn } from '@/lib/analyst/engine';
-import { enforceAiQueryLimit } from '@/lib/analyst/access';
+import { enforceAiQueryLimit, enforceCreditBalance } from '@/lib/analyst/access';
+import { DEFAULT_ANALYST_MODEL } from '@/lib/analyst/model';
 
 // Legacy stateless analyst endpoint. Kept as the Citizen path (no
 // persisted sessions per the §9.6 gating decision) and as the
@@ -59,6 +60,11 @@ export async function POST(req: NextRequest) {
     if (userId) {
       const limited = await enforceAiQueryLimit(userId, tier);
       if (limited) return limited;
+      // Credit wallet pre-flight (migration 101). The docked panel runs
+      // the default model only — Deep Analysis is a /analyst surface —
+      // so it is always measured against the main budget.
+      const denied = await enforceCreditBalance(userId, DEFAULT_ANALYST_MODEL);
+      if (denied) return denied;
     }
 
     const apiMessages = messages

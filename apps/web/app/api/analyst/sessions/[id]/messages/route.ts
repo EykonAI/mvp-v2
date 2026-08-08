@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireSessionAccess, enforceAiQueryLimit } from '@/lib/analyst/access';
+import { requireSessionAccess, enforceAiQueryLimit, enforceCreditBalance } from '@/lib/analyst/access';
 import {
   getSessionOwned,
   getMessages,
@@ -8,7 +8,7 @@ import {
   getProjectOwned,
 } from '@/lib/analyst/store';
 import { runAnalystTurn, type EngineEvent } from '@/lib/analyst/engine';
-import { DEEP_ANALYSIS_MODEL } from '@/lib/analyst/model';
+import { DEEP_ANALYSIS_MODEL, DEFAULT_ANALYST_MODEL } from '@/lib/analyst/model';
 import { autoTitleSession } from '@/lib/analyst/title';
 import { persistUserQuery, type ToolCallRecord } from '@/lib/intelligence-analyst/persistence';
 import { safeError } from '@/lib/log';
@@ -83,6 +83,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const limited = await enforceAiQueryLimit(userId, caller.tier);
   if (limited) return limited;
+
+  // Credit wallet pre-flight (migration 101). Only bites for a
+  // founder-granted test plan; a no-op for every other user. Checked
+  // against the SESSION's model so a Deep session is measured against
+  // the Deep sub-cap and an ordinary one is not.
+  const denied = await enforceCreditBalance(userId, session.model ?? DEFAULT_ANALYST_MODEL);
+  if (denied) return denied;
 
   // History + the new user turn. The user row is persisted before the
   // model call so a mid-stream failure can never lose the question.
