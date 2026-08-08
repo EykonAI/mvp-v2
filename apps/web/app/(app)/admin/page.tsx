@@ -75,6 +75,23 @@ const ADMIN_SECTIONS: AdminGroup[] = [
     ],
   },
   {
+    group: 'Analytics',
+    links: [
+      {
+        href: '/admin/analytics',
+        title: 'Cost & profitability',
+        glyph: '📊',
+        desc: 'What each user costs in real Claude tokens, what they pay, and the margin between — plus cost by feature and the raw event tail.',
+      },
+      {
+        href: '/admin/credits',
+        title: 'FP test plans',
+        glyph: '🎟️',
+        desc: 'Grant a metered evaluation account — Pro capability on a Claude budget you set, with a separate Deep Analysis cap. Top up, pause or revoke.',
+      },
+    ],
+  },
+  {
     group: 'Marketing',
     links: [
       {

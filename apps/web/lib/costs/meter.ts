@@ -30,8 +30,14 @@ export type CostFeature =
   | 'deep_analysis'
   | 'auto_title'
   | 'rule_eval_ai'
+  // ── Platform overhead: user_id NULL, billable false. Identical
+  // with zero users, so never charged to a wallet — but recorded, or
+  // the ledger undercounts against the Anthropic invoice and the gap
+  // reads as efficiency rather than a missing feed.
   | 'editorial'
   | 'newsjack'
+  | 'content_daily'
+  | 'anomaly_report'
   | 'sms'
   | 'whatsapp'
   | 'email'
@@ -54,6 +60,8 @@ const NON_BILLABLE_FEATURES: ReadonlySet<string> = new Set<string>([
   'email',
   'editorial',
   'newsjack',
+  'content_daily',
+  'anomaly_report',
 ]);
 
 function defaultBillable(feature: CostFeature): boolean {

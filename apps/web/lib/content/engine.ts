@@ -39,7 +39,12 @@ export async function runProactiveTick(supabase: SB): Promise<ProactiveResult> {
   let text = '';
   let toolCalls = 0;
   try {
-    const out = await runAnalyst({ prompt: buildAnglePrompt(angle), tier: 'pro' });
+    // Platform overhead — see process-anomaly-flags.
+    const out = await runAnalyst({
+      prompt: buildAnglePrompt(angle),
+      tier: 'pro',
+      meter: { userId: null, feature: 'content_daily' },
+    });
     text = out.text.trim();
     toolCalls = out.toolCalls;
   } catch (err) {

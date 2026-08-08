@@ -153,7 +153,14 @@ export async function POST(req: NextRequest) {
 
   for (const flag of candidates) {
     try {
-      const out = await runAnalyst({ prompt: buildPrompt(flag), tier: 'pro' });
+      // Platform overhead: runs on a cron regardless of who is logged
+      // in, so user_id NULL and billable false — recorded for P&L,
+      // never charged to a wallet.
+      const out = await runAnalyst({
+        prompt: buildPrompt(flag),
+        tier: 'pro',
+        meter: { userId: null, feature: 'anomaly_report' },
+      });
       const { title, summary, narrative } = parseReport(out.text, flag);
 
       const payload = flag.payload ?? {};

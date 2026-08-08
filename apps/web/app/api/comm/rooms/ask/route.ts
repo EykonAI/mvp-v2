@@ -67,7 +67,16 @@ export async function POST(req: NextRequest) {
 
   let answer = '';
   try {
-    const result = await runAnalyst({ prompt: question, tier });
+    // Cost metering (mig 100). The COMM in-room analyst is the same
+    // engine and the same tokens as /analyst, so it is attributed to
+    // the asking user and debited from a metered plan like any other
+    // turn. Leaving it unmetered would be a hole a partner could ask
+    // unlimited questions through.
+    const result = await runAnalyst({
+      prompt: question,
+      tier,
+      meter: { userId: user.id, feature: 'analyst_turn', ref: room },
+    });
     answer = result.text.trim();
   } catch {
     answer = '';
