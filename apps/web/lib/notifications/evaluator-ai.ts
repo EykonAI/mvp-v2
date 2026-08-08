@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getAnthropic } from '@/lib/anthropic';
 import { EVALUATOR_MODEL } from '@/lib/analyst/model';
+import { recordLlmTurn } from '@/lib/costs/meter';
 import {
   DATA_BUCKETS,
   AI_K_EVENTS_DEFAULT,
@@ -583,6 +584,25 @@ Decide via the report_decision tool.`;
   );
 
   const usage = response.usage as unknown as AiDecision['usage'];
+
+  // Cost metering (migration 100). This is the SNEAKY cost: the
+  // evaluator runs on a schedule whether or not the rule's owner ever
+  // logs in again, so a user who creates ten AI rules and walks away
+  // keeps spending. Attributed to the rule's owner, not the cron, or a
+  // metered plan would leak its whole budget without a single visit.
+  const u: any = response.usage;
+  await recordLlmTurn(
+    { userId: rule.user_id, feature: 'rule_eval_ai', ref: rule.id },
+    MODEL,
+    {
+      input_tokens: u?.input_tokens ?? 0,
+      output_tokens: u?.output_tokens ?? 0,
+      cache_write_tokens: u?.cache_creation_input_tokens ?? 0,
+      cache_read_tokens: u?.cache_read_input_tokens ?? 0,
+      legs: 1,
+    },
+  );
+
   const toolUse = response.content.find(
     (b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use',
   );

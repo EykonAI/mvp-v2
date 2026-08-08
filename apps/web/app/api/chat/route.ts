@@ -69,6 +69,10 @@ export async function POST(req: NextRequest) {
       messages: apiMessages,
       tier,
       persona,
+      // Docked panel on globe / INTEL. Same engine, same tokens, so it
+      // is metered identically. userId is null for the unauthenticated
+      // case — the cost is still recorded, just unattributed.
+      meter: { userId: userId ?? null, feature: 'analyst_turn' },
     });
 
     // Persist for the Query History tab and the Suggested-tab ranker.
