@@ -8,6 +8,7 @@ import {
   getProjectOwned,
 } from '@/lib/analyst/store';
 import { runAnalystTurn, type EngineEvent } from '@/lib/analyst/engine';
+import { DEEP_ANALYSIS_MODEL } from '@/lib/analyst/model';
 import { autoTitleSession } from '@/lib/analyst/title';
 import { persistUserQuery, type ToolCallRecord } from '@/lib/intelligence-analyst/persistence';
 import { safeError } from '@/lib/log';
@@ -173,6 +174,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         sessionId: session!.id,
         userText: content,
         assistantText: result.text,
+        userId,
       });
       const refreshed = await getSessionOwned(session!.id, userId);
       title = refreshed?.title ?? null;
@@ -189,6 +191,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         persona: session.persona ?? undefined,
         model: session.model ?? undefined,
         projectInstructions,
+        meter: {
+          userId,
+          // Deep Analysis is the budget burner (Opus 4.8 at 2.5x
+          // Sonnet 5) and carries its own sub-cap, so it is a distinct
+          // feature in the ledger rather than a flavour of analyst_turn.
+          feature:
+            session.model === DEEP_ANALYSIS_MODEL ? 'deep_analysis' : 'analyst_turn',
+          sessionId: session.id,
+        },
       });
       const { assistantRow, title, queryId } = await persistAssistant(result);
       return NextResponse.json({
@@ -221,6 +232,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           persona: session!.persona ?? undefined,
           model: session!.model ?? undefined,
           projectInstructions,
+          meter: {
+            userId,
+            feature:
+              session!.model === DEEP_ANALYSIS_MODEL ? 'deep_analysis' : 'analyst_turn',
+            sessionId: session!.id,
+          },
           onEvent: (ev: EngineEvent) => send(ev as unknown as Record<string, unknown>),
         });
         try {

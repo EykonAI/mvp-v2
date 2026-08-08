@@ -8,12 +8,17 @@
 
 import { getAnthropic } from '@/lib/anthropic';
 import { UTILITY_MODEL } from './model';
+import { recordLlmTurn } from '@/lib/costs/meter';
 import { setSessionTitle } from './store';
 
 export async function autoTitleSession(opts: {
   sessionId: string;
   userText: string;
   assistantText: string;
+  // Cost metering (migration 100). Haiku + 64 max_tokens makes this
+  // negligible per call, but it is non-zero and it fires once per new
+  // session — recorded so the ledger reconciles against the invoice.
+  userId?: string | null;
 }): Promise<void> {
   try {
     const anthropic = getAnthropic();
@@ -31,6 +36,19 @@ export async function autoTitleSession(opts: {
         },
       ],
     });
+    const u: any = (response as any).usage;
+    await recordLlmTurn(
+      { userId: opts.userId ?? null, feature: 'auto_title', sessionId: opts.sessionId },
+      UTILITY_MODEL,
+      {
+        input_tokens: u?.input_tokens ?? 0,
+        output_tokens: u?.output_tokens ?? 0,
+        cache_write_tokens: u?.cache_creation_input_tokens ?? 0,
+        cache_read_tokens: u?.cache_read_input_tokens ?? 0,
+        legs: 1,
+      },
+    );
+
     const raw = response.content
       .filter((b: any) => b.type === 'text')
       .map((b: any) => b.text)

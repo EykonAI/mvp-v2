@@ -23,6 +23,8 @@ import {
   ANALYST_MAX_TOKENS,
   ANALYST_MAX_ITERATIONS,
 } from './model';
+import type { AccUsage } from '@/lib/costs/prices';
+import { recordLlmTurn, type MeterContext } from '@/lib/costs/meter';
 
 // Events forwarded to a streaming caller, in emission order:
 //   text        — a streamed text delta from the model
@@ -47,13 +49,21 @@ export interface EngineTurnInput {
   // plumbing landed now so the engine signature is stable.
   projectInstructions?: string;
   onEvent?: (ev: EngineEvent) => void;
+  // Cost metering (migration 100). When present the engine records ONE
+  // cost_events row for this turn, priced from the accumulated usage
+  // below. Passed here rather than left to callers so metering cannot
+  // be forgotten: every entry point delegates to this function.
+  // Omit for work that should not be attributed to any user.
+  meter?: MeterContext;
 }
 
 export interface EngineTurnResult {
   text: string;
   toolCalls: ToolCallRecord[];
   iterations: number;
-  usage: unknown;
+  // Accumulated across EVERY leg of the tool-use loop — see the
+  // accumulator below for why this is not the final leg's usage.
+  usage: AccUsage;
   model: string;
 }
 
@@ -74,7 +84,40 @@ export async function runAnalystTurn(input: EngineTurnInput): Promise<EngineTurn
   const capturedToolCalls: ToolCallRecord[] = [];
   const textParts: string[] = [];
   let iterations = 0;
-  let finalUsage: unknown = null;
+
+  // ── Usage accumulator (migration 100) ────────────────────────────
+  // This loop runs up to 1 + ANALYST_MAX_ITERATIONS legs against the
+  // API. The previous `finalUsage = response.usage` after the loop
+  // captured the LAST leg only and silently discarded every earlier
+  // one, so a tool-heavy turn could bill a fraction of its true cost —
+  // the field was populated, rendered fine, and was wrong.
+  //
+  // Note the textParts comment further down: the same lesson was
+  // already learned for the turn's TEXT and never applied to usage.
+  //
+  // All four token classes are summed because prompt caching is ON for
+  // the system block: cache reads bill ~0.1x and cache writes ~1.25x,
+  // so input+output alone misprices every multi-turn session.
+  const acc: AccUsage = {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_write_tokens: 0,
+    cache_read_tokens: 0,
+    legs: 0,
+  };
+  function addUsage(u: any) {
+    if (!u) {
+      // Never silently treat a missing usage object as zero — that
+      // under-reports cost in exactly the direction that looks healthy.
+      console.warn('[costs] engine leg returned no usage object; cost under-reported');
+      return;
+    }
+    acc.input_tokens += u.input_tokens ?? 0;
+    acc.output_tokens += u.output_tokens ?? 0;
+    acc.cache_write_tokens += u.cache_creation_input_tokens ?? 0;
+    acc.cache_read_tokens += u.cache_read_input_tokens ?? 0;
+    acc.legs += 1;
+  }
 
   // Prompt caching (brief §8.3): the system prompt + 22 tool defs are
   // large and static within a session. A cache_control breakpoint on
@@ -117,6 +160,7 @@ export async function runAnalystTurn(input: EngineTurnInput): Promise<EngineTurn
   }
 
   let response = await streamLeg();
+  addUsage(response.usage);
 
   while (response.stop_reason === 'tool_use' && iterations < ANALYST_MAX_ITERATIONS) {
     iterations++;
@@ -153,14 +197,21 @@ export async function runAnalystTurn(input: EngineTurnInput): Promise<EngineTurn
     conversation.push({ role: 'user', content: toolResults });
 
     response = await streamLeg();
+    addUsage(response.usage);
   }
-
-  finalUsage = response.usage;
 
   // The stream 'text' handler already accumulated every leg's text in
   // order, so join the parts rather than re-reading response.content —
   // intermediate legs' narration would otherwise be lost.
   const text = textParts.join('').trim();
 
-  return { text, toolCalls: capturedToolCalls, iterations, usage: finalUsage, model };
+  // Record the turn's cost before returning. Awaited so the row is
+  // written even on serverless routes that freeze after the response;
+  // recordLlmTurn never throws, so a ledger failure cannot cost the
+  // user their completed answer.
+  if (input.meter) {
+    await recordLlmTurn(input.meter, model, acc);
+  }
+
+  return { text, toolCalls: capturedToolCalls, iterations, usage: acc, model };
 }
