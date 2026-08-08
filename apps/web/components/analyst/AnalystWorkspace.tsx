@@ -65,7 +65,23 @@ interface AnalystConfig {
   deep_model: string;
   deep_model_label: string;
   tier: string;
+  /** Present only for a founder-granted metered test plan. */
+  balance?: BalanceState | null;
 }
+
+// Mirrors the `balance` block on the 402 body and on GET /api/analyst/config.
+interface BalanceState {
+  budget_usd: number;
+  spent_usd: number;
+  remaining_usd: number;
+  deep_cap_usd: number;
+  deep_spent_usd: number;
+  deep_remaining_usd: number;
+  status: 'active' | 'exhausted' | 'suspended';
+  label: string | null;
+}
+
+const usd = (n: number) => `$${n.toFixed(2)}`;
 
 const MONO: React.CSSProperties = {
   fontFamily: 'var(--f-mono)',
@@ -114,6 +130,15 @@ export default function AnalystWorkspace({ tier }: { tier: string }) {
   }, []);
   const [persona, setPersona] = useState<PersonaId>(DEFAULT_PERSONA);
   const [deepOn, setDeepOn] = useState(false);
+
+  // Credit wallet (migration 101). NULL for every user without a
+  // founder-granted test plan — which is almost everyone — so the
+  // whole balance UI below simply does not render for them.
+  //
+  // Surfaced CONTINUOUSLY, not only at the moment of refusal: an
+  // evaluating partner should watch the balance run down, never be
+  // surprised by it.
+  const [balance, setBalance] = useState<BalanceState | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameText, setRenameText] = useState('');
 
@@ -191,6 +216,7 @@ export default function AnalystWorkspace({ tier }: { tier: string }) {
       .then((c) => {
         if (!c) return;
         setConfig(c);
+        if (c.balance) setBalance(c.balance);
         if (['pro', 'desk', 'enterprise'].includes(c.tier)) void loadProjects();
       })
       .catch(() => {});
@@ -288,6 +314,20 @@ export default function AnalystWorkspace({ tier }: { tier: string }) {
         const err = await res.json().catch(() => ({}));
         let msg = err.error || `Request failed (${res.status}).`;
         if (res.status === 429 && err.pass_offer?.week_pass) msg += ` · ${err.pass_offer.week_pass.label}`;
+        // 402 = metered test plan out of balance. Fail LOUD and
+        // specific: state what is exhausted, what remains, and what
+        // still works. A generic error here reads to an evaluating
+        // Founding Partner as a broken product — worse than the cap.
+        if (res.status === 402) {
+          if (err.detail) msg += ` ${err.detail}`;
+          if (err.balance) setBalance(err.balance);
+          // Deep alone is gone; the standard model still has budget.
+          if (err.retry_without_deep) {
+            setDeepOn(false);
+            setActiveModel(null);
+            msg += ' Deep has been switched off — resend to run this on the standard model.';
+          }
+        }
         setThread((t) => t.map((m) => (m.id === pendingId ? { ...m, role: 'system', content: msg, streaming: false } : m)));
         return;
       }
@@ -383,6 +423,34 @@ export default function AnalystWorkspace({ tier }: { tier: string }) {
   async function toggleDeep() {
     if (!isPro || !config) return;
     const next = !deepOn;
+
+    // Deep Analysis warning (founder decision). Deep runs on Opus 4.8
+    // at ~2.5x the standard model, so on a metered plan a careless Deep
+    // session can eat the whole 20% sub-cap in a handful of turns.
+    // State the remaining Deep allowance and require an explicit
+    // confirm — this is the only thing between one careless session and
+    // a fifth of the budget.
+    if (next && balance) {
+      if (balance.deep_remaining_usd <= 0) {
+        setThread((t) => [
+          ...t,
+          {
+            id: `sys-${Date.now()}`,
+            role: 'system',
+            content: `Deep Analysis allowance used up — ${usd(balance.deep_cap_usd)} of your ${usd(balance.budget_usd)} plan. Ordinary analyst turns still work (${usd(balance.remaining_usd)} left).`,
+          } as any,
+        ]);
+        return;
+      }
+      const ok = window.confirm(
+        `Deep Analysis runs on ${config.deep_model_label} — roughly 2.5x the cost of a standard turn.\n\n` +
+          `Deep allowance left: ${usd(balance.deep_remaining_usd)} of ${usd(balance.deep_cap_usd)}\n` +
+          `Plan balance left:   ${usd(balance.remaining_usd)} of ${usd(balance.budget_usd)}\n\n` +
+          `Turn Deep Analysis on for this session?`,
+      );
+      if (!ok) return;
+    }
+
     setDeepOn(next);
     if (activeId) {
       const res = await fetch(`/api/analyst/sessions/${activeId}`, {
@@ -586,6 +654,46 @@ export default function AnalystWorkspace({ tier }: { tier: string }) {
               </button>
             )}
             <span style={{ ...MONO, fontSize: 10, color: 'var(--teal)' }}>{modelBadge}</span>
+
+            {/* Test-plan balance (migration 101). Renders only for a
+                founder-granted metered plan. Always visible, not just
+                on refusal — a partner should watch it run down rather
+                than be surprised by it. Amber under 25%, red when the
+                plan is exhausted or paused. */}
+            {balance && (
+              <span
+                title={
+                  `${balance.label ?? 'Test plan'} — ${usd(balance.spent_usd)} of ${usd(balance.budget_usd)} used. ` +
+                  `Deep Analysis: ${usd(balance.deep_spent_usd)} of ${usd(balance.deep_cap_usd)}. ` +
+                  `Top-ups are issued by the eYKON team.`
+                }
+                style={{
+                  ...MONO,
+                  fontSize: 9.5,
+                  padding: '3px 7px',
+                  borderRadius: 2,
+                  border: '1px solid',
+                  borderColor:
+                    balance.status !== 'active'
+                      ? 'var(--accent, #E0765C)'
+                      : balance.remaining_usd < balance.budget_usd * 0.25
+                      ? '#C98A2E'
+                      : 'var(--rule)',
+                  color:
+                    balance.status !== 'active'
+                      ? 'var(--accent, #E0765C)'
+                      : balance.remaining_usd < balance.budget_usd * 0.25
+                      ? '#C98A2E'
+                      : 'var(--ink-dim)',
+                }}
+              >
+                {balance.status === 'suspended'
+                  ? 'plan paused'
+                  : balance.remaining_usd <= 0
+                  ? 'balance used up'
+                  : `${usd(balance.remaining_usd)} left`}
+              </span>
+            )}
           </span>
         </div>
 

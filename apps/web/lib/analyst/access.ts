@@ -12,6 +12,7 @@ import { getCurrentUser } from '@/lib/auth/session';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { AI_QUERY_LIMITS, getCurrentTier, type Tier } from '@/lib/subscription';
 import { captureServer } from '@/lib/analytics/server';
+import { canSpend, denialCopy } from '@/lib/costs/wallet';
 
 const TIER_RANK: Record<Tier, number> = {
   citizen: 0,
@@ -123,4 +124,52 @@ export async function enforceAiQueryLimit(
     queries_this_month: row?.new_value ?? undefined,
   });
   return null;
+}
+
+// ─── Credit wallet pre-flight (migration 101) ────────────────────
+//
+// Runs AFTER the tier and query-limit checks, and only bites for users
+// who hold a founder-granted test plan — everyone else has no wallet
+// row and passes straight through.
+//
+// 402 Payment Required is the status: this is not an upgrade prompt
+// (403) and not a rate limit (429). The client distinguishes the three
+// so it can render an honest, specific message instead of a generic
+// failure — see denialCopy().
+//
+// The Deep sub-cap denies the DEEP turn only. `deep_exhausted` carries
+// retry_without_deep so the client can offer "run this on the standard
+// model instead" rather than dead-ending.
+export async function enforceCreditBalance(
+  userId: string,
+  model: string,
+): Promise<NextResponse | null> {
+  if (process.env.NEXT_PUBLIC_AUTH_ENABLED !== 'true') return null;
+
+  const decision = await canSpend(userId, model);
+  if (decision.allowed || !decision.wallet) return null;
+
+  const copy = denialCopy(decision.reason!, decision.wallet);
+  return NextResponse.json(
+    {
+      ...copy,
+      reason: decision.reason,
+      balance: {
+        budget_usd: decision.wallet.budgetUsd,
+        spent_usd: decision.wallet.spentUsd,
+        remaining_usd: decision.wallet.remainingUsd,
+        deep_cap_usd: decision.wallet.deepCapUsd,
+        deep_spent_usd: decision.wallet.deepSpentUsd,
+        deep_remaining_usd: decision.wallet.deepRemainingUsd,
+        status: decision.wallet.status,
+        label: decision.wallet.label,
+      },
+      // Founder-extended, deliberately: the real-money payment path is
+      // still unproven, so a partner's top-up must not be the first
+      // real transaction in system history.
+      top_up: { contact: 'hello@eykon.ai', self_serve: false },
+      retry_without_deep: decision.reason === 'deep_exhausted',
+    },
+    { status: 402 },
+  );
 }

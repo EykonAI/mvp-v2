@@ -25,6 +25,7 @@ import {
 } from './model';
 import type { AccUsage } from '@/lib/costs/prices';
 import { recordLlmTurn, type MeterContext } from '@/lib/costs/meter';
+import { debitTurn } from '@/lib/costs/wallet';
 
 // Events forwarded to a streaming caller, in emission order:
 //   text        — a streamed text delta from the model
@@ -210,7 +211,18 @@ export async function runAnalystTurn(input: EngineTurnInput): Promise<EngineTurn
   // recordLlmTurn never throws, so a ledger failure cannot cost the
   // user their completed answer.
   if (input.meter) {
-    await recordLlmTurn(input.meter, model, acc);
+    // recordLlmTurn returns the price it already computed. Reusing it
+    // rather than calling priceUsage() again matters: that call throws
+    // on an unknown model id, and a second, unguarded call here would
+    // destroy a completed turn over a gap in the rate card.
+    const usdCost = await recordLlmTurn(input.meter, model, acc);
+    // Debit the wallet with the ACTUAL cost (migration 101). No-op for
+    // the ~all users with no wallet row. Post-flight because LLM cost
+    // is only knowable after the call — the pre-flight reserve in
+    // access.ts is what keeps the resulting overshoot to one turn.
+    if (usdCost !== null) {
+      await debitTurn(input.meter.userId, model, usdCost);
+    }
   }
 
   return { text, toolCalls: capturedToolCalls, iterations, usage: acc, model };
