@@ -554,10 +554,18 @@ ${eventsBlock}
 Decide via the report_decision tool.`;
 
   const anthropic = getAnthropic();
-  // SDK 0.32 types don't yet expose cache_control on the system
-  // block, but the API accepts it. Cast through unknown so the
-  // ephemeral cache marker reaches the wire — verified against the
-  // Anthropic API reference for prompt caching.
+  // ── Prompt cache REMOVED here, deliberately (measured 2026-08-08) ──
+  // This prompt used to carry cache_control: ephemeral. The default
+  // ephemeral TTL is 5 MINUTES and this evaluator runs on an HOURLY
+  // cron, so the entry was always expired by the next run: the cost
+  // ledger showed cache_write_tokens 3,190 and cache_read_tokens 0 on
+  // consecutive runs, i.e. we paid the 1.25x write premium every hour
+  // and never once collected the 0.1x read.
+  //
+  // Plain input is strictly cheaper at this cadence. Restore caching
+  // only if this ever runs more often than every 5 minutes — or switch
+  // to ttl:'1h', which costs 2x to write and only pays back if runs
+  // land inside the hour.
   const requestBody = {
     model: MODEL,
     max_tokens: MAX_TOKENS_OUT,
@@ -565,7 +573,6 @@ Decide via the report_decision tool.`;
       {
         type: 'text',
         text: AI_EVALUATOR_SYSTEM_PROMPT,
-        cache_control: { type: 'ephemeral' },
       },
     ],
     tools: [REPORT_DECISION_TOOL],

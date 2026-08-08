@@ -81,7 +81,12 @@ export async function runDetectTick(supabase: SB): Promise<TickResult> {
     let analystText = '';
     let toolCalls = 0;
     try {
-      const out = await runAnalyst({ prompt: buildAnalystPrompt(cand, framing), tier: 'pro' });
+      // Platform overhead — see process-anomaly-flags.
+      const out = await runAnalyst({
+        prompt: buildAnalystPrompt(cand, framing),
+        tier: 'pro',
+        meter: { userId: null, feature: 'newsjack' },
+      });
       analystText = out.text.trim();
       toolCalls = out.toolCalls;
     } catch (err) {
