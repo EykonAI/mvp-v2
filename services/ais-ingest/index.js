@@ -18,13 +18,30 @@ const AIS_KEY      = process.env.AISSTREAM_API_KEY;
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const STREAM_URL    = 'wss://stream.aisstream.io/v0/stream';
+// Overridable so the reconnect/backoff behaviour can be exercised against a
+// local test server, and so a future endpoint change is config, not a deploy.
+const STREAM_URL    = process.env.AIS_STREAM_URL || 'wss://stream.aisstream.io/v0/stream';
 const FLUSH_MS      = 30_000;          // upsert buffer every 30s
 const MAX_BUFFER    = 100_000;         // safety bound
 const BATCH_SIZE    = 500;             // rows per upsert call
 const RECONNECT_MIN = 1_000;
 const RECONNECT_MAX = 60_000;
-const STALE_MS      = 90_000;          // no AIS message in this long ⇒ dead stream, force reconnect
+// No AIS message in this long ⇒ dead stream, force reconnect. Env-tunable for
+// the same reason feed-health.ts exposes its thresholds: retuning a liveness
+// threshold should not require a deploy.
+const STALE_MS      = Number(process.env.AIS_STALE_MS ?? 90_000);
+
+// ─── Storm cap (the 2026-08-05 lesson) ────────────────────────
+// Past this many consecutive DRY connection cycles we stop treating the
+// problem as a transient blip. Reconnecting every 60s forever is itself
+// what keeps an upstream 429 alive, so the floor escalates to minutes.
+//   dryStreak 0..6  → 1s, 2s, 4s, 8s, 16s, 32s, 60s   (transient)
+//   dryStreak 7..10 → 5m, 10m, 20m, 30m               (refused / starved)
+// A single inbound AIS message resets it to zero, so recovery is automatic
+// within 30 minutes of the feed coming back.
+const DRY_STREAK_CAP    = 6;
+const STARVED_FLOOR_MIN = 300_000;     // 5 minutes
+const STARVED_FLOOR_MAX = 1_800_000;   // 30 minutes
 
 // ─── Subscription bounding boxes ──────────────────────────────
 // AISStream's free-tier rate limit (~155 msg/s globally) means a
@@ -94,27 +111,93 @@ function flagFromMmsi(mmsi) {
 
 // ─── WebSocket lifecycle ───────────────────────────────────────
 let ws;
-let reconnectDelay = RECONNECT_MIN;
 let messagesIn = 0;
 let lastLogged = Date.now();
 let lastMessageAt = Date.now();        // liveness: bumped on every inbound AIS message
 
+// A connection that OPENS is not a connection that WORKS. dryStreak counts
+// consecutive connection cycles that delivered ZERO AIS messages — whether
+// refused at the handshake (429) or opened and then starved. It is the only
+// input to the backoff, and only a real inbound message clears it.
+let dryStreak = 0;
+
+function backoffMs() {
+  let d = Math.min(RECONNECT_MAX, RECONNECT_MIN * 2 ** Math.min(dryStreak, DRY_STREAK_CAP));
+  if (dryStreak > DRY_STREAK_CAP) {
+    d = Math.max(d, Math.min(
+      STARVED_FLOOR_MAX,
+      STARVED_FLOOR_MIN * 2 ** (dryStreak - DRY_STREAK_CAP - 1),
+    ));
+  }
+  return d;
+}
+
 function connect() {
   console.log(`[${new Date().toISOString()}] connecting to AISStream…`);
-  ws = new WebSocket(STREAM_URL);
 
-  ws.on('open', () => {
+  // Per-connection state, deliberately in the closure: a stale socket's late
+  // 'close' must never mutate the CURRENT connection's bookkeeping.
+  const socket = new WebSocket(STREAM_URL);
+  let settled = false;
+  let gotData = false;
+  ws = socket;
+
+  // Every terminal path funnels here, exactly once per connection.
+  const settle = (reason, floorMs = 0) => {
+    if (settled) return;
+    settled = true;
+    if (!gotData) dryStreak++;
+    const delay = Math.max(backoffMs(), floorMs);
+    console.log(`  ${reason} — dry=${dryStreak}, reconnecting in ${Math.round(delay / 1000)}s`);
+    setTimeout(connect, delay);
+  };
+
+  socket.on('open', () => {
     console.log(`  open — subscribing ${BOUNDING_BOXES.length} bboxes (4 regional + 6 chokepoints)`);
-    reconnectDelay = RECONNECT_MIN;
+    // The backoff is deliberately NOT reset here. A completed handshake is
+    // not a delivering stream. Resetting on 'open' is exactly what turned the
+    // 2026-08-05 starvation into a permanent 1s-reconnect storm: open (reset
+    // to 1s) → 90s silence → watchdog kill → reconnect → 429 → … forever.
+    // Only an actual message clears the streak; see the 'message' handler.
     lastMessageAt = Date.now();         // grace window for the fresh connection
-    ws.send(JSON.stringify({
+    socket.send(JSON.stringify({
       APIKey: AIS_KEY,
       BoundingBoxes: BOUNDING_BOXES,
       FilterMessageTypes: ['PositionReport', 'ShipStaticData'],
     }));
   });
 
-  ws.on('message', (raw) => {
+  // ws aborts the handshake and emits a bare `error` reading "Unexpected
+  // server response: 429" — the status code and nothing else. The real HTTP
+  // response carries Retry-After and usually a body saying WHY (quota spent,
+  // concurrent connection, key disabled). Handling this event suppresses both
+  // that 'error' AND the 'close' that normally drives the reconnect, so this
+  // handler owns destroying the request and settling the cycle.
+  socket.on('unexpected-response', (req, res) => {
+    const retryAfter = res.headers['retry-after'];
+    const floorMs = Number.isFinite(Number(retryAfter)) ? Number(retryAfter) * 1_000 : 0;
+    let body = '';
+    res.on('data', (c) => { if (body.length < 500) body += c.toString(); });
+    const finish = (suffix) => {
+      console.error(
+        `  handshake rejected: HTTP ${res.statusCode} ${res.statusMessage || ''}`.trimEnd() +
+        (retryAfter ? ` · retry-after=${retryAfter}` : '') +
+        (body.trim() ? ` · body=${JSON.stringify(body.trim().slice(0, 300))}` : ' · empty body') +
+        suffix,
+      );
+      try { req.destroy(); } catch { /* already gone */ }
+      settle(`handshake ${res.statusCode}`, floorMs);
+    };
+    res.on('end', () => finish(''));
+    res.on('error', (e) => finish(` · body read failed: ${e.message}`));
+  });
+
+  socket.on('message', (raw) => {
+    if (!gotData) {
+      gotData = true;
+      if (dryStreak > 0) console.log(`  stream is live — clearing dry streak (was ${dryStreak})`);
+      dryStreak = 0;
+    }
     lastMessageAt = Date.now();
     messagesIn++;
     let msg;
@@ -154,13 +237,15 @@ function connect() {
     }
   });
 
-  ws.on('error', (err) => console.error('ws error:', err.message));
-
-  ws.on('close', (code, reason) => {
-    console.log(`  close ${code} ${reason || ''} — reconnecting in ${reconnectDelay}ms`);
-    setTimeout(connect, reconnectDelay);
-    reconnectDelay = Math.min(RECONNECT_MAX, reconnectDelay * 2);
+  // 'error' normally precedes 'close', which settles. Settling here too is a
+  // guarded no-op in that case, and covers the rare error that never closes —
+  // previously that would have hung the worker with no reconnect scheduled.
+  socket.on('error', (err) => {
+    console.error('ws error:', err.message);
+    settle(`error ${err.message}`);
   });
+
+  socket.on('close', (code, reason) => settle(`close ${code} ${reason || ''}`.trimEnd()));
 }
 
 // ─── Periodic flush ────────────────────────────────────────────
@@ -197,6 +282,8 @@ async function flush() {
 // ─── Boot ──────────────────────────────────────────────────────
 console.log('eYKON AIS ingest starting…');
 console.log(`  flush every ${FLUSH_MS / 1000}s, batches of ${BATCH_SIZE}`);
+console.log(`  stale after ${STALE_MS / 1000}s · storm cap after ${DRY_STREAK_CAP} dry cycles ` +
+            `(floor ${STARVED_FLOOR_MIN / 60_000}m → ${STARVED_FLOOR_MAX / 60_000}m)`);
 connect();
 setInterval(() => { flush().catch((e) => console.error('flush threw:', e.message)); }, FLUSH_MS);
 
@@ -206,6 +293,13 @@ setInterval(() => { flush().catch((e) => console.error('flush threw:', e.message
 // 2026-06-21 stall). If nothing has arrived within STALE_MS, force the socket
 // closed; terminate() is immediate (close() can hang on a dead socket) and
 // fires 'close', which reconnects with backoff.
+//
+// NOTE (2026-08-05): this watchdog is also an amplifier when the stream is
+// STARVED rather than half-open — it manufactures a fresh connection attempt
+// every ~90s, which is what sustains an upstream 429. That is now bounded by
+// dryStreak/backoffMs(): a kill here counts as a dry cycle, so repeated
+// starvation walks the reconnect interval out to 30 minutes instead of
+// hammering. The watchdog stays; the storm it could cause does not.
 setInterval(() => {
   if (!ws || ws.readyState !== WebSocket.OPEN) return; // CONNECTING/CLOSING handled by the normal lifecycle
   const silentMs = Date.now() - lastMessageAt;
@@ -214,7 +308,11 @@ setInterval(() => {
     lastMessageAt = Date.now();        // grace so we don't re-fire while the new socket comes up
     try { ws.terminate(); } catch (e) { console.error('terminate failed:', e.message); }
   }
-}, 30_000);
+  // Tick derived from the threshold rather than a flat 30s, so detection
+  // latency stays proportional when STALE_MS is retuned. (At the 90s default
+  // the old flat tick meant a stall was caught anywhere from 90-120s later —
+  // which is why the 2026-08-05 logs read "no AIS messages for 105s".)
+}, Math.max(1_000, Math.min(30_000, Math.floor(STALE_MS / 3))));
 
 process.on('SIGTERM', async () => {
   console.log('SIGTERM — flushing and exiting…');
