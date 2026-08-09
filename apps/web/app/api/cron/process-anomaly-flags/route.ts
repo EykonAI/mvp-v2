@@ -77,11 +77,53 @@ function buildPrompt(flag: AnomalyFlag): string {
   ].join('\n');
 }
 
-/** Parse the TITLE/SUMMARY/NARRATIVE format, falling back gracefully on free text. */
+/** Parse the TITLE/SUMMARY/NARRATIVE format, falling back gracefully on free text.
+ *
+ * MODEL-AGNOSTIC BY CONSTRUCTION. Models differ in whether they wrap the
+ * labels in markdown emphasis: Sonnet 5 wrote `TITLE:` plain, Haiku 4.5
+ * writes `**TITLE:**`. The original regexes assumed the plain form, and
+ * the failure was silent and ugly:
+ *
+ *   - every title began with a literal `** `, surfaced straight into the UI;
+ *   - the summary's `(?=\nNARRATIVE:)` lookahead never matched
+ *     `\n**NARRATIVE:**`, so the summary ran to the END of the text and
+ *     swallowed the whole narrative — ~1,900 chars where the prompt asks
+ *     for 2-3 sentences, duplicating content into the field the citizen
+ *     briefing reads.
+ *
+ * Nothing errored; the rows just quietly became wrong. So the labels are
+ * now matched tolerantly (optional `**` / `__` either side, flexible
+ * whitespace) rather than the prompt being tightened — a prompt can only
+ * ask, whereas the parser can guarantee. Emphasis INSIDE the body text is
+ * deliberately preserved: only the label markers are normalised.
+ */
+// A label is: line start · optional markdown noise (#, >, *, _, -) ·
+// the WORD · optional emphasis · the colon · optional emphasis.
+// Anchoring to line start is what keeps a literal "SUMMARY:" written
+// inside a narrative paragraph from being mistaken for the label.
+const LABEL = (word: string) =>
+  `(?:^|\\n)[ \\t]*[#>*_\\-]{0,4}[ \\t]*${word}[ \\t]*[*_]{0,2}[ \\t]*:[ \\t]*[*_]{0,2}[ \\t]*`;
+
+const RX_TITLE = new RegExp(LABEL('TITLE') + '(.+)', 'i');
+const RX_SUMMARY = new RegExp(
+  LABEL('SUMMARY') + '([\\s\\S]*?)(?=' + LABEL('NARRATIVE') + '|$)',
+  'i',
+);
+const RX_NARRATIVE = new RegExp(LABEL('NARRATIVE') + '([\\s\\S]*)', 'i');
+
+/** Trim stray emphasis a model may leave hugging the captured value. */
+function tidy(s: string | undefined): string | undefined {
+  return s
+    ?.trim()
+    .replace(/^(?:\*{1,2}|_{1,2})\s*/, '')
+    .replace(/\s*(?:\*{1,2}|_{1,2})$/, '')
+    .trim();
+}
+
 function parseReport(text: string, flag: AnomalyFlag): { title: string; summary: string; narrative: string } {
-  const title = /TITLE:\s*(.+)/i.exec(text)?.[1]?.trim();
-  const summary = /SUMMARY:\s*([\s\S]*?)(?=\nNARRATIVE:|$)/i.exec(text)?.[1]?.trim();
-  const narrative = /NARRATIVE:\s*([\s\S]*)/i.exec(text)?.[1]?.trim();
+  const title = tidy(RX_TITLE.exec(text)?.[1]);
+  const summary = tidy(RX_SUMMARY.exec(text)?.[1]);
+  const narrative = tidy(RX_NARRATIVE.exec(text)?.[1]);
   return {
     title: (title || `${flag.domain} anomaly: ${flag.flag_type}`).slice(0, 90),
     summary: summary || text.slice(0, 300),
