@@ -186,16 +186,26 @@ async function handle(req: NextRequest) {
     for (const f of futs) {
       for (const c of f.contracts) {
         try {
-          const obs = await fetchEiaFuturesLatest({
+          const res = await fetchEiaFuturesLatest({
             apiKey: eiaKey,
             route: f.route,
             seriesId: c.seriesId,
             defaultUnit: f.unit,
           });
-          if (!obs) {
-            errors.push(`eia_fut/${c.seriesId}: no observations`);
+          if (!res.ok) {
+            // Stale is the EXPECTED outcome today: EIA discontinued
+            // NYMEX futures after 2024-04-05 and the endpoint still
+            // answers 200 with that final settlement. Report it and
+            // write NOTHING — a two-year-old curve stored as today's
+            // term structure is worse than no curve at all.
+            errors.push(
+              res.reason === 'stale'
+                ? `eia_fut/${c.seriesId}: SERIES DISCONTINUED — newest ${res.newestPeriod} is ${res.ageDays}d old (EIA stopped publishing NYMEX futures after 2024-04-05); nothing written`
+                : `eia_fut/${c.seriesId}: no observations`,
+            );
             continue;
           }
+          const obs = res.observation;
           await upsert(
             [
               {
