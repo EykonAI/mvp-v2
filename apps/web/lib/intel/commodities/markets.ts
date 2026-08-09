@@ -1,3 +1,4 @@
+import { FUTURES_MAX_AGE_DAYS } from '@/lib/eia/client';
 import { createServerSupabase } from '@/lib/supabase-server';
 
 /**
@@ -153,6 +154,16 @@ export interface MarketsPayload {
     period: string;
     points: Array<{ month: number; price: number }>;
     structure: 'backwardated' | 'contango' | 'flat';
+  } | null;
+  /**
+   * Why no curve is shown, when that is a source fact rather than a
+   * not-yet-ingested state. Present ⇒ futures is null and the panel
+   * explains itself instead of rendering an empty slot.
+   */
+  futures_unavailable: {
+    reason: 'source_discontinued';
+    detail: string;
+    last_curve_period: string | null;
   } | null;
   export_shares: ExportSharesPayload | null;
   sanction_risk: {
@@ -379,6 +390,7 @@ export async function buildMarketsPayload(commodity: string): Promise<MarketsPay
 
   // ── futures (wti: NYMEX WTI; ttf view: Henry Hub, labeled) ────────
   let futures: MarketsPayload['futures'] = null;
+  let futures_unavailable: MarketsPayload['futures_unavailable'] = null;
   if (futuresKey) {
     if (futuresRes.error) {
       errors.push(`commodity_prices futures: ${futuresRes.error.message}`);
@@ -389,7 +401,26 @@ export async function buildMarketsPayload(commodity: string): Promise<MarketsPay
         const m = Number(r.source.slice(-1));
         if (!latestPer.has(m)) latestPer.set(m, r); // rows newest-first
       }
-      if (latestPer.size >= 2) {
+      // Freshness gate (defense in depth, 2026-08-09). The ingest now
+      // refuses stale settlements, but rows written before that guard
+      // are still in the table — and a forward curve is a claim about
+      // NOW, so an old one is false rather than merely dated. Anything
+      // older than the window does not render at any age.
+      const newestPeriod = [...latestPer.values()]
+        .map(r => r.period)
+        .sort()
+        .pop();
+      const curveAgeDays = newestPeriod
+        ? Math.floor((Date.now() - new Date(`${newestPeriod}T00:00:00Z`).getTime()) / 86_400_000)
+        : Infinity;
+      if (curveAgeDays > FUTURES_MAX_AGE_DAYS) {
+        futures_unavailable = {
+          reason: 'source_discontinued',
+          detail:
+            'EIA stopped publishing NYMEX futures after 2024-04-05; no free forward curve is currently ingested. Spot and realized volatility below are live.',
+          last_curve_period: newestPeriod ?? null,
+        };
+      } else if (latestPer.size >= 2) {
         const points = [...latestPer.entries()]
           .map(([month, r]) => ({ month, price: r.price }))
           .sort((a, b) => a.month - b.month);
@@ -599,6 +630,7 @@ export async function buildMarketsPayload(commodity: string): Promise<MarketsPay
     prices,
     volatility_30d,
     futures,
+    futures_unavailable,
     export_shares,
     sanction_risk,
     ribbon,

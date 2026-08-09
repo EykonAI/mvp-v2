@@ -162,14 +162,27 @@ export const EIA_WEEKLY_STOCK_SERIES: ReadonlyArray<{ id: string; label: string 
 export const EIA_BRENT_SPOT = 'RBRTE';
 export const EIA_WTI_SPOT = 'RWTC';
 
-// ─── NYMEX futures (front months 1–4) ─────────────────────────────
+// ─── NYMEX futures (front months 1–4) — SERIES DISCONTINUED ───────
 //
-// EIA republishes NYMEX settlement prices as daily series — free and
-// official, same key as the spot layer. WTI (Cushing) and Henry Hub
-// natural gas only: EIA carries no Brent or TTF futures, and we do not
-// substitute a lookalike. Henry Hub rows are stored under the
-// 'henry_hub' commodity key, never under 'ttf' — the UI labels them as
-// the US benchmark explicitly (Grounding Brief 2026-08-09 rev. B §4.2).
+// DEAD SOURCE, kept only so the freshness guard has something to
+// describe. EIA STOPPED PUBLISHING NYMEX futures after 2024-04-05
+// ("Futures prices after April 5, 2024, are not available" —
+// eia.gov/dnav/pet/pet_pri_fut_s1_d.htm). The endpoint still answers
+// 200 with the final 2024 settlement forever, so the ingest happily
+// stored a two-year-old curve and the panel rendered it as today's
+// term structure (found on prod 2026-08-09, hours after shipping).
+//
+// This is the DBnomics failure repeating: a live-looking endpoint
+// serving frozen data. The lesson generalises — an ingest that trusts
+// "newest row returned" without asserting the row is RECENT cannot
+// tell a current series from a decommissioned one.
+//
+// fetchEiaFuturesLatest now enforces FUTURES_MAX_AGE_DAYS and returns
+// a typed refusal instead of a stale observation, so the layer fails
+// loud and writes nothing. Do not re-enable by raising the limit:
+// getting a real forward curve needs a licensed source (CME, or a
+// vendor that redistributes it) — a founder decision, not a code fix.
+export const FUTURES_MAX_AGE_DAYS = 7;
 export const EIA_WTI_FUTURES: ReadonlyArray<{ month: 1 | 2 | 3 | 4; seriesId: string }> = [
   { month: 1, seriesId: 'RCLC1' },
   { month: 2, seriesId: 'RCLC2' },
@@ -183,13 +196,23 @@ export const EIA_HH_FUTURES: ReadonlyArray<{ month: 1 | 2 | 3 | 4; seriesId: str
   { month: 4, seriesId: 'RNGC4' },
 ];
 
-/** Newest settlement for one futures contract series. */
+/**
+ * Newest settlement for one futures contract series, REFUSED when it
+ * is not recent. Returns the observation only if it is within
+ * FUTURES_MAX_AGE_DAYS of today; otherwise `{ stale: … }` naming the
+ * age so the caller can report it rather than store it. A settlement
+ * price is a claim about the forward curve NOW — an old one is not a
+ * worse version of that claim, it is a different and false one.
+ */
 export async function fetchEiaFuturesLatest(opts: {
   apiKey: string;
   route: 'petroleum/pri/fut' | 'natural-gas/pri/fut';
   seriesId: string;
   defaultUnit: string;
-}): Promise<EiaObservation | null> {
+}): Promise<
+  | { ok: true; observation: EiaObservation }
+  | { ok: false; reason: 'no_data' | 'stale'; newestPeriod?: string; ageDays?: number }
+> {
   // length 7 tolerates weekends/holidays; rows arrive newest-first.
   const obs = await fetchEiaSeries({
     apiKey: opts.apiKey,
@@ -199,5 +222,14 @@ export async function fetchEiaFuturesLatest(opts: {
     length: 7,
     defaultUnit: opts.defaultUnit,
   });
-  return obs[0] ?? null;
+  const newest = obs[0];
+  if (!newest) return { ok: false, reason: 'no_data' };
+
+  const ageDays = Math.floor(
+    (Date.now() - new Date(`${newest.period}T00:00:00Z`).getTime()) / 86_400_000,
+  );
+  if (!Number.isFinite(ageDays) || ageDays > FUTURES_MAX_AGE_DAYS) {
+    return { ok: false, reason: 'stale', newestPeriod: newest.period, ageDays };
+  }
+  return { ok: true, observation: newest };
 }

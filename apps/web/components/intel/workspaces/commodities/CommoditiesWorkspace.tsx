@@ -85,6 +85,7 @@ interface MarketsData {
   prices: MarketPrices | null;
   volatility_30d: { pct: number; method: string } | null;
   futures: FuturesData | null;
+  futures_unavailable: { reason: string; detail: string; last_curve_period: string | null } | null;
   export_shares: ExportShares | null;
   sanction_risk: { computed: boolean; trend_window_days: number; rows: SanctionRiskRow[] } | null;
   ribbon: RibbonData | null;
@@ -385,7 +386,12 @@ export default function CommoditiesWorkspace() {
                   {markets.futures.benchmark_note}
                 </div>
               )}
-              {!markets.futures && markets.volatility_30d && (
+              {!markets.futures && markets.futures_unavailable && (
+                <div className="eyebrow" style={{ marginTop: 6, color: 'var(--amber)' }}>
+                  No forward curve · {markets.futures_unavailable.detail}
+                </div>
+              )}
+              {!markets.futures && !markets.futures_unavailable && markets.volatility_30d && (
                 <div className="eyebrow" style={{ marginTop: 6 }}>
                   30d realized vol from stored dailies · futures for this instrument need a licensed source — not substituted
                 </div>

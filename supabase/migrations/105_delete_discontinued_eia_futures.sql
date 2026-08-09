@@ -1,0 +1,41 @@
+-- 105: delete the stale EIA NYMEX futures rows (discontinued series)
+--
+-- WHAT HAPPENED
+-- PR #359 added an EIA NYMEX futures layer for WTI (RCLC1–4) and Henry
+-- Hub (RNGC1–4). The endpoints answered 200 and the ingest stored the
+-- newest observation each returned — but EIA STOPPED PUBLISHING NYMEX
+-- futures after 2024-04-05 ("Futures prices after April 5, 2024, are
+-- not available", eia.gov/dnav/pet/pet_pri_fut_s1_d.htm). The "newest"
+-- row is therefore the final 2024 settlement, frozen forever, and the
+-- Commodities panel rendered it as today's forward curve — complete
+-- with a computed backwardation marker. Found on prod 2026-08-09,
+-- hours after the merge.
+--
+-- This is the DBnomics failure repeating (13-month-stale IMF mirror):
+-- a live-looking endpoint serving frozen data. The companion code
+-- change (same PR) adds FUTURES_MAX_AGE_DAYS = 7 at BOTH the ingest
+-- (refuses to store, reports SERIES DISCONTINUED in errors[]) and the
+-- read path (refuses to render at any age), so the class is closed
+-- even for rows written before this migration.
+--
+-- WHY DELETE
+-- Same rule as migration 103: these rows assert something false — a
+-- settlement price is a claim about the forward curve NOW. There is no
+-- correct window in which a 2024 curve is today's term structure, so
+-- there is nothing to re-scope or re-score. The spot layer (eia_spot)
+-- and the IMF monthly layer are untouched and current.
+--
+-- RUN READ-ONLY FIRST — expect 8 rows (wti m1-m4, henry_hub m1-m4),
+-- all period 2024-04-05:
+--
+--   select commodity, source, period, price
+--   from commodity_prices
+--   where source like 'eia_fut_m%'
+--   order by commodity, source;
+--
+-- VERIFY AFTER: the same SELECT returns 0 rows, and
+--   select count(*) from commodity_prices where source = 'eia_spot';
+-- is unchanged (169 at authoring: brent 85 + wti 84).
+
+delete from commodity_prices
+where source in ('eia_fut_m1', 'eia_fut_m2', 'eia_fut_m3', 'eia_fut_m4');
