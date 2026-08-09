@@ -13,6 +13,9 @@ export interface AnalystResult {
   text: string;
   toolCalls: number;
   usage: unknown;
+  /** The model that actually ran — echo it in logs rather than
+   *  assuming the default, so an env override is visible in ops. */
+  model: string;
 }
 
 export async function runAnalyst(opts: {
@@ -28,12 +31,23 @@ export async function runAnalyst(opts: {
   // genuinely not attributable, and worth revisiting if it shows up as
   // a gap between the ledger and the Anthropic invoice.
   meter?: MeterContext;
+  // Overrides DEFAULT_ANALYST_MODEL for this call. Pass one of the
+  // named constants from lib/analyst/model.ts — never a literal, so a
+  // model swap stays a config change rather than a code hunt.
+  // Used by the anomaly-report cron (ANOMALY_REPORT_MODEL).
+  model?: string;
 }): Promise<AnalystResult> {
   const result = await runAnalystTurn({
     messages: [{ role: 'user', content: opts.prompt }],
     tier: opts.tier ?? 'pro',
     persona: opts.persona,
     meter: opts.meter,
+    model: opts.model,
   });
-  return { text: result.text, toolCalls: result.iterations, usage: result.usage };
+  return {
+    text: result.text,
+    toolCalls: result.iterations,
+    usage: result.usage,
+    model: result.model,
+  };
 }

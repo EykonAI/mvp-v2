@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { runAnalyst } from '@/lib/intelligence-analyst/run';
+import { ANOMALY_REPORT_MODEL } from '@/lib/analyst/model';
 
 // process-anomaly-flags · hourly cron (P2a, supersedes services/supervisor).
 //
@@ -159,6 +160,11 @@ export async function POST(req: NextRequest) {
       const out = await runAnalyst({
         prompt: buildPrompt(flag),
         tier: 'pro',
+        // Haiku by default — the cost ledger measured this cron as the
+        // platform's largest variable cost (~$230/mo of overhead no
+        // user pays for). Flip back with ANOMALY_REPORT_MODEL in
+        // Railway, no deploy needed. See lib/analyst/model.ts.
+        model: ANOMALY_REPORT_MODEL,
         meter: { userId: null, feature: 'anomaly_report' },
       });
       const { title, summary, narrative } = parseReport(out.text, flag);
@@ -202,5 +208,9 @@ export async function POST(req: NextRequest) {
     candidates: candidates.length,
     reports_written: reportsWritten,
     llm_failures: llmFailures,
+    // Echoed so the Railway run log shows which model actually ran.
+    // An env override that silently does nothing is the failure mode
+    // worth designing against — this makes the A/B legible from ops.
+    model: ANOMALY_REPORT_MODEL,
   });
 }

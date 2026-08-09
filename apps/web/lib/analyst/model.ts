@@ -48,6 +48,43 @@ export const EVALUATOR_MODEL =
 export const EDITORIAL_MODEL =
   process.env.EDITORIAL_MODEL || 'claude-sonnet-5';
 
+// The hourly anomaly-report cron (process-anomaly-flags): turns
+// medium+ anomaly_flags into short grounded agent_reports.
+//
+// WHY THIS HAS ITS OWN KNOB. The cost ledger (mig 100) measured this
+// as the platform's single largest variable cost — ~$0.0565 per
+// report at Sonnet 5 against a MEASURED medium+ inflow of ~5.7/hour,
+// i.e. roughly $230/month of pure platform overhead that no user pays
+// for. It was invisible before the ledger existed.
+//
+// Note the cap (MAX_REPORTS_PER_TICK = 8) is NOT the cost driver:
+// inflow is 5.7/hour and the backlog is zero, so the cap never binds.
+// Lowering it would not save money, it would grow a backlog until the
+// 14-day expiry silently discarded flags — cheaper only by dropping
+// intelligence. Changing the MODEL is the one lever that halves cost
+// with nothing degraded: the queue still drains at inflow and every
+// medium+ flag still gets a report.
+//
+// Haiku 4.5 by default ($1/$5 vs Sonnet 5's $2/$10 — and vs $3/$15
+// once Sonnet 5's intro pricing ends 2026-08-31). These are short
+// summaries written from structured evidence the tools already
+// fetched, which is the shape Haiku handles for auto-titles today.
+//
+// A/B IT BEFORE TRUSTING IT. Set ANOMALY_REPORT_MODEL=claude-sonnet-5
+// in Railway to flip back with no deploy, and compare the narrative
+// quality of a few agent_reports rows. These reports feed the
+// analyst's query_agent_reports tool and the citizen briefing — the
+// table that sat empty forever under the retired supervisor worker —
+// so if Haiku reads thin, Sonnet at ~$230/month is the honest price
+// of a feed that actually works.
+//
+// Caveat worth knowing: Haiku 4.5's context window is 200K, not the
+// 1M of Sonnet 5 / Opus 4.8. That is ample for one flag plus its tool
+// results, but a future prompt that grows the evidence block could
+// hit it where Sonnet would not.
+export const ANOMALY_REPORT_MODEL =
+  process.env.ANOMALY_REPORT_MODEL || 'claude-haiku-4-5';
+
 // Models a session row may carry. Anything else is rejected on write.
 export function allowedSessionModels(): string[] {
   return [DEFAULT_ANALYST_MODEL, DEEP_ANALYSIS_MODEL];
