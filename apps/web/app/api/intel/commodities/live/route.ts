@@ -4,6 +4,7 @@ import { EIA_CUSHING_CRUDE_STOCKS } from '@/lib/eia/client';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+export const fetchCache = 'force-no-store';
 
 /**
  * Commodities workspace — live inputs (INTEL grounding audit 2026-07-04,
@@ -58,7 +59,11 @@ export async function GET(_req: NextRequest) {
     supabase
       .from('ais_chokepoint_observations')
       .select('chokepoint, period, vessel_count, window_hours, snapshot_at')
-      .gte('snapshot_at', new Date(Date.now() - 14 * 24 * 3600_000).toISOString())
+      // 30d (not 14d): the snapshot cron now skips dead-feed days
+      // entirely (feed-liveness guard, 2026-08-09), so during an AIS
+      // outage no new rows appear and the widest window keeps the
+      // last-observed counts visible for the honest NO DATA state.
+      .gte('snapshot_at', new Date(Date.now() - 30 * 24 * 3600_000).toISOString())
       .order('snapshot_at', { ascending: false }),
     supabase
       .from('eia_inventory_observations')
@@ -73,9 +78,18 @@ export async function GET(_req: NextRequest) {
 
   // Chokepoints: newest observation per corridor + trailing average of
   // the older observations in the 14d window (needs ≥3 to be meaningful).
+  // Coverage-aware corridors (2026-08-09). Every stored row is now a
+  // real look (the cron's feed-liveness guard skips dead-feed days and
+  // migration 103 removed the poisoned zeros), so a corridor whose
+  // newest snapshot is older than the daily cadence was NOT observed
+  // since then. That renders as NO DATA with the last-observed count —
+  // never as a number, never as a delta. Absence of an observation is
+  // not a result.
   let chokepoints: Array<{
     chokepoint: string;
     label: string;
+    no_data: boolean;
+    days_since: number;
     latest_count: number;
     latest_period: string;
     window_hours: number;
@@ -90,9 +104,15 @@ export async function GET(_req: NextRequest) {
       list.push(row); // arrives newest-first
       byCorridor.set(row.chokepoint, list);
     }
+    // 26h = daily cadence + 2h grace for cron jitter. Past that, the
+    // newest row no longer describes the last 24h.
+    const COVERAGE_MAX_AGE_MS = 26 * 3600_000;
+    const now = Date.now();
     chokepoints = [...byCorridor.entries()]
       .map(([slug, rows]) => {
         const latest = rows[0];
+        const ageMs = now - new Date(latest.snapshot_at).getTime();
+        const noData = ageMs > COVERAGE_MAX_AGE_MS;
         const trailing = rows.slice(1);
         const avg = trailing.length >= 3
           ? trailing.reduce((s, r) => s + r.vessel_count, 0) / trailing.length
@@ -100,11 +120,16 @@ export async function GET(_req: NextRequest) {
         return {
           chokepoint: slug,
           label: CHOKEPOINT_LABELS[slug] ?? slug,
+          no_data: noData,
+          days_since: Math.floor(ageMs / (24 * 3600_000)),
+          // When no_data, latest_* is the LAST OBSERVED look, and the
+          // delta is withheld — a delta against a stale look is a claim
+          // about a window we did not see.
           latest_count: latest.vessel_count,
           latest_period: latest.period,
           window_hours: latest.window_hours,
           trailing_avg: avg === null ? null : Math.round(avg),
-          delta_pct: avg ? Math.round(((latest.vessel_count - avg) / avg) * 100) : null,
+          delta_pct: !noData && avg ? Math.round(((latest.vessel_count - avg) / avg) * 100) : null,
         };
       })
       .sort((a, b) => b.latest_count - a.latest_count);
