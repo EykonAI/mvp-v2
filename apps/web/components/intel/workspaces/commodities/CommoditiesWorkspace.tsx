@@ -46,29 +46,70 @@ interface MarketPrices {
   series: number[];
   latest: { period: string; value: number };
 }
+// PR 2 shape (lib/intel/commodities/markets.ts): export shares carry
+// their layer (comtrade | seed | production) + source + basis so the
+// panel can always name what the reader is looking at.
 interface ExportShares {
+  layer: 'comtrade' | 'seed' | 'production';
   period: string;
   source: string;
-  rows: Array<{ reporter: string; value_usd: number; share: number }>;
+  basis: string;
+  rows: Array<{ reporter: string; share: number; value?: number; unit?: string | null }>;
+  notes?: string[];
 }
 interface SanctionRiskRow {
   country: string;
   band: 'red' | 'amber' | 'green';
   ofac_active_designations: number | null;
+  designation_delta_90d: number | null; // measured, never predicted
   fatalities_30d: number | null;
   conflict_events_30d: number | null;
 }
 interface RibbonData {
   heuristic: true;
   base: number;
+  maritime_degraded: boolean;
+  maritime_degraded_reason: string | null;
   inputs: { flags_72h: number; weighted_density: number };
   buckets: Array<{ t_plus_h: number; value: number }>;
 }
+interface FuturesData {
+  label: string;
+  benchmark_note: string | null;
+  unit: string;
+  period: string;
+  points: Array<{ month: number; price: number }>;
+  structure: 'backwardated' | 'contango' | 'flat';
+}
 interface MarketsData {
   prices: MarketPrices | null;
+  volatility_30d: { pct: number; method: string } | null;
+  futures: FuturesData | null;
   export_shares: ExportShares | null;
-  sanction_risk: { computed: boolean; rows: SanctionRiskRow[] } | null;
+  sanction_risk: { computed: boolean; trend_window_days: number; rows: SanctionRiskRow[] } | null;
   ribbon: RibbonData | null;
+}
+// Panel 07 (PR 2, D4 — designed for the paid AIS tier, degraded today).
+interface ShipmentRow {
+  mmsi: string;
+  vessel_name: string | null;
+  flag: string | null;
+  cargo_class: string | null;
+  laden: 'laden' | 'ballast' | null;
+  origin_port: string | null;
+  destination: string | null;
+  destination_kind: 'declared' | 'inferred' | 'unknown';
+  eta: string | null;
+  confidence: 'high' | 'medium' | 'low';
+  dark_gap_hours: number | null;
+}
+interface ShipmentsData {
+  supported: boolean;
+  reason?: string;
+  coverage_scope: 'global' | 'chokepoint';
+  feed_stale_days: number | null;
+  inference_note: string;
+  rows: ShipmentRow[];
 }
 
 const COMMODITIES = [
@@ -89,6 +130,10 @@ export default function CommoditiesWorkspace() {
   const [liveError, setLiveError] = useState(false);
   const [markets, setMarkets] = useState<MarketsData | null>(null);
   const [marketsLoading, setMarketsLoading] = useState(true);
+  const [shipments, setShipments] = useState<ShipmentsData | null>(null);
+  const [memo, setMemo] = useState<{ text: string; label: string } | null>(null);
+  const [memoState, setMemoState] = useState<'idle' | 'drafting' | 'error'>('idle');
+  const [memoError, setMemoError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -128,6 +173,54 @@ export default function CommoditiesWorkspace() {
       });
     return () => { cancelled = true; };
   }, [selected]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setShipments(null);
+    fetch(`/api/intel/commodities/shipments?commodity=${selected}`)
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data: ShipmentsData) => {
+        if (!cancelled) setShipments(data);
+      })
+      .catch(() => {
+        if (!cancelled) setShipments(null);
+      });
+    return () => { cancelled = true; };
+  }, [selected]);
+
+  // Memo drafts are per-commodity; a stale memo for another slug must
+  // not linger under the new selection.
+  useEffect(() => {
+    setMemo(null);
+    setMemoState('idle');
+    setMemoError(null);
+  }, [selected]);
+
+  const draftMemo = async () => {
+    setMemoState('drafting');
+    setMemoError(null);
+    try {
+      const res = await fetch('/api/intel/commodities/memo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ commodity: selected }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMemoState('error');
+        setMemoError(data?.error ?? `HTTP ${res.status}`);
+        return;
+      }
+      setMemo({ text: data.memo, label: data.label });
+      setMemoState('idle');
+    } catch (err) {
+      setMemoState('error');
+      setMemoError(err instanceof Error ? err.message : 'request failed');
+    }
+  };
 
   const isEnergy = ['brent', 'wti', 'ttf'].includes(selected);
 
@@ -207,7 +300,15 @@ export default function CommoditiesWorkspace() {
               </div>
               <div className="eyebrow" style={{ marginTop: 8 }}>
                 {markets.export_shares.source} · {markets.export_shares.period}
+                {markets.export_shares.layer !== 'comtrade' && (
+                  // The reader must always know whether this is a live
+                  // Comtrade period or a seeded/production vintage (D2).
+                  <> · {markets.export_shares.layer === 'seed' ? 'seeded primary source' : 'production share'}</>
+                )}
               </div>
+              {markets.export_shares.notes?.map(n => (
+                <div key={n} className="eyebrow" style={{ marginTop: 2 }}>{n}</div>
+              ))}
             </>
           ) : (
             // No sourced trade flows yet (Comtrade ingest may lag its API
@@ -246,7 +347,7 @@ export default function CommoditiesWorkspace() {
               <div className="flex items-baseline justify-between" style={{ marginTop: 8 }}>
                 <span className="eyebrow">
                   Spot · {markets.prices.series.length} obs ·{' '}
-                  {markets.prices.source === 'eia_spot' ? 'EIA daily' : 'World Bank CMO monthly'}
+                  {markets.prices.source === 'eia_spot' ? 'EIA daily' : 'IMF PCPS monthly'}
                 </span>
                 <span className="flex items-baseline" style={{ gap: 8 }}>
                   <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10.5, color: 'var(--ink-dim)' }}>
@@ -257,6 +358,38 @@ export default function CommoditiesWorkspace() {
                   </span>
                 </span>
               </div>
+              {(markets.futures || markets.volatility_30d) && (
+                <div className="flex" style={{ gap: 1, marginTop: 10, background: 'var(--rule-soft)', border: '1px solid var(--rule-soft)' }}>
+                  {markets.futures?.points.map(p => (
+                    <div key={p.month} style={{ flex: 1, padding: '6px 4px', background: 'var(--bg-panel)', textAlign: 'center' }}>
+                      <div className="eyebrow" style={{ marginBottom: 2 }}>M{p.month}</div>
+                      <div className="num-lg" style={{ fontSize: 12.5, color: 'var(--ink)' }}>{p.price}</div>
+                    </div>
+                  ))}
+                  {markets.volatility_30d && (
+                    <div style={{ flex: 1.4, padding: '6px 4px', background: 'var(--bg-panel)', textAlign: 'center' }} title={markets.volatility_30d.method}>
+                      <div className="eyebrow" style={{ marginBottom: 2 }}>30d vol</div>
+                      <div className="num-lg" style={{ fontSize: 12.5, color: 'var(--wheat)' }}>{markets.volatility_30d.pct}%</div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {markets.futures && (
+                <div className="eyebrow" style={{ marginTop: 6 }}>
+                  {markets.futures.label} · {markets.futures.structure}
+                  {markets.volatility_30d ? ' · vol computed from stored dailies (realized, not implied)' : ''}
+                </div>
+              )}
+              {markets.futures?.benchmark_note && (
+                <div className="eyebrow" style={{ marginTop: 2, color: 'var(--amber)' }}>
+                  {markets.futures.benchmark_note}
+                </div>
+              )}
+              {!markets.futures && markets.volatility_30d && (
+                <div className="eyebrow" style={{ marginTop: 6 }}>
+                  30d realized vol from stored dailies · futures for this instrument need a licensed source — not substituted
+                </div>
+              )}
             </>
           ) : (
             <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
@@ -349,6 +482,11 @@ export default function CommoditiesWorkspace() {
                         {r.ofac_active_designations != null
                           ? `${r.ofac_active_designations.toLocaleString()} OFAC`
                           : 'OFAC n/a'}
+                        {r.designation_delta_90d != null && r.designation_delta_90d !== 0 && (
+                          <span style={{ color: r.designation_delta_90d > 0 ? 'var(--red)' : 'var(--green)' }}>
+                            {' '}{r.designation_delta_90d > 0 ? '▲ +' : '▼ −'}{Math.abs(r.designation_delta_90d)} / 90d
+                          </span>
+                        )}
                         {r.fatalities_30d != null && r.fatalities_30d > 0
                           ? ` · ${r.fatalities_30d.toLocaleString()} fatal/30d`
                           : ''}
@@ -371,6 +509,7 @@ export default function CommoditiesWorkspace() {
               </ul>
               <p style={{ marginTop: 8, fontSize: 10, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
                 Computed from OFAC designations + 30d conflict reporting — not an asserted rating.
+                Trend = measured Δ over {markets.sanction_risk.trend_window_days}d of designation history — computed, never predicted.
               </p>
             </>
           ) : (
@@ -387,6 +526,23 @@ export default function CommoditiesWorkspace() {
         >
           {markets?.ribbon ? (
             <>
+              {markets.ribbon.maritime_degraded && (
+                // The heuristic inherits its inputs' instrument problems:
+                // a dead AIS feed silently deflates the Maritime density,
+                // so the panel says so instead of understating risk quietly.
+                <p
+                  style={{
+                    margin: '0 0 6px',
+                    fontSize: 10,
+                    color: 'var(--red)',
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                  }}
+                  title={markets.ribbon.maritime_degraded_reason ?? undefined}
+                >
+                  Maritime degraded — {markets.ribbon.maritime_degraded_reason}
+                </p>
+              )}
               <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
                 HEURISTIC · live anomaly densities · 72h — severity- and recency-weighted Maritime + Energy
                 anomaly flags ({markets.ribbon.inputs.flags_72h} in window), decayed over the next three days.
@@ -445,16 +601,152 @@ export default function CommoditiesWorkspace() {
             )}
           </Panel>
         )}
+
+        {/* Panel 07 — designed for the paid AIS tier, running degraded
+            on free (D4). Same table either way: the paid provider only
+            fills the columns the free tier cannot (class, laden, ETA). */}
+        <Panel
+          title="07 · Commodity Shipments · AIS-inferred"
+          span={3}
+          tag={
+            shipments?.supported
+              ? {
+                  label: shipments.feed_stale_days ? `CHOKEPOINT SCOPE · FEED STALE ${shipments.feed_stale_days}d` : 'CHOKEPOINT SCOPE',
+                  title: shipments.inference_note,
+                }
+              : undefined
+          }
+        >
+          {!shipments ? (
+            <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>Loading shipments…</p>
+          ) : !shipments.supported ? (
+            <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>{shipments.reason}</p>
+          ) : shipments.rows.length === 0 ? (
+            <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
+              No inferred shipments in the current window
+              {shipments.feed_stale_days ? ` — AIS feed stale ${shipments.feed_stale_days}d, derivation frozen at the last covered day.` : '.'}
+            </p>
+          ) : (
+            <>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--f-mono)', fontSize: 10.5 }}>
+                <thead>
+                  <tr>
+                    {['Vessel', 'Class', 'Laden', 'Flag', 'From', 'Destination', 'Conf'].map(h => (
+                      <th
+                        key={h}
+                        style={{
+                          textAlign: h === 'Conf' ? 'right' : 'left',
+                          padding: '4px 6px',
+                          color: 'var(--ink-dim)',
+                          fontSize: 8.5,
+                          letterSpacing: '0.1em',
+                          textTransform: 'uppercase',
+                          fontWeight: 400,
+                          borderBottom: '1px solid var(--rule-soft)',
+                        }}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {shipments.rows.slice(0, 6).map(r => (
+                    <tr key={r.mmsi}>
+                      <td style={{ padding: '5px 6px', color: 'var(--ink)', borderBottom: '1px solid var(--rule-soft)' }}>
+                        {r.vessel_name ?? r.mmsi}
+                      </td>
+                      {/* "—" is the honest free-tier value: static data absent, not zero. */}
+                      <td style={{ padding: '5px 6px', color: 'var(--ink-dim)', borderBottom: '1px solid var(--rule-soft)' }}>
+                        {r.cargo_class ?? '—'}
+                      </td>
+                      <td style={{ padding: '5px 6px', color: r.laden === 'laden' ? 'var(--green)' : 'var(--ink-dim)', borderBottom: '1px solid var(--rule-soft)' }}>
+                        {r.laden ? (r.laden === 'laden' ? '▲ laden' : '▽ ballast') : '—'}
+                      </td>
+                      <td style={{ padding: '5px 6px', color: 'var(--ink-dim)', borderBottom: '1px solid var(--rule-soft)' }}>
+                        {r.flag ?? '—'}
+                      </td>
+                      <td style={{ padding: '5px 6px', color: 'var(--ink-dim)', borderBottom: '1px solid var(--rule-soft)' }}>
+                        {r.origin_port ?? '—'}
+                      </td>
+                      <td style={{ padding: '5px 6px', color: r.dark_gap_hours ? 'var(--red)' : 'var(--ink-dim)', borderBottom: '1px solid var(--rule-soft)' }}>
+                        {r.dark_gap_hours
+                          ? `unknown · dark gap ${Math.round(r.dark_gap_hours)}h`
+                          : r.destination
+                            ? `${r.destination} (${r.destination_kind === 'declared' ? 'decl' : 'inf'})`
+                            : 'unknown'}
+                      </td>
+                      <td style={{ padding: '5px 6px', textAlign: 'right', borderBottom: '1px solid var(--rule-soft)' }}>
+                        <span
+                          style={{
+                            padding: '1px 6px',
+                            fontSize: 8.5,
+                            letterSpacing: '0.08em',
+                            textTransform: 'uppercase',
+                            background: r.confidence === 'high' ? 'var(--green)' : 'var(--bg-raised)',
+                            color: r.confidence === 'high' ? 'var(--bg-void)' : 'var(--amber)',
+                            border: r.confidence === 'high' ? 'none' : '1px solid var(--rule)',
+                          }}
+                        >
+                          {r.confidence}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p style={{ marginTop: 8, marginBottom: 0, fontSize: 10, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
+                {shipments.inference_note} Class and laden state fill in with the paid AIS tier — “—” means the free tier has no static data, not that the value is zero.
+              </p>
+            </>
+          )}
+        </Panel>
       </div>
 
+      {/* Footer actions — grounded (PR 2, D5). Export/compliance are
+          deterministic downloads of the panel payloads; the memo is
+          the one labeled-LLM feature, wallet-debited server-side. */}
       <div
-        className="flex items-center"
+        className="flex items-center flex-wrap"
         style={{ gap: 8, padding: 10, background: 'var(--bg-panel)', border: '1px solid var(--rule-soft)' }}
       >
-        <button style={footerBtn}>◆ Export PDF + JSON</button>
-        <button style={footerBtn}>Draft {persona === 'day-trader' ? 'trade memo' : persona === 'journalist' ? 'lead brief' : 'commodities memo'}</button>
-        <button style={footerBtn}>Compliance review</button>
+        <a href={`/api/intel/commodities/export?commodity=${selected}&format=pdf`} style={{ textDecoration: 'none' }}>
+          <button style={footerBtn}>◆ Export PDF</button>
+        </a>
+        <a href={`/api/intel/commodities/export?commodity=${selected}&format=json`} style={{ textDecoration: 'none' }}>
+          <button style={footerBtn}>Export JSON</button>
+        </a>
+        <span className="eyebrow" style={{ fontSize: 8 }}>live payload snapshot</span>
+        <button style={footerBtn} onClick={draftMemo} disabled={memoState === 'drafting'}>
+          {memoState === 'drafting'
+            ? 'Drafting…'
+            : `Draft ${persona === 'day-trader' ? 'trade memo' : persona === 'journalist' ? 'lead brief' : 'commodities memo'}`}
+        </button>
+        <span className="eyebrow" style={{ fontSize: 8 }}>analyst engine · Pro</span>
+        <a href={`/api/intel/commodities/compliance?commodity=${selected}`} style={{ textDecoration: 'none' }}>
+          <button style={footerBtn}>Compliance review</button>
+        </a>
+        <span className="eyebrow" style={{ fontSize: 8 }}>deterministic OFAC snapshot · no LLM</span>
       </div>
+
+      {memoState === 'error' && memoError && (
+        <div style={{ padding: 10, background: 'rgba(228, 105, 92, 0.06)', borderLeft: '2px solid var(--red)', fontSize: 11.5, color: 'var(--ink-dim)' }}>
+          Memo unavailable: {memoError}
+        </div>
+      )}
+
+      {memo && (
+        <div style={{ padding: 14, background: 'var(--bg-navy)', border: '1px solid var(--rule-soft)' }}>
+          <div className="flex items-center justify-between" style={{ marginBottom: 8, gap: 8 }}>
+            <span className="eyebrow">{memo.label}</span>
+            <span className="flex" style={{ gap: 6 }}>
+              <button style={footerBtn} onClick={() => navigator.clipboard?.writeText(memo.text)}>Copy</button>
+              <button style={footerBtn} onClick={() => setMemo(null)}>Dismiss</button>
+            </span>
+          </div>
+          <div style={{ fontSize: 12.5, color: 'var(--ink)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{memo.text}</div>
+        </div>
+      )}
     </div>
   );
 }
