@@ -5,7 +5,10 @@ import { fetchImfPcpsMonthlyUsd } from '@/lib/imf/client';
 import {
   EIA_BRENT_SPOT,
   EIA_WTI_SPOT,
+  EIA_WTI_FUTURES,
+  EIA_HH_FUTURES,
   fetchEiaDailySpot,
+  fetchEiaFuturesLatest,
 } from '@/lib/eia/client';
 
 export const runtime = 'nodejs';
@@ -163,6 +166,56 @@ async function handle(req: NextRequest) {
         );
       }
     }
+  }
+
+  // ── 3. EIA NYMEX futures, front months 1–4 (PR 2, D3) ─────────────
+  // WTI under 'wti'; Henry Hub under 'henry_hub' — NEVER under 'ttf'
+  // (the UI labels HH as the US benchmark; storing it as ttf would be
+  // a label lying about what the code computes). Brent/TTF futures are
+  // not freely available and are not substituted.
+  if (eiaKey) {
+    const futs: ReadonlyArray<{
+      commodity: string;
+      route: 'petroleum/pri/fut' | 'natural-gas/pri/fut';
+      unit: string;
+      contracts: typeof EIA_WTI_FUTURES;
+    }> = [
+      { commodity: 'wti', route: 'petroleum/pri/fut', unit: 'USD/bbl', contracts: EIA_WTI_FUTURES },
+      { commodity: 'henry_hub', route: 'natural-gas/pri/fut', unit: 'USD/MMBtu', contracts: EIA_HH_FUTURES },
+    ];
+    for (const f of futs) {
+      for (const c of f.contracts) {
+        try {
+          const obs = await fetchEiaFuturesLatest({
+            apiKey: eiaKey,
+            route: f.route,
+            seriesId: c.seriesId,
+            defaultUnit: f.unit,
+          });
+          if (!obs) {
+            errors.push(`eia_fut/${c.seriesId}: no observations`);
+            continue;
+          }
+          await upsert(
+            [
+              {
+                commodity: f.commodity,
+                period: obs.period,
+                price: obs.value,
+                unit: obs.unit || f.unit,
+                source: `eia_fut_m${c.month}`,
+                fetched_at: now,
+              },
+            ],
+            `eia_fut/${c.seriesId}`,
+          );
+        } catch (err) {
+          errors.push(`eia_fut/${c.seriesId}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+  } else {
+    errors.push('eia_fut: EIA_API_KEY not set — futures layer skipped');
   }
 
   const ok = upsertedTotal > 0 || errors.length === 0;

@@ -161,3 +161,43 @@ export const EIA_WEEKLY_STOCK_SERIES: ReadonlyArray<{ id: string; label: string 
 // Spot Price FOB.
 export const EIA_BRENT_SPOT = 'RBRTE';
 export const EIA_WTI_SPOT = 'RWTC';
+
+// ─── NYMEX futures (front months 1–4) ─────────────────────────────
+//
+// EIA republishes NYMEX settlement prices as daily series — free and
+// official, same key as the spot layer. WTI (Cushing) and Henry Hub
+// natural gas only: EIA carries no Brent or TTF futures, and we do not
+// substitute a lookalike. Henry Hub rows are stored under the
+// 'henry_hub' commodity key, never under 'ttf' — the UI labels them as
+// the US benchmark explicitly (Grounding Brief 2026-08-09 rev. B §4.2).
+export const EIA_WTI_FUTURES: ReadonlyArray<{ month: 1 | 2 | 3 | 4; seriesId: string }> = [
+  { month: 1, seriesId: 'RCLC1' },
+  { month: 2, seriesId: 'RCLC2' },
+  { month: 3, seriesId: 'RCLC3' },
+  { month: 4, seriesId: 'RCLC4' },
+];
+export const EIA_HH_FUTURES: ReadonlyArray<{ month: 1 | 2 | 3 | 4; seriesId: string }> = [
+  { month: 1, seriesId: 'RNGC1' },
+  { month: 2, seriesId: 'RNGC2' },
+  { month: 3, seriesId: 'RNGC3' },
+  { month: 4, seriesId: 'RNGC4' },
+];
+
+/** Newest settlement for one futures contract series. */
+export async function fetchEiaFuturesLatest(opts: {
+  apiKey: string;
+  route: 'petroleum/pri/fut' | 'natural-gas/pri/fut';
+  seriesId: string;
+  defaultUnit: string;
+}): Promise<EiaObservation | null> {
+  // length 7 tolerates weekends/holidays; rows arrive newest-first.
+  const obs = await fetchEiaSeries({
+    apiKey: opts.apiKey,
+    route: opts.route,
+    frequency: 'daily',
+    seriesId: opts.seriesId,
+    length: 7,
+    defaultUnit: opts.defaultUnit,
+  });
+  return obs[0] ?? null;
+}

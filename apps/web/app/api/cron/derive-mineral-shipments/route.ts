@@ -254,11 +254,119 @@ export async function POST(req: NextRequest) {
     else staleMarked = data?.length ?? 0;
   }
 
+  // ─── 6 · OIL shipments (PR 2, D4 — commodity_shipments) ─────────
+  // Tanker-family port calls at OIL ports: ports within an EXPLICIT
+  // 5 km of a registry refinery, via the oil_port_call_candidates RPC
+  // (migration 104; EXPLAIN quoted in the PR — GiST-indexed, ~130 ms).
+  // Confidence is stated per row:
+  //   high   — AIS tanker class (80–89) + oil-port call
+  //   medium — oil-port call, class unknown (free tier rarely sends
+  //            static data; vessel_type is NULL on >99% of rows)
+  // Non-tanker classes (tugs, passenger, fishing) are skipped — a tug
+  // at a refinery port is not a shipment. laden/cargo_class/eta stay
+  // NULL until the paid AIS tier supplies static data; the columns
+  // exist so the provider upgrade is a data change, not a schema one.
+  let oilUpserted = 0;
+  {
+    const { data: candRows, error: candErr } = await supabase.rpc('oil_port_call_candidates', {
+      p_lookback_days: PORT_CALL_LOOKBACK_DAYS,
+      p_radius_m: 5000,
+    });
+    if (candErr) {
+      errors.push(`oil_port_call_candidates: ${candErr.message}`);
+    } else {
+      type Cand = {
+        mmsi: string; port_id: string; port_name: string | null;
+        country_code: string | null; arrived_at: string; departed_at: string | null;
+      };
+      const cands = (candRows ?? []) as Cand[];
+      const candMmsis = Array.from(new Set(cands.map(c => c.mmsi)));
+
+      // Vessel identity + type + declared destination for candidates.
+      type OilVessel = Vessel & { vessel_type: number | null };
+      const vesselByMmsi = new Map<string, OilVessel>();
+      for (const mmsis of chunk(candMmsis, IN_CHUNK)) {
+        const { data, error } = await supabase
+          .from('vessel_positions')
+          .select('mmsi, name, flag, destination, vessel_type')
+          .in('mmsi', mmsis);
+        if (error) {
+          errors.push(`vessel_positions (oil): ${error.message}`);
+          break;
+        }
+        for (const v of (data ?? []) as OilVessel[]) vesselByMmsi.set(v.mmsi, v);
+      }
+
+      type OilRow = {
+        commodity: string;
+        mmsi: string;
+        vessel_name: string | null;
+        flag: string | null;
+        origin_port: string | null;
+        origin_country: string | null;
+        destination: string | null;
+        destination_kind: 'declared' | 'unknown';
+        confidence: 'high' | 'medium';
+        method: string;
+        coverage_scope: 'chokepoint';
+        last_seen: string;
+        status: 'underway';
+      };
+      const oilRows: OilRow[] = [];
+      for (const c of cands) {
+        const v = vesselByMmsi.get(c.mmsi);
+        const type = v?.vessel_type ?? null;
+        const isTanker = type !== null && type >= 80 && type <= 89;
+        // Known non-cargo classes are excluded; NULL type stays in at
+        // medium confidence (the free tier's static-data gap, stated).
+        if (type !== null && !isTanker && !(type >= 70 && type <= 79)) continue;
+        const destination = v?.destination?.trim() || null;
+        oilRows.push({
+          commodity: 'oil',
+          mmsi: c.mmsi,
+          vessel_name: v?.name ?? null,
+          flag: v?.flag ?? null,
+          origin_port: c.port_name,
+          origin_country: c.country_code,
+          destination,
+          destination_kind: destination ? 'declared' : 'unknown',
+          confidence: isTanker ? 'high' : 'medium',
+          method: isTanker ? 'tanker_class+oil_port_call' : 'oil_port_call (class unknown, free tier)',
+          coverage_scope: 'chokepoint',
+          last_seen: nowIso,
+          status: 'underway',
+        });
+      }
+
+      for (const batch of chunk(oilRows, IN_CHUNK)) {
+        const { error } = await supabase
+          .from('commodity_shipments')
+          .upsert(batch, { onConflict: 'mmsi,commodity' });
+        if (error) {
+          errors.push(`commodity_shipments upsert: ${error.message}`);
+          break;
+        }
+        oilUpserted += batch.length;
+      }
+
+      // Staleness pass, same 7-day rule as minerals.
+      const { data: staleOil, error: staleOilErr } = await supabase
+        .from('commodity_shipments')
+        .update({ status: 'stale' })
+        .eq('status', 'underway')
+        .lt('last_seen', staleCutoff)
+        .select('mmsi');
+      if (staleOilErr) errors.push(`oil stale pass: ${staleOilErr.message}`);
+      else staleMarked += staleOil?.length ?? 0;
+    }
+  }
+
   return NextResponse.json({
     ok: errors.length === 0,
     routes: laneList.length,
     candidates_scanned: vessels.length,
     shipments_upserted: upserted,
+    oil_shipments_upserted: oilUpserted,
     stale_marked: staleMarked,
     by_mineral: byMineral,
     errors,
