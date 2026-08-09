@@ -35,6 +35,43 @@ async function handle(req: NextRequest) {
   const period = todayUtcYmd();
   const snapshotAt = new Date().toISOString();
 
+  // Feed-liveness guard (2026-08-09). The AIS worker died on 2026-08-05
+  // and this cron kept counting an empty table, writing vessel_count 0
+  // for every corridor — real-looking rows that rendered as "−100% vs
+  // 14d avg" and poisoned the trailing baseline. A row in
+  // ais_chokepoint_observations must mean "we looked with a live
+  // instrument": if the newest vessel position is older than the count
+  // window, we did not look, so we write NOTHING and fail loud (red
+  // Railway run) instead of recording zeros. The guard keys on feed
+  // liveness, never on the count value — a genuine zero on a live feed
+  // still writes.
+  const { data: newest, error: liveErr } = await supabase
+    .from('vessel_positions')
+    .select('updated_at')
+    .order('updated_at', { ascending: false })
+    .limit(1);
+
+  const newestAt = !liveErr && newest?.[0]?.updated_at ? new Date(newest[0].updated_at) : null;
+  const feedAgeHours = newestAt
+    ? (Date.now() - newestAt.getTime()) / 3600_000
+    : null;
+
+  if (liveErr || feedAgeHours === null || feedAgeHours > SNAPSHOT_WINDOW_HOURS) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'ais_feed_stale',
+        detail: liveErr
+          ? `liveness probe failed: ${liveErr.message}`
+          : `newest vessel position is ${feedAgeHours === null ? 'absent' : `${feedAgeHours.toFixed(1)}h old`} (window ${SNAPSHOT_WINDOW_HOURS}h) — no rows written`,
+        newest_position_at: newestAt?.toISOString() ?? null,
+        period,
+        elapsed_ms: Date.now() - startedAt,
+      },
+      { status: 503 },
+    );
+  }
+
   const results: Array<{
     chokepoint: string;
     vessel_count: number | null;
@@ -83,6 +120,11 @@ async function handle(req: NextRequest) {
     { status: failed === 0 ? 200 : 500 },
   );
 }
+
+// Must match the default windowHours passed to snapshotChokepoint —
+// the liveness guard asks "could a count over this window possibly
+// have seen a live feed?".
+const SNAPSHOT_WINDOW_HOURS = 24;
 
 function todayUtcYmd(): string {
   return new Date().toISOString().slice(0, 10);

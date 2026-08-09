@@ -13,6 +13,11 @@ import IllustrativeBadge from '@/components/intel/shared/IllustrativeBadge';
 interface LiveChokepoint {
   chokepoint: string;
   label: string;
+  // Coverage state (2026-08-09): when no_data is true the corridor has
+  // not been observed for days_since days — latest_* then carries the
+  // LAST OBSERVED look and delta_pct is withheld by the server.
+  no_data: boolean;
+  days_since: number;
   latest_count: number;
   latest_period: string;
   window_hours: number;
@@ -276,29 +281,50 @@ export default function CommoditiesWorkspace() {
                     style={{ gap: 8, padding: '4px 0', borderBottom: '1px solid var(--rule-soft)' }}
                   >
                     <span style={{ color: 'var(--ink-dim)' }}>{cp.label}</span>
-                    <span className="flex items-baseline" style={{ gap: 8 }}>
-                      {cp.delta_pct != null && (
-                        <span
-                          style={{
-                            fontSize: 9.5,
-                            color:
-                              Math.abs(cp.delta_pct) >= 25
-                                ? 'var(--red)'
-                                : Math.abs(cp.delta_pct) >= 10
-                                  ? 'var(--amber)'
-                                  : 'var(--ink-dim)',
-                          }}
-                        >
-                          {cp.delta_pct >= 0 ? '+' : '−'}{Math.abs(cp.delta_pct)}% vs 14d avg
-                        </span>
-                      )}
-                      <span className="num-lg" style={{ fontSize: 14, color: 'var(--wheat)' }}>
-                        {cp.latest_count}
+                    {cp.no_data ? (
+                      // Uncovered corridor: the feed has not delivered a
+                      // look for days_since days. NO DATA is the honest
+                      // state — never 0, never a delta (absence of an
+                      // observation is not a result).
+                      <span style={{ fontSize: 10.5, color: 'var(--ink-dim)', letterSpacing: '0.08em' }}>
+                        NO DATA · {cp.days_since}d
                       </span>
-                    </span>
+                    ) : (
+                      <span className="flex items-baseline" style={{ gap: 8 }}>
+                        {cp.delta_pct != null && (
+                          <span
+                            style={{
+                              fontSize: 9.5,
+                              color:
+                                Math.abs(cp.delta_pct) >= 25
+                                  ? 'var(--red)'
+                                  : Math.abs(cp.delta_pct) >= 10
+                                    ? 'var(--amber)'
+                                    : 'var(--ink-dim)',
+                            }}
+                          >
+                            {cp.delta_pct >= 0 ? '+' : '−'}{Math.abs(cp.delta_pct)}% vs 14d avg
+                          </span>
+                        )}
+                        <span className="num-lg" style={{ fontSize: 14, color: 'var(--wheat)' }}>
+                          {cp.latest_count}
+                        </span>
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>
+              {live.chokepoints.some(cp => cp.no_data) && (
+                <p style={{ marginTop: 8, marginBottom: 0, fontSize: 10, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
+                  Last observed{' '}
+                  {live.chokepoints
+                    .filter(cp => cp.no_data)
+                    .map(cp => `${cp.label} ${cp.latest_count} (${cp.latest_period})`)
+                    .join(' · ')}
+                  <br />
+                  free-tier AIS · ingest-sensitive · baseline covered days only
+                </p>
+              )}
             </>
           ) : (
             <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
