@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { CampaignPageView, TrackedCta } from '@/components/marketing/CampaignTracking';
 import { notFound } from 'next/navigation';
 import type { CSSProperties } from 'react';
 import { createServerSupabase } from '@/lib/supabase-server';
@@ -76,14 +77,17 @@ export default async function PublicContentPage({ params }: { params: { id: stri
 
   return (
     <main style={{ minHeight: '100vh', color: 'var(--ink)' }}>
+      {/* Campaign attribution: landing page for proactive-content links —
+          utm_* captured here because the global page_viewed strips it (PR B). */}
+      <CampaignPageView contentType="proactive" contentId={params.id} />
       <header style={{ borderBottom: '1px solid var(--rule-soft)', padding: '14px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Link href="/" prefetch={false} style={{ textDecoration: 'none', display: 'flex', alignItems: 'baseline', gap: 8 }}>
           <span style={{ fontFamily: 'var(--f-display)', fontSize: 18, letterSpacing: '0.04em', color: 'var(--ink)' }}>eYKON</span>
           <span style={{ ...eyebrow, color: 'var(--teal)' }}>·ai</span>
         </Link>
-        <Link href={SIGNUP} prefetch={false} style={{ ...eyebrow, color: 'var(--teal)', textDecoration: 'none', border: '1px solid var(--teal)', borderRadius: 4, padding: '7px 14px' }}>
+        <TrackedCta href={SIGNUP} source="proactive" contentId={params.id} style={{ ...eyebrow, color: 'var(--teal)', textDecoration: 'none', border: '1px solid var(--teal)', borderRadius: 4, padding: '7px 14px' }}>
           Explore the live globe
-        </Link>
+        </TrackedCta>
       </header>
 
       <section style={{ maxWidth: 640, margin: '0 auto', padding: '36px 24px 96px' }}>
@@ -111,9 +115,9 @@ export default async function PublicContentPage({ params }: { params: { id: stri
           <p style={{ fontSize: 13.5, color: 'var(--ink-dim)', lineHeight: 1.6, margin: '0 0 14px' }}>
             eYKON fuses maritime, aviation, conflict and energy feeds on one globe, with an AI analyst that cites its sources and a calibration ledger that scores its own predictions. This read was generated from live open-source data.
           </p>
-          <Link href={SIGNUP} prefetch={false} style={{ display: 'inline-block', fontFamily: 'var(--f-mono)', fontSize: 11.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--bg-void, #0a0e12)', background: 'var(--teal)', borderRadius: 4, padding: '10px 18px', textDecoration: 'none', fontWeight: 600 }}>
+          <TrackedCta href={SIGNUP} source="proactive" contentId={params.id} style={{ display: 'inline-block', fontFamily: 'var(--f-mono)', fontSize: 11.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--bg-void, #0a0e12)', background: 'var(--teal)', borderRadius: 4, padding: '10px 18px', textDecoration: 'none', fontWeight: 600 }}>
             Ask your own question — free
-          </Link>
+          </TrackedCta>
         </div>
 
         <p style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--ink-faint)', marginTop: 22, lineHeight: 1.6 }}>
