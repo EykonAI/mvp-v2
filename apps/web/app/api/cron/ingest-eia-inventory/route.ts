@@ -8,7 +8,13 @@ import {
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+// 300, matching the other heavy ingest routes (ingest-comtrade-minerals,
+// ingest-gem-*, build-entity-graph). 60 was never right for this route and
+// the routine tick proved it: a 4-series × 12-observation run measured
+// elapsed_ms 58,960 on 2026-08-15 — 98% of the old budget, before any
+// backfill. The cost is EIA v2 request latency (~14 s per series), not row
+// count, so it is nearly fixed per series regardless of `length`.
+export const maxDuration = 300;
 
 /**
  * EIA weekly inventory ingest · daily.
@@ -33,8 +39,15 @@ export const maxDuration = 60;
  * https://www.eia.gov/opendata/register.php).
  *
  * BACKFILL: pass ?length=N (bounded by MAX_LENGTH) for a one-off deep
- * pull. The scheduled tick keeps DEFAULT_LENGTH; nothing about the
- * schedule needs to change to run one.
+ * pull, and ?series=<id> to do it one series at a time. The scheduled
+ * tick passes neither and keeps DEFAULT_LENGTH across all series;
+ * nothing about the schedule needs to change to run a backfill.
+ *
+ * Backfill one series at a time. Each series costs ~14 s in EIA request
+ * latency alone, so four at once sits close to the ceiling even with
+ * maxDuration 300 — and a timeout mid-loop leaves the later series
+ * untouched with no signal about how far it got. Per-series requests
+ * fail small and are trivially resumable.
  */
 const DEFAULT_LENGTH = 12;
 const MAX_LENGTH = 600; // ~11.5 years of weekly prints
@@ -71,12 +84,32 @@ async function handle(req: NextRequest) {
       ? Math.min(Math.floor(requestedLength), MAX_LENGTH)
       : DEFAULT_LENGTH;
 
+  // Optional single-series filter for backfills. Unknown ids are a hard
+  // 400 rather than a silent empty run — a backfill that quietly does
+  // nothing and reports ok:true is the exact failure this codebase keeps
+  // rediscovering.
+  const seriesFilter = new URL(req.url).searchParams.get('series');
+  const targetSeries = seriesFilter
+    ? EIA_WEEKLY_STOCK_SERIES.filter((s) => s.id === seriesFilter)
+    : EIA_WEEKLY_STOCK_SERIES;
+
+  if (seriesFilter && targetSeries.length === 0) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `unknown series '${seriesFilter}'`,
+        known_series: EIA_WEEKLY_STOCK_SERIES.map((s) => s.id),
+      },
+      { status: 400 },
+    );
+  }
+
   const errors: string[] = [];
   const perSeries: Record<string, { fetched: number; upserted: number }> = {};
   let fetchedTotal = 0;
   let upsertedTotal = 0;
 
-  for (const series of EIA_WEEKLY_STOCK_SERIES) {
+  for (const series of targetSeries) {
     let observations;
     try {
       observations = await fetchEiaWeeklyStocks({
@@ -125,6 +158,7 @@ async function handle(req: NextRequest) {
     {
       ok: !allFailed,
       length,
+      series_filter: seriesFilter ?? null,
       series: perSeries,
       fetched: fetchedTotal,
       upserted: upsertedTotal,
