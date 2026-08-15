@@ -25,11 +25,40 @@ export const EVENT = {
   REFUND_REQUESTED: 'refund_requested',
   REFUND_SENT: 'refund_sent',
   WELCOME_EMAIL_SENT: 'welcome_email_sent',
+  // ── Campaign funnel (closing-LP brief §7) ──────────────────────────
+  // /c and /q are the public landing pages every X/Reddit/Discord link
+  // points at; /start is the closing page they hand off to (PR D). The
+  // global page_viewed deliberately strips the query string, so campaign
+  // attribution lives HERE: these events carry utm_* explicitly, and the
+  // first view also writes first-touch person properties via $set_once
+  // (lib/analytics/utm.ts) so a visitor who returns direct and then pays
+  // still attributes to the channel that found them.
+  CONTENT_PAGE_VIEWED: 'content_page_viewed',
+  CTA_CLICKED: 'cta_clicked',
+  CLOSING_PAGE_VIEWED: 'closing_page_viewed',
+  PROOF_SCROLLED: 'proof_scrolled',
+  VIDEO_PLAYED: 'video_played',
+  VIDEO_PROGRESS: 'video_progress',
+  LEAD_FORM_STARTED: 'lead_form_started',
+  LEAD_CAPTURED: 'lead_captured',
+  OFFER_VIEWED: 'offer_viewed',
+  LIMITS_EXPANDED: 'limits_expanded',
 } as const;
 
 export type EventName = (typeof EVENT)[keyof typeof EVENT];
 
 export type PaymentMethod = 'fiat' | 'crypto';
+
+// Campaign attribution fields, read from the landing URL by
+// lib/analytics/utm.ts. All nullable — organic traffic carries none.
+export type CampaignProps = {
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  utm_content: string | null;
+  referrer: string | null;
+  landing_path: string;
+};
 
 // Minimum property shape for each event. Extra fields are fine — PostHog
 // widens schemas on demand — but this set is what dashboards rely on.
@@ -38,7 +67,7 @@ export type EventProps =
   | { event: 'signup_started'; plan?: string | null }
   | { event: 'signup_completed'; plan?: string | null; has_referrer?: boolean }
   | { event: 'plan_selected'; plan: string; billing_cycle: 'monthly' | 'annual' | 'annual-crypto'; payment_method: PaymentMethod }
-  | { event: 'checkout_started'; plan: string; payment_method: PaymentMethod; amount_usd_cents?: number }
+  | { event: 'checkout_started'; plan: string; payment_method: PaymentMethod; amount_usd_cents?: number; source?: 'closing' | 'content' | 'pricing' }
   | { event: 'checkout_succeeded'; plan: string; payment_method: PaymentMethod; amount_usd_cents?: number; founding_locked?: boolean }
   | { event: 'checkout_failed'; plan: string; payment_method: PaymentMethod; reason?: string }
   | { event: 'module_opened'; module_slug: string; tier?: 'hero' | 'visible' | 'advanced' }
@@ -61,6 +90,16 @@ export type EventProps =
       active_persona: string;
       active_persona_visibility: 'default' | 'advanced';
     }
+  | ({ event: 'content_page_viewed'; content_type: 'newsjack' | 'proactive'; content_id: string } & CampaignProps)
+  | { event: 'cta_clicked'; source: 'newsjack' | 'proactive' | 'closing'; content_id: string | null; target: string }
+  | ({ event: 'closing_page_viewed' } & CampaignProps)
+  | { event: 'proof_scrolled'; depth: number }
+  | { event: 'video_played' }
+  | { event: 'video_progress'; pct: 25 | 50 | 75 | 100 }
+  | { event: 'lead_form_started' }
+  | { event: 'lead_captured'; persona: string; theatres: string[]; utm_source: string | null; has_tools: boolean }
+  | { event: 'offer_viewed'; spots_left: number | null }
+  | { event: 'limits_expanded'; limit: 1 | 2 | 3 }
   | {
       // Fired server-side when a user clicks "Request refund" on /billing
       // and the eligibility checks pass (within 14 days, no prior lifetime

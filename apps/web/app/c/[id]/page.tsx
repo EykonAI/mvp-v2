@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { CampaignPageView, TrackedCta } from '@/components/marketing/CampaignTracking';
 import { notFound } from 'next/navigation';
 import type { CSSProperties } from 'react';
 import { loadConvergence } from '@/lib/briefs/convergence';
@@ -60,15 +61,19 @@ export default async function PublicConvergencePage({ params }: { params: { id: 
 
   return (
     <main style={{ minHeight: '100vh', color: 'var(--ink)' }}>
+      {/* Campaign attribution: this page is where X/Reddit/Discord links
+          land, and the global page_viewed strips the query string — so the
+          utm_* fields are captured here, on this page's own event (PR B). */}
+      <CampaignPageView contentType="newsjack" contentId={c.id} />
       {/* header */}
       <header style={{ borderBottom: '1px solid var(--rule-soft)', padding: '14px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Link href="/" prefetch={false} style={{ textDecoration: 'none', display: 'flex', alignItems: 'baseline', gap: 8 }}>
           <span style={{ fontFamily: 'var(--f-display)', fontSize: 18, letterSpacing: '0.04em', color: 'var(--ink)' }}>eYKON</span>
           <span style={{ ...eyebrow, color: 'var(--teal)' }}>·ai</span>
         </Link>
-        <Link href={SIGNUP(c.id)} prefetch={false} style={{ ...eyebrow, color: 'var(--teal)', textDecoration: 'none', border: '1px solid var(--teal)', borderRadius: 4, padding: '7px 14px' }}>
+        <TrackedCta href={SIGNUP(c.id)} source="newsjack" contentId={c.id} style={{ ...eyebrow, color: 'var(--teal)', textDecoration: 'none', border: '1px solid var(--teal)', borderRadius: 4, padding: '7px 14px' }}>
           Explore the live globe
-        </Link>
+        </TrackedCta>
       </header>
 
       <section style={{ maxWidth: 640, margin: '0 auto', padding: '36px 24px 96px' }}>
@@ -112,14 +117,14 @@ export default async function PublicConvergencePage({ params }: { params: { id: 
             This is one live signal from eYKON — maritime, aviation, conflict and energy feeds fused on a single globe, with an AI analyst that cites its sources and a calibration ledger that scores its own predictions. Convergences like this fire automatically when independent domains move together in the same place.
           </p>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-            <Link href={SIGNUP(c.id)} prefetch={false} style={{ display: 'inline-block', fontFamily: 'var(--f-mono)', fontSize: 11.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--bg-void, #0a0e12)', background: 'var(--teal)', borderRadius: 4, padding: '10px 18px', textDecoration: 'none', fontWeight: 600 }}>
+            <TrackedCta href={SIGNUP(c.id)} source="newsjack" contentId={c.id} style={{ display: 'inline-block', fontFamily: 'var(--f-mono)', fontSize: 11.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--bg-void, #0a0e12)', background: 'var(--teal)', borderRadius: 4, padding: '10px 18px', textDecoration: 'none', fontWeight: 600 }}>
               Explore the live view — free
-            </Link>
+            </TrackedCta>
             {/* Week Pass (mig 075): the impulse exit while an event is
                 live — full Pro for 7 days, one-off, expires on its own. */}
-            <Link href="/pricing?plan=week_pass" prefetch={false} style={{ display: 'inline-block', fontFamily: 'var(--f-mono)', fontSize: 11.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--teal)', border: '1px solid var(--teal)', borderRadius: 4, padding: '9px 18px', textDecoration: 'none' }}>
+            <TrackedCta href="/pricing?plan=week_pass" source="newsjack" contentId={c.id} style={{ display: 'inline-block', fontFamily: 'var(--f-mono)', fontSize: 11.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--teal)', border: '1px solid var(--teal)', borderRadius: 4, padding: '9px 18px', textDecoration: 'none' }}>
               Follow this event with full access — 7-day pass $9
-            </Link>
+            </TrackedCta>
           </div>
         </div>
 
