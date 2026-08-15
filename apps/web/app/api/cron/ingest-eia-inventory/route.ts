@@ -31,7 +31,14 @@ export const maxDuration = 60;
  *
  * Requires: EIA_API_KEY env var (free signup at
  * https://www.eia.gov/opendata/register.php).
+ *
+ * BACKFILL: pass ?length=N (bounded by MAX_LENGTH) for a one-off deep
+ * pull. The scheduled tick keeps DEFAULT_LENGTH; nothing about the
+ * schedule needs to change to run one.
  */
+const DEFAULT_LENGTH = 12;
+const MAX_LENGTH = 600; // ~11.5 years of weekly prints
+
 async function handle(req: NextRequest) {
   const unauth = requireCronSecret(req);
   if (unauth) return unauth;
@@ -48,6 +55,22 @@ async function handle(req: NextRequest) {
   const supabase = createServerSupabase();
   const now = new Date().toISOString();
 
+  // Per-run history depth. The scheduled tick only ever needs the last few
+  // weeks — it runs weekly and upserts on (series_id, period), so 12 gives
+  // ample overlap against a missed run. A ONE-OFF BACKFILL passes ?length=N
+  // to pull real history: the forecaster in lib/predictions/issue-eia-weekly.ts
+  // shrinks the recent regime toward a long-run anchor, and that anchor is
+  // only meaningful with years of prints rather than the months this cron
+  // accretes on its own. Bounded at MAX_LENGTH because EIA v2 paginates and
+  // an unbounded length silently truncates rather than erroring.
+  const requestedLength = Number(
+    new URL(req.url).searchParams.get('length') ?? DEFAULT_LENGTH,
+  );
+  const length =
+    Number.isFinite(requestedLength) && requestedLength > 0
+      ? Math.min(Math.floor(requestedLength), MAX_LENGTH)
+      : DEFAULT_LENGTH;
+
   const errors: string[] = [];
   const perSeries: Record<string, { fetched: number; upserted: number }> = {};
   let fetchedTotal = 0;
@@ -59,7 +82,7 @@ async function handle(req: NextRequest) {
       observations = await fetchEiaWeeklyStocks({
         apiKey,
         seriesId: series.id,
-        length: 12,
+        length,
       });
     } catch (err) {
       errors.push(
@@ -101,6 +124,7 @@ async function handle(req: NextRequest) {
   return NextResponse.json(
     {
       ok: !allFailed,
+      length,
       series: perSeries,
       fetched: fetchedTotal,
       upserted: upsertedTotal,
