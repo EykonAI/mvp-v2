@@ -2,9 +2,12 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type { CSSProperties } from 'react';
 import { loadForecast } from '@/lib/briefs/forecasts';
+import { HashVerifier } from '@/components/briefs/HashVerifier';
 
-// Per-forecast drill-down: the full sealed call, the forecast vs. observed
-// outcome + Brier/log-loss, the issue/resolution metadata, the SHA-256 seal,
+// Per-forecast drill-down: the full call, the forecast vs. observed outcome
+// + Brier/log-loss, the issue/resolution metadata, the SHA-256 binding hash
+// with an in-browser verifier ("hashed at issue", not "sealed" — sealing is
+// the creator-track commit-reveal mechanic and the two must not be conflated),
 // and the external resolution source once it has resolved.
 
 export const dynamic = 'force-dynamic';
@@ -73,11 +76,20 @@ export default async function ForecastDetailPage({ params }: { params: { id: str
         <Meta k="Persona" v={f.persona ?? '—'} />
       </dl>
 
-      {f.hash && (
+      {f.hash && f.targetObservable && f.resolvesAt ? (
+        <HashVerifier
+          statement={f.statement}
+          targetObservable={f.targetObservable}
+          resolvesAt={f.resolvesAt}
+          issuedAt={f.issuedAt}
+          predictedMean={f.predictedMean}
+          hash={f.hash}
+        />
+      ) : f.hash ? (
         <p style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--ink-faint)', letterSpacing: '0.02em', marginTop: 20 }}>
-          Sealed at issue · SHA-256 {f.hash.slice(0, 16)}…
+          Hashed at issue · SHA-256 {f.hash}
         </p>
-      )}
+      ) : null}
 
       {f.resolved && f.resolutionSourceUrl && (
         <a
