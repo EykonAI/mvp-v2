@@ -795,9 +795,10 @@ export function Landing() {
                 Pay annually in crypto, save <span className="pct">30% extra</span>.
               </h3>
               <p>
-                Annual-only — USDC, USDT, BTC, or ETH on native chains, plus USDC/USDT on
+                USDC, USDT, BTC, or ETH on native chains, plus USDC/USDT on
                 Polygon and Base. Settles in minutes, no chargebacks. Price is quoted in
-                USD-equivalent and locked for 20 minutes at checkout.
+                USD-equivalent and locked for 20 minutes at checkout. Founding Pro can
+                also pay monthly — $29.00 flat, same rate locked for life.
               </p>
               <p>
                 That <span className="pct">30%</span> is the <strong>founding</strong> crypto
@@ -915,16 +916,19 @@ export function Landing() {
         <Faq q="How does the crypto discount work in practice?">
           Select Annual billing, then toggle &quot;Annual + Crypto −30%&quot;. At checkout,
           choose your coin (USDC, BTC, ETH, or USDT). Your wallet is quoted in USD-equivalent
-          at execution price via our payment processor. Crypto payments are annual-only — no
-          monthly subscriptions on-chain — and the 30% discount applies automatically.
-          That 30% is part of the founding offer: claim one of the first 1,000 seats and it&apos;s
-          locked for life. Once those are gone, standard crypto pricing is 15% off.
+          at execution price via our payment processor. The 30% discount applies to the
+          annual price automatically; Founding Pro also has a monthly option at $29.00
+          flat — the founding rate itself, effectively $20.30/month if you pay annually.
+          Nothing auto-renews: each period is a payment you actively make, and we remind
+          you before it lapses. The founding rate is locked for life on either cadence.
+          Once the first 1,000 seats are gone, standard crypto pricing is 15% off.
         </Faq>
         <Faq q="Which cryptocurrencies do you accept?">
           USDC, USDT, BTC, ETH on their native chains, plus USDC and USDT on Polygon and Base
-          (lower gas fees). Minimum payment is the annual price of your chosen tier.
-          Transactions typically confirm in under 15 minutes; your Pro or Enterprise access
-          activates the moment the payment is confirmed on-chain.
+          (lower gas fees). For the $29 monthly option we recommend USDC or USDT on Base or
+          Polygon — mainnet gas on a $29 payment is real money, and some coins carry
+          provider minimums near that amount. Transactions typically confirm in under 15
+          minutes; your access activates the moment the payment is confirmed on-chain.
         </Faq>
         <Faq q="What happens if the crypto price moves between checkout and confirmation?">
           Our processor (<strong>NOWPayments</strong>) locks the USD-equivalent quote for 20

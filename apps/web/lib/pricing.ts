@@ -28,10 +28,15 @@ export const TIER_LABELS: Record<Tier, string> = {
 };
 
 // Variant id format: <tier>_<founding|standard>_<cycle>
-// Crypto is annual-only, so only the four _annual variants are crypto-eligible.
+// Crypto was annual-only until 2026-08-15; the founding MONTHLY variant
+// (closing-LP brief v1.3 §4.6) is the one exception — the low-commitment
+// door for the /start page, at the same lifetime-locked rate. The '_monthly'
+// suffix is load-bearing: complete_crypto_purchase (migration 107) derives
+// the billing cycle and period length from it.
 export type CryptoVariantId =
   | 'member_standard_annual'
   | 'pro_founding_annual'
+  | 'pro_founding_monthly'
   | 'pro_standard_annual'
   | 'enterprise_founding_annual'
   | 'enterprise_standard_annual';
@@ -39,7 +44,7 @@ export type CryptoVariantId =
 export type CryptoVariant = {
   id: CryptoVariantId;
   tier: Tier;
-  billing_cycle: 'annual';
+  billing_cycle: 'annual' | 'monthly';
   is_founding: boolean;
   seats: number;
   label: string;
@@ -54,7 +59,8 @@ const round = (x: number) => Math.round(x);
 
 // Pricing source of truth (founding crypto −30%, standard crypto −15%):
 // Member standard      = $12/mo   → annual $99   → crypto $84.15   (= $99 × 0.85)
-// Pro founding monthly = $29/mo   → annual $348  → crypto $243.60  (= $348 × 0.70)
+// Pro founding monthly (crypto) = $29.00 flat — the rate itself, no derivation
+// Pro founding annual  = $29/mo   → annual $348  → crypto $243.60  (= $348 × 0.70)
 // Pro standard monthly = $99/mo   → annual $1188 → crypto $1009.80 (= $1188 × 0.85)
 // Enterprise founding  = $99/seat/mo  → annual $1188/seat → crypto $831.60/seat  → total $2494.80 for 3 seats
 // Enterprise standard  = $199/seat/mo → annual $2388/seat → crypto $2029.80/seat → total $6089.40 for 3 seats
@@ -83,6 +89,24 @@ export const CRYPTO_VARIANTS: Record<CryptoVariantId, CryptoVariant> = {
     label: 'Pro · Founding Member · Annual (crypto)',
     fiat_per_seat_annual_usd_cents: 34_800,
     crypto_total_usd_cents: round(34_800 * (1 - FOUNDING_CRYPTO_DISCOUNT)), // 24360 → $243.60
+    crypto_price_currency: 'usd',
+  },
+  // The monthly door (founder decision 2026-08-15): $29.00 flat — the
+  // founding rate itself, NOT a discounted derivation. Its job is to give
+  // the annual an honest anchor (30% off ≈ $20.30/mo effective) instead of
+  // a strike-through against a standard price nobody has paid, and to let
+  // a sceptic in for $29 instead of $243.60. Monthly renewals are manual
+  // re-payments like every crypto sub — crypto-renewal-reminder nudges on
+  // a 7/2/1-day cadence (annual keeps 30/7/1).
+  pro_founding_monthly: {
+    id: 'pro_founding_monthly',
+    tier: 'pro',
+    billing_cycle: 'monthly',
+    is_founding: true,
+    seats: 1,
+    label: 'Pro · Founding Member · Monthly (crypto)',
+    fiat_per_seat_annual_usd_cents: 34_800,
+    crypto_total_usd_cents: 2_900, // $29.00 flat
     crypto_price_currency: 'usd',
   },
   pro_standard_annual: {

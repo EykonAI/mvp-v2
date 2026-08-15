@@ -10,13 +10,18 @@ export const maxDuration = 60;
 
 /**
  * Daily cron that finds active crypto subscriptions renewing within a
- * reminder window and sends each user a payment-ready nudge. Three windows
- * fire per subscription across its lifetime: 30 days, 7 days, and 1 day
- * before current_period_end. The email_log table prevents duplicate sends
- * at each window (idempotent via a "same template to same user within 24h"
- * check).
+ * reminder window and sends each user a payment-ready nudge. Windows are
+ * per cycle: annual gets 30/7/1 days before current_period_end; monthly
+ * gets 7/2/1 — on a 30-day cycle a 30-day window would fire on day zero
+ * and a monthly subscriber lives closer to the edge (crypto renewals are
+ * manual re-payments; missed months are a certainty, not a risk). The
+ * email_log table prevents duplicate sends at each window (idempotent via
+ * a "same template to same user within 24h" check).
  */
-const WINDOWS_DAYS = [30, 7, 1] as const;
+const WINDOWS_BY_CYCLE: Record<'annual' | 'monthly', readonly number[]> = {
+  annual: [30, 7, 1],
+  monthly: [7, 2, 1],
+};
 
 export async function POST(req: NextRequest) {
   const unauth = requireCronSecret(req);
@@ -34,7 +39,10 @@ export async function POST(req: NextRequest) {
     failed: 0,
   };
 
-  for (const days of WINDOWS_DAYS) {
+  for (const [cycle, windows] of Object.entries(WINDOWS_BY_CYCLE) as Array<
+    ['annual' | 'monthly', readonly number[]]
+  >) {
+  for (const days of windows) {
     results.windows_processed++;
     const target = new Date(today);
     target.setUTCDate(target.getUTCDate() + days);
@@ -47,7 +55,7 @@ export async function POST(req: NextRequest) {
       .select('id, user_id, variant_id, tier, billing_cycle, status, current_period_end')
       .eq('payment_provider', 'nowpayments')
       .eq('status', 'active')
-      .eq('billing_cycle', 'annual')
+      .eq('billing_cycle', cycle)
       .gte('current_period_end', targetStart.toISOString())
       .lte('current_period_end', targetEnd.toISOString());
 
@@ -101,6 +109,7 @@ export async function POST(req: NextRequest) {
         results.sent++;
       }
     }
+  }
   }
 
   return NextResponse.json(results);
