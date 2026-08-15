@@ -94,8 +94,19 @@ export async function issueEiaWeekly(opts: { now?: Date } = {}): Promise<IssueEi
         series_id: EIA_CUSHING_CRUDE_STOCKS,
         baseline_kbbl: baseline,
         baseline_period: latest.period,
-        forecast_basis: draw == null ? 'flat_prior_insufficient_history' : 'wow_draw_rate_regime_blend',
+        forecast_basis:
+          draw == null
+            ? 'flat_prior_insufficient_history'
+            : draw.anchor === 'prior_history'
+              ? 'wow_draw_rate_regime_blend'
+              : 'wow_draw_rate_recent_vs_uninformative',
         forecast_sample_weeks: draw?.transitions ?? 0,
+        // Which anchor the recent regime was shrunk toward, and how much
+        // history stood behind it. A reader must be able to tell a blend
+        // against real climatology apart from one against a 0.5 prior —
+        // they are different claims and they deserve different trust.
+        forecast_anchor: draw?.anchor ?? null,
+        forecast_anchor_transitions: draw?.anchor_transitions ?? 0,
         // Both inputs are recorded so a reader can see WHY the forecast
         // sits where it does, and so a future audit can tell a regime
         // call apart from a climatology call.
@@ -179,13 +190,52 @@ function formatThousands(n: number): string {
  * (n/(n+K), the same credibility shrinkage the Reputation Note uses)
  * lets the forecast follow a regime once there is enough evidence for
  * one, and fall back toward climatology when there is not.
+ *
+ * CORRECTION 2026-08-15 — the "~120 weeks" above was never true. The
+ * caller asks for 120 prints but the ingest cron fetched only the last
+ * 12 per run and accreted from its own start date, so the table held 25
+ * observations (24 transitions, from 2026-02-27). Two consequences, both
+ * fixed here and in the ingest route:
+ *
+ *   1. The anchor was NOT climatology, it was the last six months.
+ *   2. The anchor CONTAINED the recent window, so the blend shrank the
+ *      recent rate toward a set half-composed of itself — ~83% effective
+ *      weight on the last 12 weeks against an intended 67%.
+ *
+ * Measured cost: through mid-July the series ran a sustained drawdown
+ * (Cushing 30,568 → 18,957). It reversed on 2026-07-31 and 2026-08-07
+ * with the two largest builds on record, while the forecast climbed
+ * 0.500 → 0.573 → 0.688. The July fix cured averaging-the-regime-away
+ * and replaced it with lagging the regime.
+ *
+ * The anchor is now strictly disjoint, and when it is too thin to mean
+ * anything (< MIN_ANCHOR_TRANSITIONS) we shrink toward 0.5 and SAY SO in
+ * the stored context rather than calling six months "climatology".
+ * Backfill the history (ingest-eia-inventory?length=300) and the anchor
+ * becomes real without touching this file.
  */
 const RECENT_WEEKS = 12;
 const SHRINKAGE_K = 6;
 
+/**
+ * Minimum transitions the anchor window needs before it counts as an
+ * estimate of anything. Below this we shrink toward an uninformative 0.5
+ * rather than toward a handful of prints dressed up as climatology —
+ * absence of history is not a base rate.
+ */
+const MIN_ANCHOR_TRANSITIONS = 26;
+const UNINFORMATIVE_PRIOR = 0.5;
+
 function weekOverWeekDrawRate(
   rows: { period: string; value: number | string }[],
-): { rate: number; transitions: number; recent_rate: number | null; long_rate: number } | null {
+): {
+  rate: number;
+  transitions: number;
+  recent_rate: number | null;
+  long_rate: number | null;
+  anchor: 'prior_history' | 'uninformative_prior';
+  anchor_transitions: number;
+} | null {
   const MIN_HISTORY = 8;
   const vals = rows
     .slice()
@@ -203,18 +253,43 @@ function weekOverWeekDrawRate(
     return transitions ? { r: draws / transitions, n: transitions } : null;
   };
 
-  const long = rate(vals);
-  if (!long) return null;
   const recent = rate(vals.slice(-(RECENT_WEEKS + 1)));
 
-  // Credibility blend: the recent window earns its weight.
-  const w = recent ? recent.n / (recent.n + SHRINKAGE_K) : 0;
-  const blended = recent ? w * recent.r + (1 - w) * long.r : long.r;
+  // DISJOINT anchor. Previously this was rate(vals) — the whole series —
+  // which CONTAINS the recent window, so the blend shrank the recent rate
+  // toward a set half-composed of itself. With 25 prints on hand that put
+  // ~83% of the weight on the last 12 weeks instead of the intended 67%,
+  // and the "credibility" term was measuring nothing independent.
+  // The anchor is now strictly the prints BEFORE the recent window.
+  const anchorSeries = vals.slice(0, Math.max(0, vals.length - RECENT_WEEKS));
+  const anchorRate = rate(anchorSeries);
+
+  const anchorUsable =
+    anchorRate != null && anchorRate.n >= MIN_ANCHOR_TRANSITIONS;
+  const anchorValue = anchorUsable ? anchorRate.r : UNINFORMATIVE_PRIOR;
+
+  if (!recent) {
+    return {
+      rate: anchorValue,
+      transitions: anchorRate?.n ?? 0,
+      recent_rate: null,
+      long_rate: anchorUsable ? Number(anchorRate.r.toFixed(3)) : null,
+      anchor: anchorUsable ? 'prior_history' : 'uninformative_prior',
+      anchor_transitions: anchorRate?.n ?? 0,
+    };
+  }
+
+  // Credibility blend: the recent window earns its weight against an
+  // independent anchor.
+  const w = recent.n / (recent.n + SHRINKAGE_K);
+  const blended = w * recent.r + (1 - w) * anchorValue;
 
   return {
     rate: blended,
-    transitions: long.n,
-    recent_rate: recent ? Number(recent.r.toFixed(3)) : null,
-    long_rate: Number(long.r.toFixed(3)),
+    transitions: recent.n + (anchorRate?.n ?? 0),
+    recent_rate: Number(recent.r.toFixed(3)),
+    long_rate: anchorUsable ? Number(anchorRate!.r.toFixed(3)) : null,
+    anchor: anchorUsable ? 'prior_history' : 'uninformative_prior',
+    anchor_transitions: anchorRate?.n ?? 0,
   };
 }
