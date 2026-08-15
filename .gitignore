@@ -1,5 +1,10 @@
 # ─── Node ─────────────────────────────────────────────────────
-node_modules/
+# No trailing slash: `node_modules/` matches DIRECTORIES only, so a
+# node_modules SYMLINK (the shared-clone worktree build trick) slips
+# past it into `git add`. One did exactly that in #362 and broke every
+# Railway web build after it — Docker's `COPY . /app` cannot replace
+# its cached node_modules directory with a symlink file.
+node_modules
 .pnp
 .pnp.js
 
