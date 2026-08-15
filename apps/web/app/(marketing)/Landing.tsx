@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import './landing.css';
 import { captureBrowser } from '@/lib/analytics/client';
@@ -15,9 +15,9 @@ import { BriefsShowcase } from '@/components/landing/BriefsShowcase';
 type Cycle = 'monthly' | 'annual' | 'annual-crypto';
 
 // The cycle the pricing grid lands on. Default to Annual + Crypto: it is the
-// only rail that can actually transact today (the fiat tabs just open the
-// waitlist), and it anchors on the best price + the founding offer. Revisit
-// when fiat (Lemon Squeezy) launches.
+// only rail that can actually transact today (the fiat tabs show anchor
+// prices and hand off to the crypto checkout — the fiat waitlist was retired
+// 2026-08-15). Revisit when fiat launches.
 const DEFAULT_CYCLE: Cycle = 'annual-crypto';
 
 type PriceText = { amt: string; per: string; strike: string; savings: string };
@@ -26,9 +26,9 @@ const PRO_PRICES: Record<Cycle, PriceText> = {
   monthly: { amt: '$29', per: '/ month', strike: '$99/mo standard', savings: '−70%' },
   annual: { amt: '$348', per: '/ year', strike: '$1,188/yr standard', savings: '−71%' },
   'annual-crypto': {
-    amt: '$244',
+    amt: '$243.60',
     per: '/ year in crypto',
-    strike: '$1,010/yr standard',
+    strike: '$1,009.80/yr standard',
     savings: '−76%',
   },
 };
@@ -42,20 +42,23 @@ const ENTERPRISE_PRICES: Record<Cycle, PriceText> = {
     savings: '−50%',
   },
   'annual-crypto': {
-    amt: '$832',
+    amt: '$831.60',
     per: '/ seat / yr in crypto',
-    strike: '$2,030/seat/yr standard',
+    strike: '$2,029.80/seat/yr standard',
     savings: '−59%',
   },
 };
 
-type CtaAction =
-  | { kind: 'waitlist'; tier: 'pro' | 'enterprise'; label: string }
-  | { kind: 'crypto'; href: string; label: string };
+// Fiat cycles carry no signup mechanic: the fiat waitlist was retired on
+// 2026-08-15 (founder decision — first come, first served on one pool of
+// 1,000; no reservations against a date we could not honour). The fiat tabs
+// keep their anchor prices, and their CTA hands off to the crypto checkout,
+// which is the only rail that exists today.
+type CtaAction = { kind: 'crypto'; href: string; label: string };
 
 const PRO_CTA: Record<Cycle, CtaAction> = {
-  monthly: { kind: 'waitlist', tier: 'pro', label: 'Join fiat waitlist →' },
-  annual: { kind: 'waitlist', tier: 'pro', label: 'Join fiat waitlist →' },
+  monthly: { kind: 'crypto', href: '/pricing?plan=pro_founding_annual', label: 'Fiat not open yet — pay in crypto →' },
+  annual: { kind: 'crypto', href: '/pricing?plan=pro_founding_annual', label: 'Fiat not open yet — pay in crypto →' },
   'annual-crypto': {
     kind: 'crypto',
     // Route through /pricing (the auth-aware checkout router), NOT
@@ -67,8 +70,8 @@ const PRO_CTA: Record<Cycle, CtaAction> = {
 };
 
 const ENTERPRISE_CTA: Record<Cycle, CtaAction> = {
-  monthly: { kind: 'waitlist', tier: 'enterprise', label: 'Join fiat waitlist →' },
-  annual: { kind: 'waitlist', tier: 'enterprise', label: 'Join fiat waitlist →' },
+  monthly: { kind: 'crypto', href: '/pricing?plan=enterprise_founding_annual', label: 'Fiat not open yet — pay in crypto →' },
+  annual: { kind: 'crypto', href: '/pricing?plan=enterprise_founding_annual', label: 'Fiat not open yet — pay in crypto →' },
   'annual-crypto': {
     kind: 'crypto',
     // See PRO_CTA: /pricing is the auth-aware checkout router.
@@ -79,8 +82,7 @@ const ENTERPRISE_CTA: Record<Cycle, CtaAction> = {
 
 // Member (monetisation review §4.1): the community rung between Citizen
 // and Pro. No founding cohort, no strike-through story — one honest
-// price. Fiat cycles still route to the crypto annual checkout (Member
-// is deliberately NOT on the fiat waitlist — migration 072 note);
+// price. Fiat cycles still route to the crypto annual checkout;
 // monthly $12 arrives with fiat billing.
 const MEMBER_PRICES: Record<Cycle, { amt: string; per: string; note: string }> = {
   monthly: {
@@ -118,14 +120,13 @@ const PRICING_ROTATE_MS = 8000;
 
 export function Landing() {
   const [cycle, setCycle] = useState<Cycle>(DEFAULT_CYCLE);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [modalTier, setModalTier] = useState<'pro' | 'enterprise'>('pro');
   const [activeSection, setActiveSection] = useState<string>('top');
 
   // Founding seats remaining — wired to the real computed count
   // (GET /api/founding/spots → lib/founding-seats, decision D-4). The page
   // stays static; we progressively replace the marketing fallback once the
-  // real number loads. Both pills below read `spotsLeft ?? 847`.
+  // real number loads. While null the pills render an em dash — never a
+  // fabricated count; a fake number here would cost the audit-us position.
   const [spotsLeft, setSpotsLeft] = useState<number | null>(null);
   useEffect(() => {
     let alive = true;
@@ -139,7 +140,7 @@ export function Landing() {
       alive = false;
     };
   }, []);
-  const spotsDisplay = (spotsLeft ?? 847).toLocaleString('en-US');
+  const spotsDisplay = spotsLeft == null ? '—' : spotsLeft.toLocaleString('en-US');
 
   // ── Pricing carousel state (§10). Static grid is the SSR / no-JS /
   // reduced-motion / narrow-viewport / "compare all" rendering; the
@@ -195,17 +196,6 @@ export function Landing() {
     prGoTo(idx);
   }
 
-  function openWaitlist(tier: 'pro' | 'enterprise') {
-    setModalTier(tier);
-    setModalOpen(true);
-    captureBrowser({
-      event: 'plan_selected',
-      plan: `${tier}_founding_${cycle === 'annual-crypto' ? 'annual' : cycle}`,
-      billing_cycle: cycle,
-      payment_method: cycle === 'annual-crypto' ? 'crypto' : 'fiat',
-    });
-  }
-
   function trackCycleChange(nextCycle: Cycle) {
     setCycle(nextCycle);
     // Only fire plan_selected when the user deliberately moves off the
@@ -219,25 +209,6 @@ export function Landing() {
       });
     }
   }
-
-  function closeWaitlist() {
-    setModalOpen(false);
-  }
-
-  // Lock body scroll + Escape-to-close while modal is open.
-  useEffect(() => {
-    if (!modalOpen) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setModalOpen(false);
-    };
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.body.style.overflow = prev;
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [modalOpen]);
 
   // IntersectionObserver drives the nav-link active state as the viewer scrolls.
   useEffect(() => {
@@ -323,7 +294,7 @@ export function Landing() {
         </p>
         <p className="hero-meta">
           <span className="count">■ {spotsDisplay}</span> of <span className="count">1,000</span>{' '}
-          founding seats remaining · USD pricing · Pay in fiat or crypto
+          founding seats remaining · USD-quoted · crypto checkout · 14-day refund
         </p>
         <p className="hero-meta">
           Live feeds free on <span className="count">every tier</span> — you pay for
@@ -359,12 +330,12 @@ export function Landing() {
           <Pillar
             label="P-01 · GLOBE"
             title="The state of the world, on one screen — free for everyone."
-            body="Live vessels (AIS), aircraft (ADS-B), conflict events (GDELT 2.0) and weather, over the infrastructure that makes them interpretable: ~127,000 power-plant units, ~700 refineries, ~304,000 mineral deposits, ~3,800 seaports, ~7,500 airports, gas and oil pipelines, LNG terminals. Every layer carries its source and refresh timestamp inline. Live feeds are free on every tier — including free."
+            body="Aircraft (ADS-B), conflict events (GDELT 2.0), thermal anomalies (NASA FIRMS), night-time radiance (NASA Black Marble), chokepoint vessel coverage (AIS) and weather, over the infrastructure that makes them interpretable: ~127,000 power-plant units, ~700 refineries, ~304,000 mineral deposits, ~3,800 seaports, ~7,500 airports, gas and oil pipelines, LNG terminals. Every layer carries its source and refresh timestamp inline. Live feeds are free on every tier — including free."
           />
           <Pillar
             label="P-02 · AI ANALYST"
             title="Ask in plain English. It queries the database."
-            body="A Fable 5 analyst with a catalog of first-class tools wired directly into the live feeds and the platform's proprietary signal tables — no SQL, no guessing from documentation. Persona-aware: pick one of seven roles and the framing, tool selection and output density adapt. When the data can't support an answer, it says so."
+            body="A Claude analyst with a catalog of 23 first-class tools wired directly into the live feeds and the platform's proprietary signal tables — no SQL, no guessing from documentation. Persona-aware: pick one of seven roles and the framing, tool selection and output density adapt. When the data can't support an answer, it says so."
           />
           <Pillar
             label="P-03 · INTEL"
@@ -384,7 +355,7 @@ export function Landing() {
           <Pillar
             label="P-06 · BRIEFS"
             title="What eYKON publishes back."
-            body="A daily brief composed each morning from the live feeds, persona digests for seven roles, the convergence wire — and eYKON's own forecasts, sealed at issue and scored in public when they resolve. Reporting you can audit, not just read."
+            body="A daily brief composed each morning from the live feeds, persona digests for seven roles, the convergence wire — and eYKON's own forecasts, hashed at issue and scored in public when they resolve. Reporting you can audit, not just read."
           />
         </div>
         <div className="stat-strip">
@@ -393,15 +364,15 @@ export function Landing() {
           </div>
           <div className="stat sep">·</div>
           <div className="stat">
-            <span className="val">47</span> integrated feeds
+            <span className="val">3</span> independent physical sensors
           </div>
           <div className="stat sep">·</div>
           <div className="stat">
-            <span className="val">&lt; 60 s</span> refresh
+            <span className="val">23</span> live analyst tools
           </div>
           <div className="stat sep">·</div>
           <div className="stat">
-            <span className="val">25+</span> Intelligence Menu modules
+            <span className="val">22</span> live intelligence modules
           </div>
         </div>
       </section>
@@ -425,7 +396,7 @@ export function Landing() {
           <h2 className="section-title">
             The <span className="accent">Intelligence Menu</span>.
           </h2>
-          <p className="section-sub">Twenty-five modules. One operational picture.</p>
+          <p className="section-sub">Twenty-seven modules — twenty-two live today, five on the roadmap, labelled.</p>
         </div>
         <p className="intelligence-intro">
           Every module below is a different lens on the same live dataset — pick the ones
@@ -438,13 +409,13 @@ export function Landing() {
             foreground
             title="Financial & crypto market intelligence"
             code="Cluster C · IM-13 → IM-17"
-            lead="The core loop for traders: an event on the map becomes a ranked basket of affected instruments within seconds."
+            lead="The trader cluster: sanctions designations and commodity pricing are live today. The ranked-instruments loop (IM-13) is the roadmap's centrepiece — labelled, not sold as live."
             modules={[
-              ['IM-13', 'Asset Impact Lens', 'For any event on the globe, the ranked list of equities, commodities, FX, and crypto pairs historically correlated.'],
-              ['IM-14', 'Crypto Flow Monitor', 'Stablecoin issuance, large-wallet movements, exchange in/out flows during geopolitical events.'],
+              ['IM-13', 'Asset Impact Lens · ROADMAP', 'For any event on the globe, the ranked list of equities, commodities, FX, and crypto pairs historically correlated.'],
+              ['IM-14', 'Crypto Flow Monitor · ROADMAP', 'Stablecoin issuance, large-wallet movements, exchange in/out flows during geopolitical events.'],
               ['IM-15', 'Sanctions Tracker', 'New designations, delisting, and OFAC-class event timeline mapped to affected tickers.'],
               ['IM-16', 'Commodity Pricing Panel', 'Oil, gas, grain, metals with event overlays.'],
-              ['IM-17', 'Correlation Heatmap', 'User watchlist vs. global event stream; historical and live coefficients.'],
+              ['IM-17', 'Correlation Heatmap · ROADMAP', 'User watchlist vs. global event stream; historical and live coefficients.'],
             ]}
           />
           <Cluster
@@ -466,8 +437,8 @@ export function Landing() {
               ['IM-07', 'Energy Atlas', 'Refineries, LNG terminals, pipelines, power plants, and grid interconnectors.'],
               ['IM-08', 'Chokepoint Monitor', 'Strait-by-strait transit volumes, closures, and historical base rates.'],
               ['IM-09', 'Strategic Minerals', 'Cobalt, lithium, REE mine locations with ownership and export routes.'],
-              ['IM-10', 'Port & Logistics', 'Container-port throughput, dwell times, queue anomalies.'],
-              ['IM-11', 'Grid & Power Flow', 'ENTSO-E live load, cross-border flows, outage events.'],
+              ['IM-10', 'Port & Logistics · ROADMAP', 'Container-port throughput, dwell times, queue anomalies.'],
+              ['IM-11', 'Grid & Power Flow · ROADMAP', 'ENTSO-E live load, cross-border flows, outage events.'],
               ['IM-12', 'Pipeline Status Board', 'Nord Stream-class assets with state, flow, and incident history.'],
             ]}
           />
@@ -487,7 +458,7 @@ export function Landing() {
             code="Cluster E · IM-23 → IM-27"
             modules={[
               ['IM-23', 'AI Analyst (Claude-powered)', 'Plain-English querying of the full dataset with cited reasoning.'],
-              ['IM-24', 'Compound-Signal Alerts', 'Multi-condition triggers delivered via email, push, or webhook.'],
+              ['IM-24', 'Compound-Signal Alerts', 'Multi-condition triggers delivered via email, SMS and WhatsApp.'],
               ['IM-25', 'Personalized Briefings', "A daily digest tailored to the user's persona and watchlist."],
               ['IM-26', 'Calibration Ledger', 'Track record of every alert and analyst claim, scored over time.'],
               ['IM-27', 'Export & API', 'GeoJSON, CSV, and REST endpoints for external notebooks and pipelines.'],
@@ -496,7 +467,7 @@ export function Landing() {
         </div>
 
         <div className="see-in-action">
-          <a href="#pricing">▸ See every module in action — start free as Observer</a>
+          <a href="#pricing">▸ See the live modules in action — start free as Observer</a>
         </div>
       </section>
 
@@ -525,7 +496,7 @@ export function Landing() {
             Founding rate, <span className="accent">locked for life</span>.
           </h2>
           <p className="section-sub">
-            Four honest rungs. US dollars. Fiat or crypto. No hidden seats, no hidden fees.
+            Four honest rungs. US dollars, paid in crypto — fiat is on the roadmap, and we say so. No hidden seats, no hidden fees.
           </p>
         </div>
 
@@ -565,17 +536,6 @@ export function Landing() {
             >
               Annual + Crypto <span className="save-badge">−30%</span>
             </button>
-          </div>
-        </div>
-
-        <div className="waitlist-strip">
-          <div className="waitlist-strip-inner">
-            <div className="waitlist-strip-icon">⏱</div>
-            <div className="waitlist-strip-txt">
-              <strong>Fiat billing opens Week 2 post-launch.</strong> Secure 1 of{' '}
-              <span className="count">400</span> waitlist-reserved founding seats (of 1,000) —
-              or pay in crypto today to claim instantly.
-            </div>
           </div>
         </div>
 
@@ -641,7 +601,7 @@ export function Landing() {
               <span className="price-per">{member.per}</span>
             </div>
             <div className="price-note dim">{member.note}</div>
-            <CtaButton cta={memberCta} onWaitlist={openWaitlist} />
+            <CtaButton cta={memberCta} />
             <div className="tier-section-label">Everything in Citizen, plus</div>
             <ul className="tier-features">
               <li>
@@ -677,24 +637,24 @@ export function Landing() {
               <span className="price-per">{pro.per}</span>
             </div>
             <div className="price-note">Founding rate · locked for life</div>
-            <CtaButton cta={proCta} primary onWaitlist={openWaitlist} />
+            <CtaButton cta={proCta} primary />
             <div className="tier-section-label">Everything in Citizen, plus</div>
             <ul className="tier-features">
               <li>
-                <strong>All 25+ Intelligence Menu</strong> modules (IM-01 → IM-27)
+                <strong>Every live Intelligence Menu</strong> module — roadmap items as they land
               </li>
               <li>
                 <strong>SMS + WhatsApp</strong> alert delivery
               </li>
               <li>
-                <strong>IM-13 Asset Impact Lens</strong> +{' '}
-                <strong>IM-14 Crypto Flow Monitor</strong>
+                <strong>IM-15 Sanctions Tracker</strong> +{' '}
+                <strong>IM-16 Commodity Pricing</strong>
               </li>
               <li>
                 <strong>AI Analyst</strong> — 500 queries / month (IM-23)
               </li>
               <li>10 watchlists, 50 assets each</li>
-              <li>Compound-signal alerts (IM-24) · email + push</li>
+              <li>Compound-signal alerts (IM-24) · email · SMS · WhatsApp</li>
               <li>
                 Full data <strong>export</strong> — GeoJSON, CSV (IM-27)
               </li>
@@ -720,7 +680,7 @@ export function Landing() {
               <span className="price-per">{ent.per}</span>
             </div>
             <div className="price-note">3-seat minimum · locked for life</div>
-            <CtaButton cta={entCta} onWaitlist={openWaitlist} />
+            <CtaButton cta={entCta} />
             <div className="tier-section-label">Everything in Pro, plus</div>
             <ul className="tier-features">
               <li>
@@ -925,29 +885,32 @@ export function Landing() {
           <code>$99/mo</code> Pro, <code>$199/seat/mo</code> Enterprise) apply to everyone
           after the founding cohort is full.
         </Faq>
-        <Faq q="Why is fiat payment a waitlist instead of a direct purchase at launch?">
-          We&apos;re sequencing the launch. <strong>Crypto payments</strong> (via
-          NOWPayments) are live from day one — pay annually in USDC, USDT, BTC, or ETH and
-          claim your founding seat instantly. <strong>Fiat billing</strong> (via Lemon
-          Squeezy) activates in Week 2 post-launch. Until then,{' '}
-          <strong>400 of the 1,000 founding seats</strong> are reserved for the fiat waitlist,
-          allocated first-come, first-served by waitlist position. When fiat goes live, we
-          email the top 400 with a payment-authorization link at the Founding rate, locked
-          for life. Joining today costs nothing and keeps your seat warm.
+        <Faq q="When does fiat billing open?">
+          Not yet scheduled — and we would rather say that than promise a date.{' '}
+          <strong>Crypto payments</strong> (via NOWPayments) are live today: pay in USDC,
+          USDT, BTC, or ETH and claim your founding seat instantly, first come, first
+          served. We retired the old fiat waitlist rather than keep collecting names
+          against a date we could not honour. When fiat opens, the founding rate applies
+          to whatever seats remain — one pool of 1,000, no reservations, no queue.
         </Faq>
         <Faq q="I'm a crypto day-trader. What do I actually get that I couldn't cobble together myself?">
-          A single screen where a Strait of Hormuz incident becomes a ranked list of affected
-          crypto pairs in seconds, with historical base rates. You could theoretically piece
-          together AIS, ACLED, sanctions feeds, and correlation analysis yourself — but not
-          fast enough to trade on it. The <code>IM-13 Asset Impact Lens</code> and{' '}
-          <code>IM-14 Crypto Flow Monitor</code> modules are purpose-built for this loop.
+          A single screen where a Hormuz escalation, a refinery going dark on satellite
+          thermal, and a fresh OFAC designation land in one feed — with the infrastructure
+          context to interpret them, and an AI analyst with 23 tools over the live tables.
+          You could piece together ACLED, FIRMS, sanctions lists and a map yourself — but
+          not in one place, with one provenance trail. The ranked-instruments loop
+          (<code>IM-13</code>) is the roadmap&apos;s centrepiece and is labelled ROADMAP
+          until it ships — we don&apos;t sell it as live.
         </Faq>
         <Faq q="How fresh is the data?">
-          Every plan — including Citizen — receives real-time feeds: <code>ADS-B ~15s</code>,{' '}
-          <code>AIS ~60s</code>, <code>GDELT ~hourly</code>, static infrastructure daily.
-          Paid tiers differ on the intelligence layer — AI Analyst budget, the nine INTEL
-          workspaces, alerts and exports — never on the rawness of the map. Every data
-          point carries its source, license, and ingestion timestamp.
+          Every plan — including Citizen — gets the same live map. <code>ADS-B</code>{' '}
+          near-real-time, <code>GDELT</code> hourly, <code>thermal</code> per satellite
+          overpass, <code>night-lights</code> on NASA&apos;s ~9-day publication schedule,{' '}
+          <code>AIS</code> chokepoint coverage on a free tier we are upgrading. Every data
+          point carries its source, license and ingestion timestamp — and a degraded feed
+          says so on the layer instead of pretending. Paid tiers differ on the intelligence
+          layer — AI Analyst budget, the nine INTEL workspaces, alerts and exports — never
+          on the rawness of the map.
         </Faq>
         <Faq q="How does the crypto discount work in practice?">
           Select Annual billing, then toggle &quot;Annual + Crypto −30%&quot;. At checkout,
@@ -1124,13 +1087,6 @@ export function Landing() {
         </div>
       </footer>
 
-      {/* ─── WAITLIST MODAL ──────────────────────────────────────── */}
-      <WaitlistModal
-        open={modalOpen}
-        tier={modalTier}
-        onClose={closeWaitlist}
-        onTierChange={setModalTier}
-      />
     </div>
   );
 }
@@ -1180,27 +1136,8 @@ function Cluster({
   );
 }
 
-function CtaButton({
-  cta,
-  primary,
-  onWaitlist,
-}: {
-  cta: CtaAction;
-  primary?: boolean;
-  onWaitlist: (tier: 'pro' | 'enterprise') => void;
-}) {
+function CtaButton({ cta, primary }: { cta: CtaAction; primary?: boolean }) {
   const cls = primary ? 'tier-btn primary' : 'tier-btn';
-  if (cta.kind === 'waitlist') {
-    return (
-      <button
-        type="button"
-        className={cls}
-        onClick={() => onWaitlist(cta.tier)}
-      >
-        {cta.label}
-      </button>
-    );
-  }
   return (
     <Link href={cta.href} className={cls}>
       {cta.label}
@@ -1222,173 +1159,5 @@ function Faq({
       <summary className="faq-q">{q}</summary>
       <p className="faq-a">{children}</p>
     </details>
-  );
-}
-
-// ───────── Waitlist modal ─────────
-
-function WaitlistModal({
-  open,
-  tier,
-  onClose,
-  onTierChange,
-}: {
-  open: boolean;
-  tier: 'pro' | 'enterprise';
-  onClose: () => void;
-  onTierChange: (t: 'pro' | 'enterprise') => void;
-}) {
-  const emailRef = useRef<HTMLInputElement>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [msg, setMsg] = useState<{ text: string; tone: 'info' | 'success' | 'error' } | null>(
-    null,
-  );
-
-  useEffect(() => {
-    if (open) {
-      const t = setTimeout(() => emailRef.current?.focus(), 80);
-      return () => clearTimeout(t);
-    }
-    setMsg(null);
-  }, [open]);
-
-  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const form = e.currentTarget;
-    if (!form.checkValidity()) {
-      form.reportValidity();
-      return;
-    }
-    const data = Object.fromEntries(new FormData(form).entries());
-    setSubmitting(true);
-    setMsg({ text: 'Reserving your seat…', tone: 'info' });
-
-    try {
-      const res = await fetch('/api/waitlist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      if (res.ok) {
-        setMsg({
-          text: '✓ You are on the waitlist. Check your inbox for confirmation.',
-          tone: 'success',
-        });
-        form.reset();
-        setTimeout(onClose, 2600);
-      } else {
-        const body = await res.json().catch(() => ({}));
-        setMsg({
-          text: body?.error ?? 'Something went wrong. Please try again.',
-          tone: 'error',
-        });
-      }
-    } catch {
-      setMsg({
-        text: '✓ Received. We will email you when fiat billing opens.',
-        tone: 'success',
-      });
-      form.reset();
-      setTimeout(onClose, 2600);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <div
-      className={open ? 'modal-backdrop open' : 'modal-backdrop'}
-      aria-hidden={!open}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="waitlist-title"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="modal-card">
-        <button
-          type="button"
-          className="modal-close"
-          aria-label="Close"
-          onClick={onClose}
-        >
-          ×
-        </button>
-        <div className="modal-kicker">·· Fiat waitlist ··</div>
-        <h3 className="modal-title" id="waitlist-title">
-          Reserve your founding seat.
-        </h3>
-        <p className="modal-sub">
-          400 of the 1,000 founding seats are reserved for the fiat waitlist. When fiat
-          billing launches in Week 2 post-launch, we email the top 400 for payment
-          authorization at the Founding rate — locked for life. First-come, first-served.
-        </p>
-        <form className="waitlist-form" onSubmit={onSubmit} noValidate>
-          <div className="form-row">
-            <label htmlFor="wl-email">Email</label>
-            <input
-              ref={emailRef}
-              type="email"
-              id="wl-email"
-              name="email"
-              required
-              placeholder="you@domain.com"
-              autoComplete="email"
-            />
-          </div>
-          <div className="form-row">
-            <label htmlFor="wl-tier">Tier</label>
-            <select
-              id="wl-tier"
-              name="tier"
-              required
-              value={tier}
-              onChange={(e) => onTierChange(e.target.value as 'pro' | 'enterprise')}
-            >
-              <option value="pro">Pro · $29/mo founding</option>
-              <option value="enterprise">
-                Enterprise · $99/seat/mo founding (3-seat min)
-              </option>
-            </select>
-          </div>
-          <div className="form-row">
-            <label htmlFor="wl-note">
-              Anything we should know? <span className="form-optional">(optional)</span>
-            </label>
-            <textarea
-              id="wl-note"
-              name="note"
-              rows={2}
-              placeholder="Seat count, use case, timing…"
-            />
-          </div>
-          <label className="form-consent">
-            <input type="checkbox" name="consent" required />
-            <span>
-              I agree to be contacted by eYKON.ai about my waitlist seat. No marketing spam.
-            </span>
-          </label>
-          <button type="submit" className="btn-primary modal-submit" disabled={submitting}>
-            {submitting ? 'Reserving…' : 'Reserve my seat →'}
-          </button>
-          <div
-            className="form-msg"
-            role="status"
-            aria-live="polite"
-            style={{
-              color:
-                msg?.tone === 'success'
-                  ? 'var(--cyan)'
-                  : msg?.tone === 'error'
-                  ? 'var(--red)'
-                  : 'var(--text-secondary)',
-            }}
-          >
-            {msg?.text ?? ''}
-          </div>
-        </form>
-      </div>
-    </div>
   );
 }

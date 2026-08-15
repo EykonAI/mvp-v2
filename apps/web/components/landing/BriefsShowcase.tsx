@@ -21,7 +21,7 @@ const BRIEFS_TILES = [
   {
     label: 'B-03 · FORECASTS',
     title: 'Forecasts.',
-    body: 'eYKON’s own calibrated forecasts — weekly chokepoint transit counts, EIA crude-inventory draws — each sealed at issue (SHA-256 commit hash) and scored when it resolves. Every item opens to the full call: forecast vs. observed, the Brier score, and the source that resolved it.',
+    body: 'eYKON’s own calibrated forecasts — weekly chokepoint transit counts, EIA crude-inventory draws — each hashed at issue — a SHA-256 you can recompute yourself on the forecast page — and scored when it resolves. Every item opens to the full call: forecast vs. observed, the Brier score, and the source that resolved it.',
   },
   {
     label: 'B-04 · CONVERGENCE',
