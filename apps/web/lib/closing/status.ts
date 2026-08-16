@@ -18,7 +18,10 @@ export interface ClosingStatus {
   thermal48h: number | null;
   conflict48h: number | null;
   nightlightsEvents: number | null;
-  watchedFacilities: number | null;
+  /** Facilities sampled on the newest PUBLISHED night — not registry rows. */
+  nightlightsFacilities: number | null;
+  /** The newest published night (YYYY-MM-DD). NASA publishes ~9 days behind. */
+  nightlightsNewestNight: string | null;
   convergences21d: number | null;
   aisDaysSince: number | null; // 0 = fresh today; null = unknown
 }
@@ -42,12 +45,37 @@ export async function loadClosingStatus(): Promise<ClosingStatus> {
     }
   };
 
-  const [thermal48h, conflict48h, nightlightsEvents, watchedFacilities, convergences21d, aisNewest] =
+  // Night-lights coverage: facilities sampled on the newest PUBLISHED
+  // night, from the radiance table itself. The first version of this file
+  // counted firms_monitored_facilities (183,051) and called it "sites
+  // watched" — the exact §6.6 registry-rows-are-not-sites trap, on the
+  // page whose whole pitch is honesty. Count what was actually sampled.
+  const nightlights = (async (): Promise<{ n: number | null; night: string | null }> => {
+    try {
+      const { data: newest } = await admin
+        .from('blackmarble_facility_radiance')
+        .select('period')
+        .order('period', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const night = (newest as { period: string } | null)?.period ?? null;
+      if (!night) return { n: null, night: null };
+      const { count: c, error } = await admin
+        .from('blackmarble_facility_radiance')
+        .select('*', { count: 'exact', head: true })
+        .eq('period', night);
+      return { n: error ? null : (c ?? null), night };
+    } catch {
+      return { n: null, night: null };
+    }
+  })();
+
+  const [thermal48h, conflict48h, nightlightsEvents, nl, convergences21d, aisNewest] =
     await Promise.all([
       count('firms_thermal_anomalies', (q: any) => q.gte('ingested_at', hoursAgo(48))),
       count('conflict_events', (q: any) => q.gte('ingested_at', hoursAgo(48))),
       count('nightlights_significant_events'),
-      count('firms_monitored_facilities'),
+      nightlights,
       count('convergence_events', (q: any) => q.gte('created_at', hoursAgo(21 * 24))),
       (async () => {
         try {
@@ -69,5 +97,13 @@ export async function loadClosingStatus(): Promise<ClosingStatus> {
     aisDaysSince = Math.floor((Date.now() - new Date(aisNewest).getTime()) / 86_400_000);
   }
 
-  return { thermal48h, conflict48h, nightlightsEvents, watchedFacilities, convergences21d, aisDaysSince };
+  return {
+    thermal48h,
+    conflict48h,
+    nightlightsEvents,
+    nightlightsFacilities: nl.n,
+    nightlightsNewestNight: nl.night,
+    convergences21d,
+    aisDaysSince,
+  };
 }

@@ -40,7 +40,7 @@ export function HonestyBoard({ status }: { status: ClosingStatus }) {
           <div className="cs-hhead cs-hg">■ LIVE &amp; DENSE</div>
           <div className="cs-hrow"><span>FIRMS thermal</span><em>{fmt(status.thermal48h)} / 48h</em></div>
           <div className="cs-hrow"><span>GDELT conflict</span><em>{fmt(status.conflict48h)} / 48h</em></div>
-          <div className="cs-hrow"><span>Night-lights</span><em>{fmt(status.watchedFacilities)} sites watched</em></div>
+          <div className="cs-hrow"><span>Night-lights</span><em>{fmt(status.nightlightsFacilities)} facilities · night of {status.nightlightsNewestNight ?? '—'}</em></div>
           <div className="cs-hrow"><span>Convergence</span><em>{fmt(status.convergences21d)} / 21d</em></div>
           <div className="cs-hrow"><span>OFAC entity graph</span><em>weekly</em></div>
           <div className="cs-hrow" style={{ borderBottom: 0 }}><span>Infrastructure</span><em>~183k assets</em></div>
