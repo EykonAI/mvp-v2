@@ -1,0 +1,63 @@
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import './start.css';
+import { loadClosingStatus } from '@/lib/closing/status';
+import { ClosingPage } from './ClosingPage';
+
+/**
+ * /start — the closing landing page for campaign traffic (brief v1.3,
+ * PR D). One route, seven screens, one exit. /c and /q hand off here
+ * (PR E); the homepage keeps serving people who arrive already
+ * interested.
+ *
+ * Public: top-level route outside the (app) group, not in middleware
+ * APP_PATHS — no login wall, same posture as /c and /q.
+ *
+ * force-dynamic + no-store: the honesty board and the freshness of this
+ * page ARE the product. Next 14's Data Cache would freeze the first
+ * response until the next deploy (§17.6) — on a page whose middle
+ * screen says "queried live", a frozen response is a false claim.
+ */
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
+
+export const metadata: Metadata = {
+  title: 'Start — eYKON.ai',
+  description:
+    'We saw a national blackout from orbit. Live geopolitical sensors, a public forecast record, and 1,000 founding seats at $29/month locked for life.',
+  openGraph: {
+    title: 'eYKON.ai — We saw a national blackout from orbit',
+    description:
+      'Three NASA-sensed facilities, three clear nights, one monotonic collapse in emitted light. The founding rate is live: $29/month, locked for life.',
+    type: 'website',
+  },
+};
+
+// Flipped by PR F when the recording lands in /public/start/. Until then
+// the video slot renders its styled fallback — never a broken player.
+const VIDEO_SRC: string | null = null;
+const VIDEO_POSTER: string | null = null;
+
+export default async function StartPage() {
+  const status = await loadClosingStatus();
+  const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? null;
+
+  return (
+    <main className="cs-page">
+      <header className="cs-header">
+        <Link href="/" prefetch={false} className="cs-logo">
+          ⊕ EYKON<span>.AI</span>
+        </Link>
+        <span className="cs-mono" style={{ fontSize: 10, letterSpacing: '0.14em', color: 'var(--ink-faint)' }}>
+          THE EVIDENCE FIRST · THE OFFER AFTER
+        </span>
+      </header>
+      <ClosingPage
+        status={status}
+        turnstileSiteKey={turnstileSiteKey}
+        videoSrc={VIDEO_SRC}
+        videoPoster={VIDEO_POSTER}
+      />
+    </main>
+  );
+}
