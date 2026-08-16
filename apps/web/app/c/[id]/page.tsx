@@ -117,8 +117,13 @@ export default async function PublicConvergencePage({ params }: { params: { id: 
             This is one live signal from eYKON — maritime, aviation, conflict and energy feeds fused on a single globe, with an AI analyst that cites its sources and a calibration ledger that scores its own predictions. Convergences like this fire automatically when independent domains move together in the same place.
           </p>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-            <TrackedCta href={SIGNUP(c.id)} source="newsjack" contentId={c.id} style={{ display: 'inline-block', fontFamily: 'var(--f-mono)', fontSize: 11.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--bg-void, #0a0e12)', background: 'var(--teal)', borderRadius: 4, padding: '10px 18px', textDecoration: 'none', fontWeight: 600 }}>
-              Explore the live view — free
+            {/* Primary hand-off (brief §9, PR E): campaign traffic goes to
+                /start — the closing page — not straight to signup. The utm
+                params mark the internal hand-off source; the visitor's
+                ORIGINAL channel is already locked in as first-touch
+                $set_once person properties from this page's view event. */}
+            <TrackedCta href={`/start?utm_source=newsjack&utm_content=${encodeURIComponent(c.id)}`} source="newsjack" contentId={c.id} style={{ display: 'inline-block', fontFamily: 'var(--f-mono)', fontSize: 11.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--bg-void, #0a0e12)', background: 'var(--teal)', borderRadius: 4, padding: '10px 18px', textDecoration: 'none', fontWeight: 600 }}>
+              See how we found this →
             </TrackedCta>
             {/* Week Pass (mig 075): the impulse exit while an event is
                 live — full Pro for 7 days, one-off, expires on its own. */}
