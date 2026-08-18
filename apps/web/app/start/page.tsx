@@ -1,14 +1,15 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import './start.css';
 import { loadClosingStatus } from '@/lib/closing/status';
 import { ClosingPage } from './ClosingPage';
 
 /**
- * /start — the closing landing page for campaign traffic (brief v1.3,
- * PR D). One route, seven screens, one exit. /c and /q hand off here
- * (PR E); the homepage keeps serving people who arrive already
- * interested.
+ * /start — the closing landing page for campaign traffic (brief v1.4,
+ * PRs D/G/H). One route, THREE STEPS, one exit: who you are → your
+ * pitch → your setup. /c and /q hand off here (PR E); the homepage keeps
+ * serving people who arrive already interested.
+ *
+ * ?p=<persona> deep-links a channel straight to its own pitch.
  *
  * Public: top-level route outside the (app) group, not in middleware
  * APP_PATHS — no login wall, same posture as /c and /q.
@@ -44,14 +45,6 @@ export default async function StartPage() {
 
   return (
     <main className="cs-page">
-      <header className="cs-header">
-        <Link href="/" prefetch={false} className="cs-logo">
-          ⊕ EYKON<span>.AI</span>
-        </Link>
-        <span className="cs-mono" style={{ fontSize: 10, letterSpacing: '0.14em', color: 'var(--ink-faint)' }}>
-          THE EVIDENCE FIRST · THE OFFER AFTER
-        </span>
-      </header>
       <ClosingPage
         status={status}
         turnstileSiteKey={turnstileSiteKey}

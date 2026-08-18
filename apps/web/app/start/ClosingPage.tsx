@@ -1,24 +1,34 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ClosingStatus } from '@/lib/closing/status';
+import { PERSONA_BY_ID, isPersonaId, type PersonaId } from '@/lib/closing/personas';
 import { captureWithFirstTouch, campaignPropsFromLocation } from '@/lib/analytics/utm';
 import { TrackedCta } from '@/components/marketing/CampaignTracking';
 import { ProofBlock } from '@/components/closing/ProofBlock';
 import { FounderVideo } from '@/components/closing/FounderVideo';
 import { HonestyBoard } from '@/components/closing/HonestyBoard';
+import { PersonaGrid } from '@/components/closing/PersonaGrid';
+import { PersonaPitch } from '@/components/closing/PersonaPitch';
 import { QualifyForm } from '@/components/closing/QualifyForm';
 import { SeatCounter } from '@/components/closing/SeatCounter';
 
 /**
- * /start — the closing page shell (brief v1.3 §4). Seven screens, one
- * exit. closing_page_viewed fires once with the utm_* fields and writes
- * first-touch person properties; proof_scrolled {depth} fires once per
- * screen at 50% visibility, so the funnel shows exactly which screen
- * loses people.
+ * /start — the three-step persona funnel (brief v1.4 §4.0).
+ *
+ *   1 · WHO + PROOF   persona grid, then the Kuwait receipt.
+ *   2 · THE PITCH     tailored pitch, founder video, live honesty board.
+ *   3 · QUALIFY       six questions → offer (if the offer is for them)
+ *                     → checkout.
+ *
+ * ?p=<persona> deep-links straight to step 2, so a post that already
+ * knows its audience never asks the question twice.
+ *
+ * proof_scrolled {depth} is reused for step depth rather than cutting a
+ * second taxonomy — one source of truth for the funnel (PR B).
  */
-
-const SCREEN_IDS = ['proof', 'video', 'what', 'honesty', 'qualify', 'offer', 'checkout'] as const;
+const STEP_CTX = ['· who you are', '· your pitch', '· your setup'];
 
 export function ClosingPage({
   status,
@@ -31,280 +41,263 @@ export function ClosingPage({
   videoSrc: string | null;
   videoPoster: string | null;
 }) {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [persona, setPersona] = useState<PersonaId | null>(null);
+  const [offerUnlocked, setOfferUnlocked] = useState(false);
+  const [altPath, setAltPath] = useState<string | null>(null);
   const viewFired = useRef(false);
   const depthsFired = useRef<Set<number>>(new Set());
-  const [cadence, setCadence] = useState<'annual' | 'monthly'>('annual');
 
   useEffect(() => {
     if (viewFired.current) return;
     viewFired.current = true;
     captureWithFirstTouch({ event: 'closing_page_viewed', ...campaignPropsFromLocation() });
+
+    // Deep-link: ?p=trader lands on the pitch already tailored.
+    const p = new URLSearchParams(window.location.search).get('p');
+    if (isPersonaId(p)) {
+      setPersona(p);
+      setStep(2);
+    }
   }, []);
 
-  useEffect(() => {
-    const obs = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) {
-          if (!e.isIntersecting) continue;
-          const depth = SCREEN_IDS.indexOf(e.target.id as (typeof SCREEN_IDS)[number]) + 1;
-          if (depth > 0 && !depthsFired.current.has(depth)) {
-            depthsFired.current.add(depth);
-            captureWithFirstTouch({ event: 'proof_scrolled', depth });
-          }
-        }
-      },
-      { threshold: 0.5 },
-    );
-    for (const id of SCREEN_IDS) {
-      const el = document.getElementById(id);
-      if (el) obs.observe(el);
+  const go = useCallback((n: 1 | 2 | 3) => {
+    setStep(n);
+    if (!depthsFired.current.has(n)) {
+      depthsFired.current.add(n);
+      captureWithFirstTouch({ event: 'proof_scrolled', depth: n });
     }
-    return () => obs.disconnect();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
+
+  const choose = useCallback(
+    (id: PersonaId) => {
+      setPersona(id);
+      go(2);
+    },
+    [go],
+  );
+
+  const unlockOffer = useCallback((destination: string) => {
+    setOfferUnlocked(true);
+    // A /pricing destination IS the founding-rate CTA below, so there is
+    // no second door to show. Anything else is a genuine alternative.
+    setAltPath(destination.startsWith('/pricing') ? null : destination);
+    requestAnimationFrame(() =>
+      document.getElementById('offer')?.scrollIntoView({ behavior: 'smooth' }),
+    );
+  }, []);
+
+  // The alternative path, labelled for what it actually is.
+  const altLabel = !altPath
+    ? null
+    : altPath.startsWith('mailto:partners')
+      ? 'Or talk to us about a Founding Partner seat →'
+      : altPath.startsWith('mailto:verify')
+        ? 'Or get verified for press access →'
+        : 'Or start free as Observer →';
+
+  const p = persona ? PERSONA_BY_ID[persona] : null;
 
   return (
-    <div className="cs-shell">
-      <ProofBlock />
-      <div style={{ margin: '-28px 0 0', paddingBottom: 40, display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
-        <a href="#qualify" className="cs-btn">
-          See what we&apos;re watching tonight →
-        </a>
-        <span className="cs-mono" style={{ fontSize: 10.5, color: 'var(--ink-dim)', letterSpacing: '0.09em' }}>
-          NO SIGNUP WALL — THE FORM COMES AFTER THE EVIDENCE
-        </span>
-      </div>
+    <>
+      <header className="cs-header">
+        <Link href="/" prefetch={false} className="cs-logo">
+          ⊕ EYKON<span>.AI</span>
+        </Link>
+        <div className="cs-rail">
+          <span className="cs-raillbl">
+            STEP <b>{step}</b>/3 <span className="cs-railctx">{STEP_CTX[step - 1]}</span>
+          </span>
+          <span
+            className="cs-segs"
+            role="progressbar"
+            aria-valuemin={1}
+            aria-valuemax={3}
+            aria-valuenow={step}
+            aria-label="Progress"
+          >
+            {[1, 2, 3].map((i) => (
+              <i key={i} className={i <= step ? 'cs-seg cs-on' : 'cs-seg'} />
+            ))}
+          </span>
+        </div>
+      </header>
 
-      <FounderVideo src={videoSrc} poster={videoPoster} />
-
-      {/* Screen 3 — what it is. Three sentences, not six pillars (§4.3). */}
-      <section className="cs-section" id="what">
-        <div className="cs-kicker">·· What this is ··</div>
-        <h2 className="cs-h2">Three sentences. Not six pillars.</h2>
-        <div className="cs-three">
-          <div className="cs-card">
-            <div className="cs-n">01 · THE MAP IS FREE</div>
-            <h3>Every layer, every tier.</h3>
-            <p>
-              Aircraft, conflict, thermal anomalies, night-time radiance and chokepoint
-              vessels over the infrastructure that makes them interpretable. Source and
-              refresh timestamp inline on every layer.
+      <div className="cs-shell">
+        {/* ── STEP 1 · WHO + PROOF ─────────────────────────────── */}
+        {step === 1 && (
+          <section className="cs-section">
+            <div className="cs-kicker">S-01 · the only question that matters first</div>
+            <h1 className="cs-h1">
+              What describes you <span className="cs-dim">best?</span>
+            </h1>
+            <p className="cs-sub">
+              eYKON adapts to how you work — the pitch, the tools, even the analyst&apos;s framing.
+              Pick one; everything after this is built for you.
             </p>
-          </div>
-          <div className="cs-card">
-            <div className="cs-n">02 · THE INTELLIGENCE IS THE PRODUCT</div>
-            <h3>Signals, not dashboards.</h3>
-            <p>
-              Convergence scored on independent sensor classes — not on how many news feeds
-              repeated the same story. An AI analyst with 23 tools wired to the live tables.
-            </p>
-          </div>
-          <div className="cs-card">
-            <div className="cs-n">03 · THE RECORD IS PUBLIC</div>
-            <h3>Wrong calls left standing.</h3>
-            <p>
-              Every forecast is hashed before the outcome, scored against ground truth and
-              published — recompute any hash yourself on its forecast page. Including the
-              ones that went badly. Especially those.
-            </p>
-          </div>
-        </div>
-      </section>
+            <PersonaGrid selected={persona} onSelect={choose} />
+            <hr className="cs-rule" />
+            <ProofBlock />
+          </section>
+        )}
 
-      <HonestyBoard status={status} />
-
-      <QualifyForm turnstileSiteKey={turnstileSiteKey} />
-
-      {/* Screen 6 — the offer (§4.6). */}
-      <section className="cs-section" id="offer">
-        <div className="cs-kicker">·· Founding cohort ··</div>
-        <h2 className="cs-h2">Founding rate. Locked for life.</h2>
-        <SeatCounter />
-
-        <div className="cs-twop">
-          <div className="cs-pcard cs-rec">
-            <div className="cs-pflag">RECOMMENDED · SAVE 30%</div>
-            <div className="cs-pk">ANNUAL</div>
-            <div className="cs-pv">
-              $243.60<span>/ year</span>
-            </div>
-            <div className="cs-pe">effectively $20.30 / month · two months free</div>
-            <div className="cs-pc">USDC · USDT · BTC · ETH · + L2</div>
-          </div>
-          <div className="cs-pcard">
-            <div className="cs-pk">MONTHLY</div>
-            <div className="cs-pv">
-              $29.00<span>/ month</span>
-            </div>
-            <div className="cs-pe">the low-commitment door · cancel by not renewing</div>
-            <div className="cs-pc">USDC · USDT on Base or Polygon</div>
-          </div>
-        </div>
-        <p className="cs-mono" style={{ maxWidth: 830, marginTop: 12, fontSize: 11, color: 'var(--ink-dim)', lineHeight: 1.7 }}>
-          Same founding rate either way — <span style={{ color: 'var(--teal)' }}>locked for life</span>, including
-          after the feeds are complete. Nothing auto-renews: each period is a payment you
-          actively make, and we remind you before it lapses.
-        </p>
-
-        <div className="cs-kicker" style={{ marginTop: 30 }}>
-          ·· What you are accepting ··
-        </div>
-        <div className="cs-lim">
-          <div className="cs-lrow">
-            <div className="cs-lno">
-              LIMIT 1<em>Data feeds</em>
-            </div>
-            <div className="cs-lsay">
-              The feeds are not there yet. AIS is thin; four of nine INTEL workspaces are
-              models, badged ILLUSTRATIVE. Initial use cases are genuinely limited — the
-              roadmap to full coverage runs about twelve months.
-            </div>
-            <div className="cs-lget">
-              Your price is locked for life, <strong>including after the feeds are complete</strong>.
-              You buy the finished platform at the unfinished price. That gap is the whole
-              reason this rate exists.
-            </div>
-          </div>
-          <div className="cs-lrow">
-            <div className="cs-lno">
-              LIMIT 2<em>Usage caps</em>
-            </div>
-            <div className="cs-lsay">
-              Token-consuming features are capped. Pro includes 500 AI Analyst queries a
-              month; Deep Analysis and dossier exports draw on the same budget. Heavy users
-              will hit the ceiling.
-            </div>
-            <div className="cs-lget">
-              Top up mid-month without changing plan — <strong>Query Pack, $5 for +25 queries</strong>,
-              stackable, on any plan. No upgrade, no renegotiation.
-            </div>
-          </div>
-          <div className="cs-lrow" style={{ borderBottom: 0 }}>
-            <div className="cs-lno">
-              LIMIT 3<em>Payment rail</em>
-            </div>
-            <div className="cs-lsay">
-              Crypto only at this stage. Fiat billing does not exist and we are not going to
-              pretend otherwise. Nothing auto-renews — each period is a payment you actively
-              make, and we remind you before it lapses.
-            </div>
-            <div className="cs-lget">
-              14-day full refund, single click, settled in USDC. Quoted in USD-equivalent,
-              locked 20 minutes at checkout. Nothing can silently charge you, because
-              nothing holds a card.
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Screen 7 — checkout (§4.7). Two paid options, never four. */}
-      <section className="cs-section" id="checkout" style={{ borderBottom: 0 }}>
-        <div className="cs-kicker">·· Checkout ··</div>
-        <h2 className="cs-h2">Pay in crypto. Two minutes.</h2>
-        <div className="cs-co">
-          <div className="cs-copanel">
-            <div className="cs-mono" style={{ fontSize: 10, letterSpacing: '0.15em', color: 'var(--ink-dim)', marginBottom: 11 }}>
-              T-02 · PRO · FOUNDING
-            </div>
-            <div className="cs-seg">
-              <button
-                type="button"
-                className={cadence === 'annual' ? 'cs-segb cs-on' : 'cs-segb'}
-                onClick={() => setCadence('annual')}
-              >
-                ANNUAL — SAVE 30%
+        {/* ── STEP 2 · THE PITCH ───────────────────────────────── */}
+        {step === 2 && p && (
+          <section className="cs-section">
+            <button type="button" className="cs-back" onClick={() => go(1)}>
+              ← Change role
+            </button>
+            <PersonaPitch persona={p} />
+            <FounderVideo src={videoSrc} poster={videoPoster} />
+            <hr className="cs-rule" />
+            <HonestyBoard status={status} />
+            <div className="cs-actions">
+              <button type="button" className="cs-btn" onClick={() => go(3)}>
+                This is me — continue →
               </button>
-              <button
-                type="button"
-                className={cadence === 'monthly' ? 'cs-segb cs-on' : 'cs-segb'}
-                onClick={() => setCadence('monthly')}
-              >
-                MONTHLY
+              <button type="button" className="cs-btn cs-ghost" onClick={() => go(1)}>
+                Not quite
               </button>
             </div>
-            {cadence === 'annual' ? (
+          </section>
+        )}
+
+        {/* ── STEP 3 · QUALIFY → OFFER → CHECKOUT ──────────────── */}
+        {step === 3 && p && (
+          <section className="cs-section">
+            <button type="button" className="cs-back" onClick={() => go(2)}>
+              ← Back
+            </button>
+            <div className="cs-kicker">S-03 · last step before your seat</div>
+            <h1 className="cs-h1">
+              Tell us what you <span className="cs-dim">watch.</span>
+            </h1>
+            <p className="cs-sub">
+              About a minute. It pre-configures your workspace and tells us whether our sensors
+              actually cover your beat — before you&apos;ve paid anything.
+            </p>
+            <QualifyForm
+              persona={p}
+              turnstileSiteKey={turnstileSiteKey}
+              onOfferUnlocked={unlockOffer}
+            />
+
+            {offerUnlocked && (
               <>
-                <div className="cs-strike" style={{ marginTop: 14 }}>
-                  $1,009.80 / yr standard
+                <hr className="cs-rule" id="offer" />
+                <div className="cs-kicker">·· Founding cohort ··</div>
+                <h2 className="cs-h2">Founding rate. Locked for life.</h2>
+                <SeatCounter />
+
+                <div className="cs-twop">
+                  <div className="cs-pcard cs-rec">
+                    <div className="cs-pflag">RECOMMENDED · SAVE 30%</div>
+                    <div className="cs-pk">ANNUAL</div>
+                    <div className="cs-pv">
+                      $243.60<span>/ year</span>
+                    </div>
+                    <div className="cs-pe">effectively $20.30 / month · two months free</div>
+                    <div className="cs-pc">USDC · USDT · BTC · ETH · + L2</div>
+                  </div>
+                  <div className="cs-pcard">
+                    <div className="cs-pk">MONTHLY</div>
+                    <div className="cs-pv">
+                      $29.00<span>/ month</span>
+                    </div>
+                    <div className="cs-pe">the low-commitment door · cancel by not renewing</div>
+                    <div className="cs-pc">USDC · USDT on Base or Polygon</div>
+                  </div>
                 </div>
-                <div className="cs-price">
-                  $243.60 <span>/ year</span>
+
+                <div className="cs-kicker" style={{ marginTop: 30 }}>
+                  ·· What you are accepting ··
                 </div>
-                <div className="cs-mono" style={{ fontSize: 10, color: 'var(--teal)', marginTop: 7, letterSpacing: '0.1em' }}>
-                  = $20.30 / MO · LOCKED FOR LIFE
+                <div className="cs-lim">
+                  <div className="cs-lrow">
+                    <div className="cs-lno">
+                      LIMIT 1<em>Data feeds</em>
+                    </div>
+                    <div className="cs-lsay">
+                      The feeds are not all there yet. Four of nine INTEL workspaces are models,
+                      badged ILLUSTRATIVE, and vessel coverage is chokepoint-only. The roadmap to
+                      full coverage runs about twelve months.
+                    </div>
+                    <div className="cs-lget">
+                      Your price is locked for life, <strong>including after the feeds are complete</strong>.
+                      You buy the finished platform at the unfinished price. That gap is the whole
+                      reason this rate exists.
+                    </div>
+                  </div>
+                  <div className="cs-lrow">
+                    <div className="cs-lno">
+                      LIMIT 2<em>Usage caps</em>
+                    </div>
+                    <div className="cs-lsay">
+                      Token-consuming features are capped. Pro includes 500 AI Analyst queries a
+                      month; Deep Analysis and dossier exports draw on the same budget.
+                    </div>
+                    <div className="cs-lget">
+                      Top up mid-month without changing plan — <strong>Query Pack, $5 for +25
+                      queries</strong>, stackable, on any plan.
+                    </div>
+                  </div>
+                  <div className="cs-lrow" style={{ borderBottom: 0 }}>
+                    <div className="cs-lno">
+                      LIMIT 3<em>Payment rail</em>
+                    </div>
+                    <div className="cs-lsay">
+                      Crypto only at this stage. Fiat billing does not exist and we are not going to
+                      pretend otherwise. Nothing auto-renews — each period is a payment you actively
+                      make, and we remind you before it lapses.
+                    </div>
+                    <div className="cs-lget">
+                      14-day full refund, single click, settled in USDC. Nothing can silently charge
+                      you, because nothing holds a card.
+                    </div>
+                  </div>
                 </div>
-                <div className="cs-coins">
-                  <span className="cs-coin">USDC</span>
-                  <span className="cs-coin">USDT</span>
-                  <span className="cs-coin">BTC</span>
-                  <span className="cs-coin">ETH</span>
+
+                <div className="cs-actions" style={{ marginTop: 26 }}>
+                  <TrackedCta
+                    href={
+                      p.id === 'risk'
+                        ? '/pricing?plan=enterprise_founding_annual'
+                        : '/pricing?plan=pro_founding_annual'
+                    }
+                    source="closing"
+                    contentId={null}
+                  >
+                    <span className="cs-btn">Claim founding seat — annual →</span>
+                  </TrackedCta>
+                  <TrackedCta href="/pricing?plan=pro_founding_monthly" source="closing" contentId={null}>
+                    <span className="cs-btn cs-ghost">Or $29 / month →</span>
+                  </TrackedCta>
                 </div>
-              </>
-            ) : (
-              <>
-                <div className="cs-strike" style={{ marginTop: 14 }}>
-                  $84.15 / mo standard-equivalent
-                </div>
-                <div className="cs-price">
-                  $29.00 <span>/ month</span>
-                </div>
-                <div className="cs-mono" style={{ fontSize: 10, color: 'var(--teal)', marginTop: 7, letterSpacing: '0.1em' }}>
-                  SAME RATE · LOCKED FOR LIFE
-                </div>
-                <div className="cs-coins">
-                  <span className="cs-coin">USDC · Base</span>
-                  <span className="cs-coin">USDT · Polygon</span>
-                </div>
+
+                {/* The persona's own door, kept beside the rate rather than
+                    in place of it — every persona may claim the founding
+                    rate, and the alternative is offered, not imposed. */}
+                {altPath && altLabel && (
+                  <p className="cs-fine">
+                    <a href={altPath} className="cs-inline">
+                      {altLabel}
+                    </a>
+                  </p>
+                )}
+                <p className="cs-fine">
+                  Not ready? The <TrackedCta href="/pricing?plan=week_pass" source="closing" contentId={null}><span className="cs-inline">$9 Week Pass</span></TrackedCta> is everything in Pro for seven days, and Observer is free forever.
+                </p>
               </>
             )}
-            <div className="cs-note">
-              Quoted in USD-equivalent, locked 20 minutes at checkout. Nothing auto-renews.
-              14-day full refund in USDC.
-            </div>
-            <div style={{ marginTop: 18 }}>
-              <TrackedCta
-                href={cadence === 'annual' ? '/pricing?plan=pro_founding_annual' : '/pricing?plan=pro_founding_monthly'}
-                source="closing"
-                contentId={null}
-                style={{ display: 'inline-block' }}
-              >
-                <span className="cs-btn">Claim founding seat →</span>
-              </TrackedCta>
-            </div>
-          </div>
-          <div className="cs-copanel">
-            <div className="cs-mono" style={{ fontSize: 10, letterSpacing: '0.15em', color: 'var(--ink-dim)', marginBottom: 11 }}>
-              NOT READY TO PAY?
-            </div>
-            <h3 className="cs-h2" style={{ fontSize: 15 }}>
-              Week Pass · $9
-            </h3>
-            <p className="cs-sub" style={{ fontSize: 12.5, marginBottom: 16 }}>
-              Everything in Pro for 7 days. No auto-renew — it expires.
-            </p>
-            <TrackedCta href="/pricing?plan=week_pass" source="closing" contentId={null} style={{ display: 'inline-block' }}>
-              <span className="cs-btn cs-ghost cs-sm">Get a week pass →</span>
-            </TrackedCta>
-            <h3 className="cs-h2" style={{ fontSize: 15, marginTop: 22 }}>
-              Observer · free forever
-            </h3>
-            <p className="cs-sub" style={{ fontSize: 12.5, marginBottom: 16 }}>
-              Live map, daily brief, 5 analyst queries/mo. No card.
-            </p>
-            <TrackedCta href="/auth/signin?next=/app" source="closing" contentId={null} style={{ display: 'inline-block' }}>
-              <span className="cs-btn cs-ghost cs-sm">Start free →</span>
-            </TrackedCta>
-            <div className="cs-note" style={{ marginTop: 20 }}>
-              Your email is already in the pipeline from the form above — a bounce here
-              still leaves a qualified lead.
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <div className="cs-footer">
-        eYKON.ai · geopolitical intelligence · detected from open-source data. Not a
-        financial advisor; signals are decision-support, not trade recommendations.
+          </section>
+        )}
       </div>
-    </div>
+
+      <footer className="cs-footer">
+        <span className="cs-spine">Don&apos;t trust us. Audit us.</span> · public sensor data ·
+        decision-support, not trade recommendations
+      </footer>
+    </>
   );
 }
