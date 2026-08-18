@@ -8,9 +8,12 @@ import { captureBrowser } from '@/lib/analytics/client';
  * GET /api/founding/spots the homepage uses — derived from the purchases
  * ledger, honestly computed, never hardcoded.
  *
- * While loading (or on error) it renders an em dash. A fabricated
- * fallback count on the one number this page tells readers to audit
- * would cost the entire "don't trust us, audit us" position.
+ * Honest-scarcity rule, tightened in v1.4 (§4.0): the number is live or
+ * the counter is NOT SHOWN. The linear page rendered an em dash; ZL's
+ * prototype hides the element outright, which is cleaner — no number and
+ * no puzzle. A fabricated fallback on the one figure this page tells
+ * readers to audit would cost the whole "don't trust us, audit us"
+ * position, and a dash still asks the reader to wonder.
  *
  * offer_viewed fires once when the counter scrolls into view, carrying
  * the number the visitor actually saw.
@@ -52,8 +55,11 @@ export function SeatCounter() {
     return () => obs.disconnect();
   }, []);
 
-  const display = spotsLeft == null ? '—' : spotsLeft.toLocaleString('en-US');
-  const pct = spotsLeft == null ? 0 : Math.max(2, Math.round(((1000 - spotsLeft) / 1000) * 100));
+  // Not loaded, or the endpoint failed: render nothing at all.
+  if (spotsLeft == null) return <div ref={ref} />;
+
+  const display = spotsLeft.toLocaleString('en-US');
+  const pct = Math.max(2, Math.round(((1000 - spotsLeft) / 1000) * 100));
 
   return (
     <div className="cs-counter" ref={ref}>
