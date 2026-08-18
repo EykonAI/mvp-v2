@@ -32,23 +32,25 @@ declare global {
   }
 }
 
+// The five personas of the three-step funnel (brief v1.4 §4.0,
+// migration 108). Kept in step with the API's PERSONAS set — a slug
+// that disagrees with the server is a 400 on every submission.
 const PERSONAS = [
-  ['day-trader', 'Day-trader'],
-  ['osint-analyst', 'OSINT analyst'],
-  ['commodities-desk', 'Commodities desk'],
+  ['trader', 'Day-trader'],
+  ['analyst', 'OSINT analyst'],
   ['journalist', 'Journalist'],
-  ['corporate-risk', 'Corporate risk'],
-  ['researcher-ngo', 'Researcher / NGO'],
-  ['other', 'Other'],
+  ['risk', 'Risk / commodities desk'],
+  ['citizen', 'Curious citizen'],
 ] as const;
 
+// Theatres are pure geography — they name what the sensors cover.
 const THEATRES = [
-  ['hormuz-red-sea', 'Hormuz / Red Sea'],
-  ['russian-refineries', 'Russian refineries'],
-  ['sanctions-shadow-fleet', 'Sanctions & shadow fleet'],
-  ['power-grid', 'Power & grid'],
-  ['critical-minerals', 'Critical minerals'],
-  ['taiwan-scs', 'Taiwan / SCS'],
+  ['hormuz', 'Hormuz'],
+  ['red-sea', 'Red Sea'],
+  ['black-sea', 'Black Sea'],
+  ['taiwan-strait', 'Taiwan Strait'],
+  ['malacca', 'Malacca'],
+  ['gulf-of-guinea', 'Gulf of Guinea'],
 ] as const;
 
 type Phase = 'idle' | 'submitting' | 'done' | 'error';

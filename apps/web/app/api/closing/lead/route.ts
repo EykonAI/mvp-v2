@@ -24,24 +24,73 @@ export const dynamic = 'force-dynamic';
  *     one conversion this page is measured by.
  */
 
-const PERSONAS = new Set([
-  'day-trader',
-  'osint-analyst',
-  'commodities-desk',
-  'journalist',
-  'corporate-risk',
-  'researcher-ngo',
-  'other',
+// The five personas of the three-step funnel (brief v1.4 §4.0,
+// migration 108). Each keys a pitch, a destination and a lead score.
+const PERSONAS = new Set(['trader', 'analyst', 'journalist', 'risk', 'citizen']);
+
+// Theatres are pure geography now — they map to what the sensors
+// actually cover, not to topics. Six offered, up to three chosen.
+const THEATRES = new Set([
+  'hormuz',
+  'red-sea',
+  'black-sea',
+  'taiwan-strait',
+  'malacca',
+  'gulf-of-guinea',
 ]);
 
-const THEATRES = new Set([
-  'hormuz-red-sea',
-  'russian-refineries',
-  'sanctions-shadow-fleet',
-  'power-grid',
-  'critical-minerals',
-  'taiwan-scs',
+const MARKETS = new Set([
+  'oil-gas',
+  'metals',
+  'grains',
+  'fx',
+  'crypto',
+  'equities',
+  'not-trading',
 ]);
+
+const NEEDS = new Set([
+  'realtime-alerts',
+  'daily-brief',
+  'ask-analyst',
+  'audited-record',
+  'community',
+]);
+
+const PAY = new Set(['crypto_today', 'fiat_waiting', 'unsure']);
+const PUBLISHES = new Set(['no', 'under_10k', 'over_10k']);
+
+/**
+ * Where this lead should land after submitting — decided SERVER-side so
+ * the page cannot drift from it, and so the rule can change without a
+ * deploy of the client. The page keeps a fallback for offline failure,
+ * but this response is authoritative.
+ *
+ * The ordering is deliberate: a large publisher is a Founding Partner
+ * conversation before it is a self-serve sale, and a fiat-only answer
+ * must never be routed into a crypto checkout it cannot complete.
+ */
+function destinationFor(input: {
+  persona: string;
+  pay: string | null;
+  publishes: string | null;
+}): string {
+  if (input.publishes === 'over_10k') {
+    return 'mailto:partners@eykon.ai?subject=Founding%20Partner';
+  }
+  if (input.persona === 'journalist') {
+    return 'mailto:verify@eykon.ai?subject=Press%20verification';
+  }
+  // Fiat-only and undecided prospects go to a free account, not a
+  // checkout they cannot pay. We asked the question precisely so we
+  // could honour the answer.
+  if (input.pay === 'fiat_waiting' || input.pay === 'unsure') {
+    return '/auth/signin?next=/app';
+  }
+  if (input.persona === 'citizen') return '/auth/signin?next=/app';
+  if (input.persona === 'risk') return '/pricing?plan=enterprise_founding_annual';
+  return '/pricing?plan=pro_founding_annual';
+}
 
 const RATE_LIMIT_PER_HOUR = 5;
 
@@ -74,6 +123,15 @@ export async function POST(request: NextRequest) {
     .slice(0, THEATRES.size);
   const currentTools = str(b.current_tools, 200);
   const wantsDailyBrief = b.wants_daily_brief === true;
+
+  const marketsRaw = Array.isArray(b.markets) ? b.markets : [];
+  const markets = marketsRaw
+    .filter((m): m is string => typeof m === 'string' && MARKETS.has(m))
+    .slice(0, 3);
+  const need = typeof b.need === 'string' && NEEDS.has(b.need) ? b.need : null;
+  const pay = typeof b.pay === 'string' && PAY.has(b.pay) ? b.pay : null;
+  const publishes =
+    typeof b.publishes === 'string' && PUBLISHES.has(b.publishes) ? b.publishes : null;
 
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return NextResponse.json({ error: 'A valid email is required.' }, { status: 400 });
@@ -139,6 +197,10 @@ export async function POST(request: NextRequest) {
     name_or_handle: nameOrHandle,
     persona,
     theatres,
+    markets,
+    need,
+    pay,
+    publishes,
     current_tools: currentTools,
     wants_daily_brief: wantsDailyBrief,
   };
@@ -177,6 +239,10 @@ export async function POST(request: NextRequest) {
   });
 
   // Identical response for insert and update — duplicate status is never
-  // revealed to the client.
-  return NextResponse.json({ ok: true });
+  // revealed to the client. `destination` is authoritative; the page's
+  // own copy of the rule is only an offline fallback.
+  return NextResponse.json({
+    ok: true,
+    destination: destinationFor({ persona, pay, publishes }),
+  });
 }
