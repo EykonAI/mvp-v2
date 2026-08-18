@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ClosingStatus } from '@/lib/closing/status';
-import { PERSONA_BY_ID, isPersonaId, type PersonaId } from '@/lib/closing/personas';
+import { PERSONA_BY_ID, type PersonaId } from '@/lib/closing/personas';
 import { captureWithFirstTouch, campaignPropsFromLocation } from '@/lib/analytics/utm';
 import { TrackedCta } from '@/components/marketing/CampaignTracking';
 import { ProofBlock } from '@/components/closing/ProofBlock';
@@ -35,14 +35,19 @@ export function ClosingPage({
   turnstileSiteKey,
   videoSrc,
   videoPoster,
+  initialPersona,
 }: {
   status: ClosingStatus;
   turnstileSiteKey: string | null;
   videoSrc: string | null;
   videoPoster: string | null;
+  /** Resolved from ?p= on the server, so a deep-linked visitor's own
+   *  pitch is in the first paint rather than replacing step 1 after
+   *  hydration. */
+  initialPersona: PersonaId | null;
 }) {
-  const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [persona, setPersona] = useState<PersonaId | null>(null);
+  const [step, setStep] = useState<1 | 2 | 3>(initialPersona ? 2 : 1);
+  const [persona, setPersona] = useState<PersonaId | null>(initialPersona);
   const [offerUnlocked, setOfferUnlocked] = useState(false);
   const [altPath, setAltPath] = useState<string | null>(null);
   const viewFired = useRef(false);
@@ -52,14 +57,13 @@ export function ClosingPage({
     if (viewFired.current) return;
     viewFired.current = true;
     captureWithFirstTouch({ event: 'closing_page_viewed', ...campaignPropsFromLocation() });
-
-    // Deep-link: ?p=trader lands on the pitch already tailored.
-    const p = new URLSearchParams(window.location.search).get('p');
-    if (isPersonaId(p)) {
-      setPersona(p);
-      setStep(2);
+    // A deep-linked arrival starts on step 2, so record that depth too —
+    // otherwise the funnel would show step 2 with no entrants.
+    if (initialPersona) {
+      depthsFired.current.add(2);
+      captureWithFirstTouch({ event: 'proof_scrolled', depth: 2 });
     }
-  }, []);
+  }, [initialPersona]);
 
   const go = useCallback((n: 1 | 2 | 3) => {
     setStep(n);

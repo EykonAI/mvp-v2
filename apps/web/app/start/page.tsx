@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './start.css';
 import { loadClosingStatus } from '@/lib/closing/status';
+import { isPersonaId } from '@/lib/closing/personas';
 import { ClosingPage } from './ClosingPage';
 
 /**
@@ -9,7 +10,11 @@ import { ClosingPage } from './ClosingPage';
  * pitch → your setup. /c and /q hand off here (PR E); the homepage keeps
  * serving people who arrive already interested.
  *
- * ?p=<persona> deep-links a channel straight to its own pitch.
+ * ?p=<persona> deep-links a channel straight to its own pitch — resolved
+ * on the SERVER so the pitch is in the first HTML. Resolving it in a
+ * client effect made a campaign visitor watch step 1 flash before their
+ * own step 2 replaced it, which is jank on exactly the path the feature
+ * exists for.
  *
  * Public: top-level route outside the (app) group, not in middleware
  * APP_PATHS — no login wall, same posture as /c and /q.
@@ -39,9 +44,15 @@ export const metadata: Metadata = {
 const VIDEO_SRC: string | null = null;
 const VIDEO_POSTER: string | null = null;
 
-export default async function StartPage() {
+export default async function StartPage({
+  searchParams,
+}: {
+  searchParams: { p?: string };
+}) {
   const status = await loadClosingStatus();
   const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? null;
+  const raw = typeof searchParams?.p === 'string' ? searchParams.p.toLowerCase() : null;
+  const initialPersona = isPersonaId(raw) ? raw : null;
 
   return (
     <main className="cs-page">
@@ -50,6 +61,7 @@ export default async function StartPage() {
         turnstileSiteKey={turnstileSiteKey}
         videoSrc={VIDEO_SRC}
         videoPoster={VIDEO_POSTER}
+        initialPersona={initialPersona}
       />
     </main>
   );
