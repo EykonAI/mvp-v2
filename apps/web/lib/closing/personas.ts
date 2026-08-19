@@ -38,7 +38,7 @@ export const PERSONAS: Persona[] = [
     label: 'Day-trader',
     blurb: 'Macro, commodities, crypto',
     tag: '· built for day-traders',
-    head: 'You hear it when the wire does.',
+    head: 'You hear it when the internet does.',
     headAccent: 'We see it before.',
     issue:
       '“By the time it’s news, the move already happened. I’m trading other people’s latency.”',
