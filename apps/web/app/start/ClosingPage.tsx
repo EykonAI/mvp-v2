@@ -194,10 +194,35 @@ export function ClosingPage({
                 <h2 className="cs-h2">Founding rate. Locked for life.</h2>
                 <SeatCounter />
 
+                {/* Both cadences carry their discount, but only ONE says
+                    RECOMMENDED — a page that recommends two things
+                    recommends neither, and annual is the better sale:
+                    paid up front, one renewal decision a year instead of
+                    twelve chances to lose them. The annual disc is solid
+                    and larger, the monthly outlined, so the eye lands on
+                    annual first while both numbers stay visible.
+
+                    Both percentages use the SAME basis (founder decision
+                    2026-08-19): the founding crypto price against the
+                    standard FIAT list. Annual $243.60 vs $1,188/yr =
+                    −79%; monthly $29.00 vs $99/mo = −71%. An earlier cut
+                    put annual against the standard CRYPTO annual
+                    ($1,009.80, −76%), which was like-for-like but left
+                    the two cadences measured differently — monthly has
+                    no standard crypto variant to compare against. One
+                    basis for both is the defensible choice on a page
+                    headed "don't trust us, audit us", and each strike
+                    price is shown beside its own percentage.
+                    Verified against lib/pricing.ts 2026-08-19. */}
                 <div className="cs-twop">
                   <div className="cs-pcard cs-rec">
-                    <div className="cs-pflag">RECOMMENDED · SAVE 30%</div>
+                    <div className="cs-pflag">RECOMMENDED · BEST VALUE</div>
+                    <div className="cs-disc" aria-hidden="true">
+                      <b>−79%</b>
+                      <i>VS STANDARD</i>
+                    </div>
                     <div className="cs-pk">ANNUAL</div>
+                    <div className="cs-strike">$1,188.00 / yr standard</div>
                     <div className="cs-pv">
                       $243.60<span>/ year</span>
                     </div>
@@ -205,7 +230,13 @@ export function ClosingPage({
                     <div className="cs-pc">USDC · USDT · BTC · ETH · + L2</div>
                   </div>
                   <div className="cs-pcard">
+                    <div className="cs-pflag cs-alt">MOST FLEXIBLE</div>
+                    <div className="cs-disc cs-out" aria-hidden="true">
+                      <b>−71%</b>
+                      <i>VS STANDARD</i>
+                    </div>
                     <div className="cs-pk">MONTHLY</div>
+                    <div className="cs-strike">$99.00 / mo standard</div>
                     <div className="cs-pv">
                       $29.00<span>/ month</span>
                     </div>

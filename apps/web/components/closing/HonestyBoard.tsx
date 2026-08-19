@@ -1,8 +1,14 @@
 import type { ClosingStatus } from '@/lib/closing/status';
 
 /**
- * Screen 4 — the honesty block (brief v1.3 §4.4). Live / degraded /
- * model, generated from the database at request time. §14.9's hardest-won
+ * The honesty block (brief v1.3 §4.4, step 2 since v1.4). Live /
+ * degraded / in-the-pipes, generated from the database at request time.
+ *
+ * The third column's heading moves with the section title: "in the
+ * pipes" promises a roadmap, so a column headed "MODEL, NOT DATA"
+ * underneath it would contradict the sentence above it. The BODY is
+ * unchanged — these are still models, still badged ILLUSTRATIVE, still
+ * never quoted as observation. §14.9's hardest-won
  * outreach lesson, generalised to a page: honesty about a thin feed is
  * the strongest opener to a specialist in that feed — and it inoculates
  * against the falsification that otherwise arrives in the comments.
@@ -28,7 +34,7 @@ export function HonestyBoard({ status }: { status: ClosingStatus }) {
       <h2 className="cs-h2">
         What is live, what is thin,
         <br />
-        and what we don&apos;t have.
+        and what is in the pipes.
       </h2>
       <p className="cs-sub">
         Every intelligence vendor shows you the green lights. Here are ours, and the red
@@ -56,13 +62,13 @@ export function HonestyBoard({ status }: { status: ClosingStatus }) {
           </div>
         </div>
         <div className="cs-hcol">
-          <div className="cs-hhead cs-hr">✕ MODEL, NOT DATA</div>
+          <div className="cs-hhead cs-hr">◷ IN THE PIPES</div>
           <div className="cs-hrow"><span>Chokepoint simulator</span><em>fixture</em></div>
           <div className="cs-hrow"><span>Cascade propagation</span><em>fixture</em></div>
           <div className="cs-hrow"><span>Critical minerals</span><em>seeded</em></div>
           <div className="cs-hnote">
-            Badged ILLUSTRATIVE in-product. Defensible as models — never quoted as
-            observation.
+            Models today, badged ILLUSTRATIVE in-product — defensible as models, never
+            quoted as observation. On the roadmap to real data.
           </div>
         </div>
       </div>
