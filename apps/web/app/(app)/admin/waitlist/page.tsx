@@ -19,7 +19,7 @@ import { WaitlistAdminClient, type WaitlistRow, type WaitlistStats } from './Wai
 // Railway auto-deploys main on merge, so apply 049 in the Supabase Dashboard
 // → SQL Editor BEFORE merging this PR, or this .select() 500s at runtime.
 
-export const metadata = { title: 'Admin · Waitlist — eYKON.ai' };
+export const metadata = { title: 'Admin · Fiat Waitlist — eYKON.ai' };
 export const dynamic = 'force-dynamic';
 
 export default async function WaitlistAdminPage() {
