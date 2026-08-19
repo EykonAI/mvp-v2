@@ -27,9 +27,9 @@ const ADMIN_SECTIONS: AdminGroup[] = [
     links: [
       {
         href: '/admin/waitlist',
-        title: 'Waitlist',
+        title: 'Fiat Waitlist',
         glyph: '📋',
-        desc: 'Fiat billing waitlist — contacts, country, spots-left, bulk email.',
+        desc: 'Demand captured while fiat billing is still being built — contacts, country, spots-left, bulk email.',
       },
       {
         href: '/admin/refunds',
