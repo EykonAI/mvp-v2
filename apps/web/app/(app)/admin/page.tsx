@@ -32,6 +32,12 @@ const ADMIN_SECTIONS: AdminGroup[] = [
         desc: 'Demand captured while fiat billing is still being built — contacts, country, spots-left, bulk email.',
       },
       {
+        href: '/admin/subscribers',
+        title: 'Subscribers',
+        glyph: '💳',
+        desc: 'Everyone who actually paid — subscriptions and Week Pass buyers, with channel, partner and country attribution.',
+      },
+      {
         href: '/admin/refunds',
         title: 'Refunds',
         glyph: '🧾',
