@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { getRewardfulReferral } from '@/components/referral/RewardfulScript';
+import { readFirstTouch } from '@/lib/analytics/first-touch';
 
 type Status = 'starting' | 'error';
 
@@ -27,12 +28,17 @@ export function CheckoutLauncher({
     (async () => {
       try {
         const rewardful = getRewardfulReferral();
+        // First touch is READ here, never re-derived: this page is /pricing,
+        // so campaignPropsFromLocation() would stamp landing_path='/pricing'
+        // on every sale and make the campaign columns permanently useless.
+        const attribution = readFirstTouch();
         const res = await fetch('/api/checkout/nowpayments', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             variant: variantId,
             ...(rewardful ? { rewardful_referral: rewardful } : {}),
+            ...(attribution ? { attribution } : {}),
           }),
         });
         const json = await res.json().catch(() => ({}));

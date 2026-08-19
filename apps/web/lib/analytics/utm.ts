@@ -24,6 +24,11 @@ import type { CampaignProps, EventProps } from './events';
  * channel. Without this, a working channel looks dead and gets killed by
  * mistake (7 attribution events all-time against 14 published posts is
  * how this file came to exist).
+ *
+ * These helpers read the CURRENT URL, which is only correct on the landing
+ * page. Anything that needs attribution LATER in the funnel — checkout is
+ * the one that matters — must read the carried copy in ./first-touch.ts,
+ * not call campaignPropsFromLocation() again.
  */
 
 export function campaignPropsFromLocation(): CampaignProps {

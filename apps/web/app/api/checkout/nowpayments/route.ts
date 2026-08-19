@@ -5,6 +5,7 @@ import { getCryptoVariant, getPassProduct, type PassProduct } from '@/lib/pricin
 import { getCurrentTier } from '@/lib/subscription';
 import { createNowpaymentsInvoice } from '@/lib/payments/nowpayments';
 import { captureServer } from '@/lib/analytics/server';
+import { buildPurchaseAttribution } from '@/lib/payments/attribution';
 
 export const dynamic = 'force-dynamic';
 
@@ -67,7 +68,7 @@ export async function POST(request: NextRequest) {
   // routes the webhook to lib/payments/passes.ts.
   const passProduct = getPassProduct(variantId);
   if (passProduct) {
-    return await checkoutPass(request, user.id, passProduct);
+    return await checkoutPass(request, user.id, passProduct, body, rewardfulReferral);
   }
 
   const variant = getCryptoVariant(variantId);
@@ -102,6 +103,16 @@ export async function POST(request: NextRequest) {
   const admin = createServerSupabase();
   const priceMajorUnits = variant.crypto_total_usd_cents / 100;
 
+  // Migration 109: campaign / partner / country, captured now rather than
+  // reconstructed later. See lib/payments/attribution.ts for why.
+  const attribution = await buildPurchaseAttribution(
+    admin,
+    request,
+    body,
+    user.id,
+    rewardfulReferral,
+  );
+
   const { data: pending, error: pendingErr } = await admin
     .from('purchases')
     .insert({
@@ -112,6 +123,7 @@ export async function POST(request: NextRequest) {
       status: 'pending',
       amount_cents: variant.crypto_total_usd_cents,
       currency: 'USD',
+      ...attribution,
     })
     .select('id')
     .single();
@@ -183,7 +195,13 @@ export async function POST(request: NextRequest) {
 // pointless at pro+ and is refused with a friendly message; the
 // purchase row carries the pass kind so the webhook routes completion
 // to completePassPurchase instead of the tier-granting RPC.
-async function checkoutPass(request: NextRequest, userId: string, product: PassProduct) {
+async function checkoutPass(
+  request: NextRequest,
+  userId: string,
+  product: PassProduct,
+  body: unknown,
+  rewardfulReferral: string,
+) {
   const admin = createServerSupabase();
 
   if (product.kind === 'week_pass') {
@@ -196,6 +214,17 @@ async function checkoutPass(request: NextRequest, userId: string, product: PassP
     }
   }
 
+  // Same attribution as a subscription: a Week Pass buyer is a customer on
+  // the Subscribers view (D-1), and a channel that only ever produces $9
+  // passes is still a channel that works.
+  const attribution = await buildPurchaseAttribution(
+    admin,
+    request,
+    body,
+    userId,
+    rewardfulReferral,
+  );
+
   const { data: pending, error: pendingErr } = await admin
     .from('purchases')
     .insert({
@@ -206,6 +235,7 @@ async function checkoutPass(request: NextRequest, userId: string, product: PassP
       status: 'pending',
       amount_cents: product.usd_cents,
       currency: 'USD',
+      ...attribution,
     })
     .select('id')
     .single();

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ClosingStatus } from '@/lib/closing/status';
 import { PERSONA_BY_ID, type PersonaId } from '@/lib/closing/personas';
 import { captureWithFirstTouch, campaignPropsFromLocation } from '@/lib/analytics/utm';
+import { rememberFirstTouch } from '@/lib/analytics/first-touch';
 import { TrackedCta } from '@/components/marketing/CampaignTracking';
 import { ProofBlock } from '@/components/closing/ProofBlock';
 import { FounderVideo } from '@/components/closing/FounderVideo';
@@ -56,6 +57,8 @@ export function ClosingPage({
   useEffect(() => {
     if (viewFired.current) return;
     viewFired.current = true;
+    // Carried to the purchase row at checkout — /pricing cannot see this URL.
+    rememberFirstTouch();
     captureWithFirstTouch({ event: 'closing_page_viewed', ...campaignPropsFromLocation() });
     // A deep-linked arrival starts on step 2, so record that depth too —
     // otherwise the funnel would show step 2 with no entrants.
