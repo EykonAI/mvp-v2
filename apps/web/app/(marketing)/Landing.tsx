@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import './landing.css';
 import { captureBrowser } from '@/lib/analytics/client';
+import { rememberFirstTouch } from '@/lib/analytics/first-touch';
 import { AnalystWithTools } from '@/components/landing/AnalystWithTools';
 import { HeroWorkspaceShowcase } from '@/components/landing/HeroWorkspaceShowcase';
 import { NotificationCenterTease } from '@/components/landing/NotificationCenterTease';
@@ -128,6 +129,16 @@ export function Landing() {
   // real number loads. While null the pills render an em dash — never a
   // fabricated count; a fake number here would cost the audit-us position.
   const [spotsLeft, setSpotsLeft] = useState<number | null>(null);
+
+  // Record the campaign this visitor arrived with, once, before they walk
+  // off toward checkout. The home page is a real funnel entry — its pricing
+  // tiles link straight to /pricing?plan= — so without this every sale that
+  // starts here lands on the purchase row with no landing_path and reads as
+  // indistinguishable from unknown.
+  useEffect(() => {
+    rememberFirstTouch();
+  }, []);
+
   useEffect(() => {
     let alive = true;
     fetch('/api/founding/spots')

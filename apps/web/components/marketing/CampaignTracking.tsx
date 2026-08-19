@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 import { captureBrowser } from '@/lib/analytics/client';
 import { campaignPropsFromLocation, captureWithFirstTouch } from '@/lib/analytics/utm';
+import { rememberFirstTouch } from '@/lib/analytics/first-touch';
 
 /**
  * Campaign instrumentation for the public landing surfaces (/c, /q, and
@@ -28,6 +29,10 @@ export function CampaignPageView({
   useEffect(() => {
     if (fired.current) return; // once per mount, incl. React 18 dev double-invoke
     fired.current = true;
+    // Persist first touch BEFORE the capture: PostHog's $set_once lives on
+    // the person profile and the server cannot read it at checkout time.
+    // This is the copy that reaches the purchase row (lib/analytics/first-touch.ts).
+    rememberFirstTouch();
     captureWithFirstTouch({
       event: 'content_page_viewed',
       content_type: contentType,
