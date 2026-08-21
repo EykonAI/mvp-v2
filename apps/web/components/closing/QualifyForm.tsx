@@ -4,6 +4,7 @@ import Script from 'next/script';
 import { useRef, useState, type FormEvent } from 'react';
 import { captureBrowser } from '@/lib/analytics/client';
 import { campaignPropsFromLocation } from '@/lib/analytics/utm';
+import { getBrowserDistinctId } from '@/lib/analytics/client';
 import type { Persona } from '@/lib/closing/personas';
 
 /**
@@ -210,6 +211,11 @@ export function QualifyForm({
           publishes: publishes[0] ?? null,
           wants_daily_brief: data.get('wants_daily_brief') === 'on',
           turnstile_token: tokenRef.current,
+          // Carries this browser's PostHog identity to the server so the
+          // server-side lead_captured lands on the SAME person as the
+          // client-side closing_page_viewed / lead_form_started. Without
+          // it the funnel cannot join and reads 0% conversion forever.
+          posthog_distinct_id: getBrowserDistinctId(),
           ...campaignPropsFromLocation(),
         }),
       });

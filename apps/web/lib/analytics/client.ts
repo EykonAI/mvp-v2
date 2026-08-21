@@ -95,6 +95,25 @@ export function captureBrowser<E extends EventProps>(e: E): void {
   client.capture(event, props);
 }
 
+/**
+ * The browser's current PostHog distinct_id, or null.
+ *
+ * Sent to server routes that capture events on this visitor's behalf, so
+ * those events land on the SAME person as the browser-side ones. Without
+ * it a server capture invents a second identity and every funnel spanning
+ * the two reads 0% conversion forever — see the note in
+ * /api/closing/lead.
+ */
+export function getBrowserDistinctId(): string | null {
+  const client = getPostHogBrowser();
+  if (!client) return null;
+  try {
+    return client.get_distinct_id() || null;
+  } catch {
+    return null;
+  }
+}
+
 export function identifyBrowser(
   userId: string,
   traits: Record<string, unknown> = {},

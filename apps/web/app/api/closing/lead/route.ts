@@ -306,15 +306,36 @@ export async function POST(request: NextRequest) {
   }
 
   // Server-side capture: the conversion this page is measured by must not
-  // depend on the browser client surviving an ad-blocker. Distinct id is
-  // a hash of the email — stable across visits, no raw PII in PostHog.
-  const distinctId = `lead:${crypto.createHash('sha256').update(email).digest('hex').slice(0, 24)}`;
-  void captureServer(distinctId, {
+  // depend on the browser client surviving an ad-blocker.
+  //
+  // IDENTITY. This event has to land on the SAME PostHog person as the
+  // browser-side closing_page_viewed and lead_form_started, or the funnel
+  // cannot join. It previously used a hash of the email — stable and
+  // PII-free, but a person nothing else on the page shares, so
+  // `closing_page_viewed → lead_captured` reported 0% conversion no matter
+  // how many real leads arrived. A funnel that cannot rise above zero is
+  // not a measurement.
+  //
+  // So: prefer the browser's distinct_id when the client offers one, and
+  // fall back to the email hash when it does not (ad-blocker, JS failure,
+  // a non-browser caller). The lead hash is kept as a PROPERTY either way,
+  // so the same person is still recognisable across devices by email.
+  const leadHash = `lead:${crypto.createHash('sha256').update(email).digest('hex').slice(0, 24)}`;
+  const browserDistinctId =
+    typeof b.posthog_distinct_id === 'string' && b.posthog_distinct_id.trim()
+      ? b.posthog_distinct_id.trim().slice(0, 200)
+      : null;
+
+  void captureServer(browserDistinctId ?? leadHash, {
     event: 'lead_captured',
     persona,
     theatres,
     utm_source: firstTouch.utm_source,
     has_tools: currentTools != null,
+    lead_hash: leadHash,
+    // Records WHICH identity was used, so a future funnel reading low is
+    // diagnosable rather than merely disappointing.
+    identity_source: browserDistinctId ? 'browser' : 'email_hash',
   });
 
   // Identical response for insert and update — duplicate status is never
