@@ -204,7 +204,7 @@ export function WaitlistAdminClient({
           hero
           label="Founding seats left"
           value={stats.spotsLeft.toLocaleString('en-US')}
-          sub={`${stats.claimed.toLocaleString('en-US')} of ${stats.cap.toLocaleString('en-US')} claimed · ${stats.paidFounders} paid + ${stats.reservedWaitlist} reserved`}
+          sub={`${stats.claimed.toLocaleString('en-US')} of ${stats.cap.toLocaleString('en-US')} claimed · ${stats.paidFounders} paid · ${stats.reservedWaitlist} on this list reserve nothing`}
         />
         <StatCard label="On waitlist" value={String(stats.total)} sub="all fiat entries" />
         <StatCard label="Pro / Enterprise" value={`${stats.pro} / ${stats.enterprise}`} sub="by tier" />
