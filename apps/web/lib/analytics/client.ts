@@ -49,6 +49,37 @@ export function initPostHogBrowser(): PostHog | null {
   return posthog;
 }
 
+/**
+ * Start session replay for the CURRENT page only.
+ *
+ * Replay is disabled globally in init() and that stays true: the product
+ * surfaces are an intelligence tool where analysts type queries that are
+ * nobody's business but theirs, and a recording of /intel or /analyst is a
+ * recording of what someone is investigating. The closing page is the one
+ * place where the visitor is anonymous, the content is a public sales page,
+ * and watching where people hesitate is the whole point.
+ *
+ * TWO KEYS ARE REQUIRED, on purpose:
+ *   1. this call (scope — code decides WHICH pages may record), and
+ *   2. "Record user sessions" enabled in the PostHog project settings
+ *      (master switch — can be pulled without a deploy).
+ * Neither alone records anything. If replay must be killed in a hurry, use
+ * the dashboard: it takes effect immediately.
+ *
+ * Input masking from init() still applies — maskAllInputs plus an explicit
+ * selector covering input/textarea/[data-ph-no-capture] — so the email and
+ * free-text fields in the qualification form are redacted in the recording.
+ */
+export function startSessionReplayHere(): void {
+  const client = getPostHogBrowser();
+  if (!client) return;
+  try {
+    client.startSessionRecording();
+  } catch {
+    // Never let an analytics opt-in break the page it is measuring.
+  }
+}
+
 export function getPostHogBrowser(): PostHog | null {
   if (!initialised) return initPostHogBrowser();
   return enabled ? posthog : null;

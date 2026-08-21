@@ -6,6 +6,7 @@ import type { ClosingStatus } from '@/lib/closing/status';
 import { PERSONA_BY_ID, type PersonaId } from '@/lib/closing/personas';
 import { captureWithFirstTouch, campaignPropsFromLocation } from '@/lib/analytics/utm';
 import { rememberFirstTouch } from '@/lib/analytics/first-touch';
+import { startSessionReplayHere } from '@/lib/analytics/client';
 import { TrackedCta } from '@/components/marketing/CampaignTracking';
 import { ProofBlock } from '@/components/closing/ProofBlock';
 import { FounderVideo } from '@/components/closing/FounderVideo';
@@ -57,6 +58,9 @@ export function ClosingPage({
   useEffect(() => {
     if (viewFired.current) return;
     viewFired.current = true;
+    // Replay is off product-wide; /start opts itself in. See
+    // startSessionReplayHere() for why this is scoped rather than global.
+    startSessionReplayHere();
     // Carried to the purchase row at checkout — /pricing cannot see this URL.
     rememberFirstTouch();
     captureWithFirstTouch({ event: 'closing_page_viewed', ...campaignPropsFromLocation() });
