@@ -298,6 +298,12 @@ export function QualifyForm({
             {phase === 'done' ? '✓ Received' : phase === 'submitting' ? 'Sending…' : `${persona.cta} →`}
           </button>
         </div>
+        {phase === 'done' && pay[0] === 'fiat_waiting' && (
+          <div className="cs-formmsg cs-good">
+            You asked to be told when card billing opens — you are on that list. We will email
+            you once, when it exists. Nothing else.
+          </div>
+        )}
         {phase === 'error' && error && <div className="cs-formmsg cs-err">{error}</div>}
         <p className="cs-fine">{persona.fine}</p>
       </form>
