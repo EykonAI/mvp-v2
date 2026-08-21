@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { getRewardfulReferral } from '@/components/referral/RewardfulScript';
 import { readFirstTouch } from '@/lib/analytics/first-touch';
+import { identifyBrowser } from '@/lib/analytics/client';
 
 type Status = 'starting' | 'error';
 
@@ -15,15 +16,25 @@ type Status = 'starting' | 'error';
 export function CheckoutLauncher({
   variantId,
   variantLabel,
+  userId,
 }: {
   variantId: string;
   variantLabel: string;
+  userId?: string;
 }) {
   const [status, setStatus] = useState<Status>('starting');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+
+    // Bridge the anonymous browser person to the account, in the last
+    // moment before the server fires checkout_started against user.id.
+    // PostHog merges the anonymous history into the identified person, so
+    // the /start events and the purchase belong to one person and the
+    // funnel spans the whole path. identifyBrowser() existed for this and
+    // had never been called from anywhere.
+    if (userId) identifyBrowser(userId);
 
     (async () => {
       try {
@@ -72,7 +83,7 @@ export function CheckoutLauncher({
     return () => {
       cancelled = true;
     };
-  }, [variantId]);
+  }, [variantId, userId]);
 
   return (
     <section

@@ -97,7 +97,7 @@ export type EventProps =
   | { event: 'video_played' }
   | { event: 'video_progress'; pct: 25 | 50 | 75 | 100 }
   | { event: 'lead_form_started' }
-  | { event: 'lead_captured'; persona: string; theatres: string[]; utm_source: string | null; has_tools: boolean }
+  | { event: 'lead_captured'; persona: string; theatres: string[]; utm_source: string | null; has_tools: boolean; lead_hash?: string; identity_source?: 'browser' | 'email_hash' }
   | { event: 'offer_viewed'; spots_left: number | null }
   | { event: 'limits_expanded'; limit: 1 | 2 | 3 }
   | {

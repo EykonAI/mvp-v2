@@ -42,5 +42,5 @@ export default async function PricingPage({
 
   const id = variant?.id ?? pass!.id;
   const label = variant?.label ?? pass!.label;
-  return <CheckoutLauncher variantId={id} variantLabel={label} />;
+  return <CheckoutLauncher variantId={id} variantLabel={label} userId={user.id} />;
 }
