@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { verifyTurnstileToken } from '@/lib/grow/turnstile';
 import { captureServer } from '@/lib/analytics/server';
+import { resolveRequestCountry } from '@/lib/geo/request-country';
 
 export const dynamic = 'force-dynamic';
 
@@ -93,6 +94,69 @@ function destinationFor(input: {
 }
 
 const RATE_LIMIT_PER_HOUR = 5;
+
+/**
+ * Mirror a fiat-only prospect into `fiat_waitlist`.
+ *
+ * /start asks "how would you pay" precisely so we can honour the answer.
+ * Until now, answering "Fiat — tell me when it opens" recorded the intent on
+ * closing_leads.pay and routed the person to a free account — correct, but it
+ * left them invisible to the one surface built for exactly this job: the
+ * admin Fiat Waitlist page, with its filters, CSV export and broadcast tool.
+ * When card billing opens, whoever works that list would not have seen them.
+ *
+ * So the /start fiat door IS the waitlist form now. The lead row stays the
+ * source of truth for qualification; this is a deliberate, narrow duplication
+ * of the contactable fields into the table the fiat workflow already reads.
+ *
+ * Tier mirrors destinationFor()'s existing rule — persona 'risk' is the
+ * enterprise path, everyone else is Pro — so no new judgement is invented
+ * here; the two stay consistent by construction.
+ *
+ * FAIL-SOFT. The lead is the asset this endpoint exists to capture. If this
+ * secondary write fails, we log and carry on; the prospect is still recorded
+ * and the form still succeeds. A waitlist mirror is never worth losing a lead
+ * over.
+ *
+ * No confirmation email is sent: /start renders its own success state, and a
+ * second message quoting the old waitlist terms would contradict it.
+ */
+async function mirrorToFiatWaitlist(
+  admin: ReturnType<typeof createServerSupabase>,
+  input: {
+    email: string;
+    persona: string;
+    need: string | null;
+    theatres: string[];
+    ipHash: string | null;
+    userAgent: string | null;
+    country: string | null;
+  },
+): Promise<void> {
+  const tier = input.persona === 'risk' ? 'enterprise' : 'pro';
+
+  // Context for whoever works this list months from now. Prose, not a token —
+  // it also has to survive the bot-note guard on /api/waitlist.
+  const noteParts = [`via /start · persona: ${input.persona}`];
+  if (input.need) noteParts.push(`needs: ${input.need}`);
+  if (input.theatres.length) noteParts.push(`watching: ${input.theatres.join(', ')}`);
+  const note = noteParts.join(' · ').slice(0, 500);
+
+  const { error } = await admin.from('fiat_waitlist').insert({
+    email: input.email,
+    tier,
+    note,
+    ip_hash: input.ipHash,
+    user_agent: input.userAgent,
+    country: input.country,
+  });
+
+  // 23505 = already on the list for this tier. Re-submitting the form is not
+  // an error and must not be surfaced as one.
+  if (error && error.code !== '23505') {
+    console.error('[closing/lead] fiat_waitlist mirror failed', error.message);
+  }
+}
 
 const str = (v: unknown, max: number): string | null =>
   typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null;
@@ -224,6 +288,21 @@ export async function POST(request: NextRequest) {
       console.error('[closing/lead] insert failed', insertError.message);
       return NextResponse.json({ error: 'Could not record your details.' }, { status: 500 });
     }
+  }
+
+  // Fiat-only prospects also land on the waitlist — that door is now the
+  // waitlist's only capture surface (the standalone form was retired).
+  // 'unsure' is deliberately excluded: it is not choosing fiat.
+  if (pay === 'fiat_waiting') {
+    await mirrorToFiatWaitlist(admin, {
+      email,
+      persona,
+      need,
+      theatres,
+      ipHash,
+      userAgent,
+      country: resolveRequestCountry(request.headers),
+    });
   }
 
   // Server-side capture: the conversion this page is measured by must not
