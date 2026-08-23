@@ -106,6 +106,41 @@ export function parseChannelFromSearchParams(params: URLSearchParams): Channel |
 }
 
 /**
+ * Resolves a canonical channel from a URL PATH — the durable half of the
+ * same job parseChannelFromSearchParams does for query strings.
+ *
+ * WHY. Privacy browsers strip `utm_*` before the request is made.
+ * Measured on production 2026-08-23: typing
+ * `https://eykon.ai/start?utm_source=ddg_test` into DuckDuckGo's address
+ * bar loads `https://eykon.ai/start` — the parameter is gone from the
+ * address bar itself. Brave and Safari 17+ ship comparable protection,
+ * and eYKON's audience skews hard toward exactly those browsers, so the
+ * loss concentrates in the visitors we most want.
+ *
+ * A stripper can identify a query parameter as tracking. It cannot
+ * distinguish a path segment from ordinary routing, so `/start/reddit`
+ * arrives intact where `?utm_source=reddit` does not.
+ *
+ * Only recognised PAMS channels are returned. An unknown-but-valid slug
+ * (a one-off campaign, `newsjack`, `proactive`) deliberately yields null:
+ * the closing page still records it in its own first-touch, but the PAMS
+ * cookie and its reporting tables keep the closed taxonomy they were
+ * designed around. This function widens WHERE a channel can be read
+ * from, never WHAT counts as one.
+ */
+export function parseChannelFromPath(pathname: string | null | undefined): Channel | null {
+  if (!pathname) return null;
+  const segments = pathname.split('/').filter(Boolean);
+  // /start/<channel> — the closing page's tagged form. Only the segment
+  // directly after a known campaign root is considered, so an arbitrary
+  // deep path cannot smuggle in a channel.
+  if (segments.length >= 2 && segments[0] === 'start') {
+    return normalizeChannel(segments[1]);
+  }
+  return null;
+}
+
+/**
  * Like parseChannelFromSearchParams but also returns the raw UTM set for
  * granular per-campaign reporting. Used by the silent capture route to
  * build the channel_touchpoints row. Returns null when there is no valid

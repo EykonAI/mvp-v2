@@ -40,6 +40,9 @@ export type FirstTouch = {
   referrer: string | null;
   landing_path: string | null;
   at: string;
+  /** Set only when a blank source was later filled by a known channel.
+   *  Present = this record's source did not come from the landing view. */
+  upgraded_at?: string;
 };
 
 /**
@@ -57,17 +60,53 @@ export function rememberFirstTouch(fallback?: {
 }): void {
   if (typeof window === 'undefined') return;
   try {
-    const existing = readFirstTouch();
-    if (existing) return; // first touch wins — never overwrite
-
     const c = campaignPropsFromLocation();
     // The query string wins WHEN IT SURVIVES — it carries campaign and
     // content that a single path segment cannot. The path channel is the
     // floor: it only fills in what a privacy browser stripped on the way
     // here. See lib/closing/channels.ts for the measurement behind this.
+    const source = c.utm_source ?? fallback?.source ?? null;
+    const medium = c.utm_medium ?? fallback?.medium ?? null;
+
+    const existing = readFirstTouch();
+    if (existing) {
+      // FIRST NON-NULL SOURCE WINS.
+      //
+      // A real source is never replaced — that is the whole point of
+      // first touch. But a BLANK one must be fillable, because the
+      // original rule ("first record wins, full stop") silently defeated
+      // path-based tagging on the funnel that needed it most:
+      //
+      //   privacy browser lands /c  → utm stripped → blank record written
+      //   clicks through /start/newsjack → record exists → path IGNORED
+      //
+      // Proven on production 2026-08-23: newsjack traffic stayed
+      // unattributed even after the path channel shipped. Filling a blank
+      // takes nothing from anyone; refusing to fill it loses the channel.
+      if (existing.utm_source) return;
+      if (!source) return;
+
+      // Keep the ORIGINAL landing_path and `at` — that is genuinely where
+      // and when this visitor first arrived. Only the attribution that was
+      // stripped in transit is being recovered.
+      window.localStorage.setItem(
+        KEY,
+        JSON.stringify({
+          ...existing,
+          utm_source: source,
+          utm_medium: medium ?? existing.utm_medium,
+          utm_campaign: existing.utm_campaign ?? c.utm_campaign,
+          utm_content: existing.utm_content ?? c.utm_content,
+          referrer: existing.referrer ?? c.referrer,
+          upgraded_at: new Date().toISOString(),
+        } satisfies FirstTouch),
+      );
+      return;
+    }
+
     const record: FirstTouch = {
-      utm_source: c.utm_source ?? fallback?.source ?? null,
-      utm_medium: c.utm_medium ?? fallback?.medium ?? null,
+      utm_source: source,
+      utm_medium: medium,
       utm_campaign: c.utm_campaign,
       utm_content: c.utm_content,
       referrer: c.referrer,
@@ -111,6 +150,7 @@ export function readFirstTouch(): FirstTouch | null {
       referrer: s(parsed.referrer),
       landing_path: s(parsed.landing_path),
       at: parsed.at,
+      ...(typeof parsed.upgraded_at === 'string' ? { upgraded_at: parsed.upgraded_at } : {}),
     };
   } catch {
     return null;
