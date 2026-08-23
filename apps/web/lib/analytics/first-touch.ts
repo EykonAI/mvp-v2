@@ -51,16 +51,23 @@ export type FirstTouch = {
  * is a true and useful statement, and leaving it blank would silently
  * under-count the page we are about to spend money driving traffic to.
  */
-export function rememberFirstTouch(): void {
+export function rememberFirstTouch(fallback?: {
+  source: string;
+  medium: string | null;
+}): void {
   if (typeof window === 'undefined') return;
   try {
     const existing = readFirstTouch();
     if (existing) return; // first touch wins — never overwrite
 
     const c = campaignPropsFromLocation();
+    // The query string wins WHEN IT SURVIVES — it carries campaign and
+    // content that a single path segment cannot. The path channel is the
+    // floor: it only fills in what a privacy browser stripped on the way
+    // here. See lib/closing/channels.ts for the measurement behind this.
     const record: FirstTouch = {
-      utm_source: c.utm_source,
-      utm_medium: c.utm_medium,
+      utm_source: c.utm_source ?? fallback?.source ?? null,
+      utm_medium: c.utm_medium ?? fallback?.medium ?? null,
       utm_campaign: c.utm_campaign,
       utm_content: c.utm_content,
       referrer: c.referrer,

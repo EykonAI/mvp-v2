@@ -122,7 +122,7 @@ export default async function PublicConvergencePage({ params }: { params: { id: 
                 params mark the internal hand-off source; the visitor's
                 ORIGINAL channel is already locked in as first-touch
                 $set_once person properties from this page's view event. */}
-            <TrackedCta href={`/start?utm_source=newsjack&utm_content=${encodeURIComponent(c.id)}`} source="newsjack" contentId={c.id} style={{ display: 'inline-block', fontFamily: 'var(--f-mono)', fontSize: 11.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--bg-void, #0a0e12)', background: 'var(--teal)', borderRadius: 4, padding: '10px 18px', textDecoration: 'none', fontWeight: 600 }}>
+            <TrackedCta href={`/start/newsjack?utm_content=${encodeURIComponent(c.id)}`} source="newsjack" contentId={c.id} style={{ display: 'inline-block', fontFamily: 'var(--f-mono)', fontSize: 11.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--bg-void, #0a0e12)', background: 'var(--teal)', borderRadius: 4, padding: '10px 18px', textDecoration: 'none', fontWeight: 600 }}>
               See how we found this →
             </TrackedCta>
             {/* Week Pass (mig 075): the impulse exit while an event is

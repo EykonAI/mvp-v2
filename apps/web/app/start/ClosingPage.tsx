@@ -38,6 +38,7 @@ export function ClosingPage({
   videoSrc,
   videoPoster,
   initialPersona,
+  channel,
 }: {
   status: ClosingStatus;
   turnstileSiteKey: string | null;
@@ -47,6 +48,9 @@ export function ClosingPage({
    *  pitch is in the first paint rather than replacing step 1 after
    *  hydration. */
   initialPersona: PersonaId | null;
+  /** Traffic source read from the URL PATH (/start/<channel>), used only
+   *  when the query string has been stripped by a privacy browser. */
+  channel?: { source: string; medium: string | null } | null;
 }) {
   const [step, setStep] = useState<1 | 2 | 3>(initialPersona ? 2 : 1);
   const [persona, setPersona] = useState<PersonaId | null>(initialPersona);
@@ -62,7 +66,7 @@ export function ClosingPage({
     // startSessionReplayHere() for why this is scoped rather than global.
     startSessionReplayHere();
     // Carried to the purchase row at checkout — /pricing cannot see this URL.
-    rememberFirstTouch();
+    rememberFirstTouch(channel ?? undefined);
     captureWithFirstTouch({ event: 'closing_page_viewed', ...campaignPropsFromLocation() });
     // A deep-linked arrival starts on step 2, so record that depth too —
     // otherwise the funnel would show step 2 with no entrants.
@@ -70,7 +74,7 @@ export function ClosingPage({
       depthsFired.current.add(2);
       captureWithFirstTouch({ event: 'proof_scrolled', depth: 2 });
     }
-  }, [initialPersona]);
+  }, [initialPersona, channel]);
 
   const go = useCallback((n: 1 | 2 | 3) => {
     setStep(n);
