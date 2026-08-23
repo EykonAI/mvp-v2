@@ -9,6 +9,7 @@ import {
   EYKON_CHANNEL_COOKIE,
   EYKON_CHANNEL_COOKIE_MAX_AGE_SECONDS,
   parseChannelFromSearchParams,
+  parseChannelFromPath,
 } from '@/lib/attribution/channels';
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
@@ -144,7 +145,12 @@ function applyAttributionCookie(request: NextRequest, response: NextResponse): N
 function applyChannelCookie(request: NextRequest, response: NextResponse): NextResponse {
   if (request.cookies.has(EYKON_CHANNEL_COOKIE)) return response;
 
-  const channel = parseChannelFromSearchParams(request.nextUrl.searchParams);
+  // Query string first — it is richer when it survives. Path second,
+  // because a privacy browser will have deleted the query string before
+  // this request was ever made (see parseChannelFromPath).
+  const channel =
+    parseChannelFromSearchParams(request.nextUrl.searchParams) ??
+    parseChannelFromPath(request.nextUrl.pathname);
   if (!channel) return response;
 
   response.cookies.set(EYKON_CHANNEL_COOKIE, channel, {
