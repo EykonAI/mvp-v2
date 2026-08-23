@@ -117,7 +117,7 @@ export default async function PublicContentPage({ params }: { params: { id: stri
           </p>
           {/* Primary hand-off (brief §9, PR E): → /start. Original channel
               stays locked in via first-touch $set_once from this page. */}
-          <TrackedCta href={`/start?utm_source=proactive&utm_content=${encodeURIComponent(params.id)}`} source="proactive" contentId={params.id} style={{ display: 'inline-block', fontFamily: 'var(--f-mono)', fontSize: 11.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--bg-void, #0a0e12)', background: 'var(--teal)', borderRadius: 4, padding: '10px 18px', textDecoration: 'none', fontWeight: 600 }}>
+          <TrackedCta href={`/start/proactive?utm_content=${encodeURIComponent(params.id)}`} source="proactive" contentId={params.id} style={{ display: 'inline-block', fontFamily: 'var(--f-mono)', fontSize: 11.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--bg-void, #0a0e12)', background: 'var(--teal)', borderRadius: 4, padding: '10px 18px', textDecoration: 'none', fontWeight: 600 }}>
             See what this is built on →
           </TrackedCta>
         </div>
