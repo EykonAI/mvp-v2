@@ -52,7 +52,7 @@ export function AnalystWithTools() {
         }}
       >
         Most &lsquo;AI + data&rsquo; products are chat panels with no access to the underlying
-        database. Our Chat is a Claude analyst with a catalog of 23 first-class Tools
+        database. Our Chat is a Claude analyst with a catalog of 24 first-class Tools
         wired directly into the platform&rsquo;s proprietary derived datasets — convergence
         events, posture scores, precursor analogs, calibration metrics. When you ask a question,
         the analyst doesn&rsquo;t write SQL or guess from documentation. It calls the right tool,

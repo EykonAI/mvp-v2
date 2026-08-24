@@ -346,7 +346,7 @@ export function Landing() {
           <Pillar
             label="P-02 · AI ANALYST"
             title="Ask in plain English. It queries the database."
-            body="A Claude analyst with a catalog of 23 first-class tools wired directly into the live feeds and the platform's proprietary signal tables — no SQL, no guessing from documentation. Persona-aware: pick one of seven roles and the framing, tool selection and output density adapt. When the data can't support an answer, it says so."
+            body="A Claude analyst with a catalog of 24 first-class tools wired directly into the live feeds and the platform's proprietary signal tables — no SQL, no guessing from documentation. Persona-aware: pick one of seven roles and the framing, tool selection and output density adapt. When the data can't support an answer, it says so."
           />
           <Pillar
             label="P-03 · INTEL"
@@ -908,7 +908,7 @@ export function Landing() {
         <Faq q="I'm a crypto day-trader. What do I actually get that I couldn't cobble together myself?">
           A single screen where a Hormuz escalation, a refinery going dark on satellite
           thermal, and a fresh OFAC designation land in one feed — with the infrastructure
-          context to interpret them, and an AI analyst with 23 tools over the live tables.
+          context to interpret them, and an AI analyst with 24 tools over the live tables.
           You could piece together ACLED, FIRMS, sanctions lists and a map yourself — but
           not in one place, with one provenance trail. The ranked-instruments loop
           (<code>IM-13</code>) is the roadmap&apos;s centrepiece and is labelled ROADMAP
