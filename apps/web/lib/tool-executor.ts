@@ -29,6 +29,7 @@ export async function executeToolCall(toolName: string, toolInput: Record<string
       case 'query_posture_scores':      return await queryPosture(toolInput);
       case 'query_convergences':        return await queryConvergences(toolInput);
       case 'query_shadow_fleet_leads':  return await queryShadowFleetLeads(toolInput);
+      case 'query_dark_contact_events': return await queryDarkContactEvents(toolInput);
       case 'query_calibration':         return await queryCalibration(toolInput);
       case 'query_precursor_matches':   return await queryPrecursorMatches(toolInput);
       case 'run_chokepoint_scenario':   return await runChokepointScenario(toolInput);
@@ -809,6 +810,23 @@ async function queryShadowFleetLeads(input: Record<string, any>): Promise<string
     feed_lag_minutes: j.feed_lag_minutes ?? null,
     coverage: j.coverage ?? null,
     note: 'silence_hours = hours since last AIS fix vs the data clock; confidence ranks silence against each vessel_s OWN 14-day cadence baseline (indicators carry cadence_hours), and vessels without a baseline are unscored rather than defaulted. Coverage IS gated: vessels last seen in a coverage box that has itself been silent >12h are held VOID and never ranked — see the coverage object for per-box state.',
+  });
+}
+
+async function queryDarkContactEvents(input: Record<string, any>): Promise<string> {
+  const params = new URLSearchParams();
+  if (input.status) params.set('status', String(input.status));
+  if (input.limit !== undefined) params.set('limit', String(input.limit));
+  const res = await fetch(`${APP_URL()}/api/intel/shadow-fleet/events?${params.toString()}`, { cache: 'no-store' });
+  const j = await res.json();
+  // The resolution vocabulary rides along so the model cannot mis-gloss it.
+  return JSON.stringify({
+    count: (j.events ?? []).length,
+    events: j.events ?? [],
+    summary: j.summary ?? null,
+    coverage: j.coverage ?? null,
+    data_clock: j.data_clock ?? null,
+    note: j.note ?? null,
   });
 }
 

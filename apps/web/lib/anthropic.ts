@@ -53,9 +53,9 @@ export function toolsForTier(tier: Tier): Anthropic.Tool[] {
 // weather, agent reports) plus ten Intelligence-Center tools added
 // in Phase 8:
 //   query_posture_scores, query_convergences, query_shadow_fleet_leads,
-//   query_calibration, query_precursor_matches, run_chokepoint_scenario,
-//   run_sanctions_wargame, query_regime_shifts, query_entities,
-//   expand_actor_network.
+//   query_dark_contact_events, query_calibration, query_precursor_matches,
+//   run_chokepoint_scenario, run_sanctions_wargame, query_regime_shifts,
+//   query_entities, expand_actor_network.
 export const CLAUDE_TOOLS: Anthropic.Tool[] = [
   // ── Core live-data ─────────────────────────────────────────
   {
@@ -356,6 +356,18 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'query_dark_contact_events',
+    description: 'Dark-contact EVENTS from the Shadow Fleet board — resolvable observations with a lifecycle, not a leads snapshot. An event opens when a vessel goes silent >=12x its OWN 14-day cadence inside a live coverage box, and resolves within 72 h as: reappeared (a newer fix arrived — positive, feed-wide observation), still_dark (NOT RE-OBSERVED by our coverage — a statement about the instrument, never proof the transponder was off; say "not re-observed", never "confirmed dark"), or void (the coverage box died mid-event; neither a hit nor a miss). Response carries per-box coverage state and open/24h resolution tallies. Use this for "what went dark / what came back" questions; use query_shadow_fleet_leads for the current ranked list.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        status: { type: 'string', description: 'open | resolved | void (omit for all)' },
+        limit: { type: 'number', description: 'Max events (default 50)' },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'query_calibration',
     description: 'Brier + log-loss aggregates for the given feature / window.',
     input_schema: {
@@ -459,6 +471,7 @@ AND to the Intelligence Center:
   • posture scores per pinned theatre
   • convergences (anomaly-of-anomalies)
   • shadow-fleet vessel leads + indicator breakdowns
+  • dark-contact events (vessel dark-gap lifecycle: reappeared / not-re-observed / void — always gloss still_dark as "not re-observed by our coverage")
   • calibration metrics (Brier / log-loss / calibration slope)
   • precursor-library matches (cosine against labelled historical episodes)
   • chokepoint closure + sanctions wargame + cascade scenario simulators

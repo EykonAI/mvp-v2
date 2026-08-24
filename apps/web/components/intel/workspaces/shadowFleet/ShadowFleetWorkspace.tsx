@@ -793,6 +793,18 @@ function EventDossier({ ev, dataClock }: { ev: DarkEvent; dataClock: string | nu
         <IndicatorMath indicators={ev.indicators ?? {}} composite={ev.confidence_at_open} />
       </div>
 
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '10px 13px 4px' }}>
+        <a
+          href={`/api/intel/shadow-fleet/evidence-pack?event_id=${encodeURIComponent(ev.id)}`}
+          style={actionStyle('var(--teal)')}
+        >
+          ↧ EXPORT EVIDENCE PACK (PDF)
+        </a>
+        <a href={analystHref(ev)} style={actionStyle('var(--teal)')}>
+          ⎇ OPEN IN AI ANALYST
+        </a>
+      </div>
+
       <div style={{ fontFamily: 'var(--f-mono)', fontSize: 8, color: 'var(--ink-faint)', lineHeight: 1.6, padding: '10px 13px', letterSpacing: '0.01em' }}>
         PROVENANCE — dark_contact_events (mig 112) · vessel_positions.updated_at · vessel_cadence (mig 111) ·
         ais_box_liveness (mig 110) · AISStream free tier. Identity denormalised at open. No registry, owner or
@@ -850,6 +862,12 @@ function AirDossier({ a }: { a: AirContact }) {
         transponder usually means a landed aircraft. Recency is shown as recency.
       </div>
 
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '2px 13px 8px' }}>
+        <a href={airAnalystHref(a)} style={actionStyle('var(--violet)')}>
+          ⎇ OPEN IN AI ANALYST
+        </a>
+      </div>
+
       <div style={{ fontFamily: 'var(--f-mono)', fontSize: 8, color: 'var(--ink-faint)', lineHeight: 1.6, padding: '2px 13px 10px', letterSpacing: '0.01em' }}>
         PROVENANCE — aircraft_positions (ADSBexchange / RapidAPI) · ingested_at is a
         true last-seen (refreshed on every upsert) · "Registration" is the
@@ -875,6 +893,52 @@ function PanelHead({ children }: { children: React.ReactNode }) {
       {children}
     </h3>
   );
+}
+
+/* ── Working actions (PR G) ────────────────────────────────────────────── */
+
+function actionStyle(color: string): React.CSSProperties {
+  return {
+    display: 'block',
+    padding: '7px 9px',
+    background: 'var(--bg-panel)',
+    border: `1px solid ${color}`,
+    color,
+    fontFamily: 'var(--f-mono)',
+    fontSize: 9.5,
+    letterSpacing: '0.1em',
+    textTransform: 'uppercase',
+    borderRadius: 2,
+    textDecoration: 'none',
+    textAlign: 'left',
+  };
+}
+
+/** Prefills the analyst composer (/analyst?q= — prefill only, never auto-sends). */
+function analystHref(ev: DarkEvent): string {
+  const pos = ev.last_fix_lat != null && ev.last_fix_lon != null
+    ? `${ev.last_fix_lat.toFixed(3)}, ${ev.last_fix_lon.toFixed(3)}`
+    : 'unknown';
+  const q =
+    `Dark-contact event: vessel ${ev.name ?? ev.mmsi} (MMSI ${ev.mmsi}, flag ${ev.flag ?? 'unknown'}) ` +
+    `has been silent ${ev.silence_ratio_at_open.toFixed(0)}× its own reporting cadence since ` +
+    `${ev.gap_started_at.slice(0, 16).replace('T', ' ')}Z. Last known position ${pos}` +
+    `${ev.box_slug ? ` in the ${ev.box_slug} coverage box` : ''}` +
+    `${ev.last_speed_kn != null && ev.last_speed_kn > 5 ? `, last seen under way at ${ev.last_speed_kn} kn` : ''}. ` +
+    `Investigate: port calls for this MMSI, OFAC/sanctions exposure for the name and flag, ` +
+    `thermal or night-lights activity near the last position, and any convergence signals in the area.`;
+  return `/analyst?q=${encodeURIComponent(q)}`;
+}
+
+function airAnalystHref(a: AirContact): string {
+  const q =
+    `Aerial contact: ${a.callsign ?? a.icao24} (ICAO24 ${a.icao24}${a.type ? `, type ${a.type}` : ''}, ` +
+    `registration ${a.registration ?? 'unknown'})${a.tags.includes('military') ? ', military' : ''}, ` +
+    `last seen ${a.last_seen_hours.toFixed(1)} h ago at ` +
+    `${a.latitude != null && a.longitude != null ? `${a.latitude.toFixed(3)}, ${a.longitude.toFixed(3)}` : 'unknown position'}` +
+    `${a.ais_blind_here ? ` — inside the ${a.box_slug} box, where AIS is currently dead, so this track is the remaining sensor` : ''}. ` +
+    `What else is observable in this area right now across aircraft, conflict events and thermal anomalies?`;
+  return `/analyst?q=${encodeURIComponent(q)}`;
 }
 
 /* ── Score arithmetic, recomputable by eye ─────────────────────────────── */
