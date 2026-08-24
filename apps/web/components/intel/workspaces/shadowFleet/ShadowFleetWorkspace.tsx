@@ -1,54 +1,54 @@
 'use client';
-import { useEffect, useState } from 'react';
-import ScoreBar from '@/components/intel/shared/ScoreBar';
+import { useEffect, useMemo, useState } from 'react';
 import weights from '@/lib/fixtures/shadow_fleet_weights.json';
+import { AIS_BOXES } from '@/lib/intel/aisCoverage';
 
-interface Lead {
+/**
+ * The Dark Contact Board — events, not vessels.
+ *
+ * Concept (build brief rev. B, BACKEND/III - INTEL /Shadow Fleet/): a live
+ * board of dark-contact EVENTS over a map, with coverage stated as plainly as
+ * the findings. Four honesty rules govern every pixel:
+ *   - a marker is a LAST KNOWN position; absence of a marker is absence of a
+ *     look, not absence of a ship;
+ *   - a dead coverage box is drawn dead, and its contacts are held VOID —
+ *     listed, dimmed, never counted;
+ *   - the track and the timeline are real observed fixes, never interpolated;
+ *   - still_dark is always glossed "not re-observed" — a statement about our
+ *     instrument, not the transponder.
+ *
+ * The map is deliberately SCHEMATIC: coarse landmasses as orientation, while
+ * coverage boxes and contact positions are projected to scale (equirectangular,
+ * 20°W–110°E). Events whose last fix falls outside the frame are surfaced as an
+ * off-frame chip, not silently dropped. Sea only — the AIR domain is PR F.
+ *
+ * The v2 leads list and its OIL/LNG/GRAIN tabs are gone: the tabs never
+ * filtered (the parameter was read and ignored) and vessel_type exists on 0.8%
+ * of the fleet, so they could not be honestly implemented. The queue reads
+ * dark_contact_events (mig 112).
+ */
+
+interface DarkEvent {
+  id: string;
   mmsi: string;
-  name: string;
-  imo: string | null;
-  flag: string;
-  dwt: number | null;
-  composite_score: number;
-  indicators: Record<string, number>;
-  last_ais_at: string | null;
-  /** Hours since the vessel's last AIS fix, vs the data clock. Never row age. */
-  silence_hours: number;
-}
-
-interface Evidence {
-  mmsi?: string;
-  data_clock?: string | null;
-  feed_lag_minutes?: number | null;
-  identity?: {
-    name: string | null;
-    imo: string | null;
-    flag: string | null;
-    foc: boolean;
-    dwt: number | null;
-    built_year: number | null;
-  };
-  telemetry?: {
-    destination: string | null;
-    speed: number | null;
-    heading: number | null;
-    nav_status: number | null;
-    nav_status_label: string | null;
-    latitude: number | null;
-    longitude: number | null;
-  };
-  contact?: {
-    last_contact_at: string | null;
-    hours_since_contact: number | null;
-    dark_gap_open: boolean;
-    last_dark_at: string | null;
-    last_ais_at: string | null;
-  };
-  score?: {
-    composite_score: number | null;
-    indicators: Record<string, number> | null;
-  };
-  error?: string;
+  name: string | null;
+  flag: string | null;
+  box_slug: string | null;
+  last_fix_lat: number | null;
+  last_fix_lon: number | null;
+  last_speed_kn: number | null;
+  cadence_hours: number;
+  silence_ratio_at_open: number;
+  confidence_at_open: number;
+  indicators: Record<string, number> | null;
+  gap_started_at: string;
+  opened_at: string;
+  deadline_at: string;
+  status: 'open' | 'resolved' | 'void';
+  resolution: 'reappeared' | 'still_dark' | null;
+  void_reason: string | null;
+  closed_at: string | null;
+  final_gap_hours: number | null;
 }
 
 interface CoverageBox {
@@ -65,612 +65,175 @@ interface Coverage {
   dead_boxes: number;
   box_dead_after_h: number;
 }
-
-interface DarkEvent {
-  id: string;
-  mmsi: string;
-  name: string | null;
-  flag: string | null;
-  box_slug: string | null;
-  silence_ratio_at_open: number;
-  confidence_at_open: number;
-  status: 'open' | 'resolved' | 'void';
-  resolution: 'reappeared' | 'still_dark' | null;
-  void_reason: string | null;
-  opened_at: string;
-  closed_at: string | null;
-  final_gap_hours: number | null;
-}
 interface EventsSummary {
   open: number | null;
   reappeared_24h: number | null;
   still_dark_24h: number | null;
   void_24h: number | null;
 }
-
-const COMMODITIES = ['oil', 'lng', 'grain'] as const;
-
-type Commodity = (typeof COMMODITIES)[number];
+interface TrackFix {
+  recorded_at: string;
+  latitude: number | null;
+  longitude: number | null;
+  speed: number | null;
+}
 
 export default function ShadowFleetWorkspace() {
-  const [commodity, setCommodity] = useState<Commodity>('oil');
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
-  const [live, setLive] = useState(false);
-  const [coverage, setCoverage] = useState<Coverage | null>(null);
   const [events, setEvents] = useState<DarkEvent[]>([]);
-  const [evSummary, setEvSummary] = useState<EventsSummary | null>(null);
+  const [summary, setSummary] = useState<EventsSummary | null>(null);
+  const [coverage, setCoverage] = useState<Coverage | null>(null);
+  const [dataClock, setDataClock] = useState<string | null>(null);
+  const [feedLag, setFeedLag] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<'all' | 'open' | 'resolved' | 'void'>('all');
+  const [track, setTrack] = useState<TrackFix[]>([]);
+  const [trackLoading, setTrackLoading] = useState(false);
 
   useEffect(() => {
-    fetch('/api/intel/shadow-fleet/events?limit=8')
+    fetch('/api/intel/shadow-fleet/events?limit=80')
       .then(r => r.json())
       .then(j => {
         setEvents(j.events ?? []);
-        setEvSummary(j.summary ?? null);
+        setSummary(j.summary ?? null);
+        setCoverage(j.coverage ?? null);
+        setDataClock(j.data_clock ?? null);
+        setFeedLag(j.feed_lag_minutes ?? null);
+        if (j.events?.[0]) setSelectedId((prev) => prev ?? j.events[0].id);
       })
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    fetch(`/api/intel/shadow-fleet/leads?commodity=${commodity}&min_score=0.3&limit=40`)
-      .then(r => r.json())
-      .then(j => {
-        setLeads(j.leads ?? []);
-        setLive(!!j.live);
-        setCoverage(j.coverage ?? null);
-        if (!selected && j.leads?.[0]) setSelected(j.leads[0].mmsi);
-      });
-  }, [commodity]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const filtered = leads.filter(
-    l =>
-      !search ||
-      l.mmsi.includes(search) ||
-      l.name.toLowerCase().includes(search.toLowerCase()) ||
-      (l.imo && l.imo.includes(search)),
+  const filtered = useMemo(
+    () =>
+      events.filter(
+        e =>
+          (filter === 'all' || e.status === filter) &&
+          (!search ||
+            e.mmsi.includes(search) ||
+            (e.name ?? '').toLowerCase().includes(search.toLowerCase())),
+      ),
+    [events, filter, search],
   );
 
-  const active = filtered.find(l => l.mmsi === selected) ?? filtered[0];
-
-  return (
-    <div>
-      <CoverageStrip coverage={coverage} />
-      <EventsRail events={events} summary={evSummary} />
-      <div
-        className="grid"
-        style={{
-          gridTemplateColumns: '340px 1fr 320px',
-          gap: 1,
-          background: 'var(--rule-soft)',
-          minHeight: 620,
-        }}
-      >
-      {/* LEADS LIST */}
-      <aside style={{ background: 'var(--bg-navy)', padding: 14, overflowY: 'auto' }}>
-        <Head accent="var(--red)">Leads List</Head>
-
-        <div className="flex" style={{ gap: 4, marginTop: 10 }}>
-          {COMMODITIES.map(c => (
-            <button
-              key={c}
-              onClick={() => setCommodity(c)}
-              style={{
-                padding: '6px 10px',
-                fontFamily: 'var(--f-mono)',
-                fontSize: 10.5,
-                letterSpacing: '0.12em',
-                textTransform: 'uppercase',
-                background: commodity === c ? 'var(--red)' : 'var(--bg-panel)',
-                color: commodity === c ? 'var(--bg-void)' : 'var(--ink-dim)',
-                border: `1px solid ${commodity === c ? 'var(--red)' : 'var(--rule)'}`,
-                borderRadius: 2,
-                cursor: 'pointer',
-                fontWeight: commodity === c ? 500 : 400,
-              }}
-            >
-              {c}
-            </button>
-          ))}
-        </div>
-
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="MMSI / IMO / Name"
-          style={{
-            width: '100%',
-            padding: '6px 8px',
-            background: 'var(--bg-panel)',
-            border: '1px solid var(--rule)',
-            color: 'var(--ink)',
-            fontFamily: 'var(--f-body)',
-            fontSize: 12,
-            marginTop: 10,
-            borderRadius: 2,
-          }}
-        />
-
-        {!live && (
-          <p className="eyebrow" style={{ marginTop: 8, color: 'var(--ink-faint)' }}>
-            Profiles warming up — showing on-the-fly scores
-          </p>
-        )}
-
-        <div className="flex flex-col" style={{ gap: 6, marginTop: 10 }}>
-          {filtered.slice(0, 25).map((l, i) => (
-            <button
-              key={l.mmsi}
-              onClick={() => setSelected(l.mmsi)}
-              style={{
-                textAlign: 'left',
-                padding: 10,
-                background: active?.mmsi === l.mmsi ? 'rgba(224, 93, 80, 0.08)' : 'var(--bg-panel)',
-                border: `1px solid ${active?.mmsi === l.mmsi ? 'var(--red)' : 'var(--rule-soft)'}`,
-                cursor: 'pointer',
-                color: 'var(--ink)',
-                fontFamily: 'var(--f-body)',
-                borderRadius: 2,
-              }}
-            >
-              <div className="flex items-baseline justify-between">
-                <span style={{ fontSize: 12 }}>{i + 1}. {l.name}</span>
-                <span className="num-lg" style={{ fontSize: 11, color: 'var(--red)' }}>
-                  {(l.composite_score * 100).toFixed(0)}
-                </span>
-              </div>
-              <div style={{ fontSize: 10.5, color: 'var(--ink-faint)', fontFamily: 'var(--f-mono)', marginTop: 2 }}>
-                MMSI {l.mmsi} · flag {l.flag} · silent {l.silence_hours}h
-              </div>
-              <div style={{ marginTop: 6 }}>
-                <ScoreBar value={l.composite_score} width={280} />
-              </div>
-            </button>
-          ))}
-        </div>
-      </aside>
-
-      {/* EVIDENCE VIEWER */}
-      <section style={{ background: 'var(--bg-navy)', padding: 16, minWidth: 0 }}>
-        {active ? <EvidenceViewer lead={active} /> : <Empty>Select a lead to explore its evidence dossier.</Empty>}
-      </section>
-
-      {/* INDICATORS + CLUSTER */}
-      <aside style={{ background: 'var(--bg-navy)', padding: 14, overflowY: 'auto' }}>
-        <Head accent="var(--red)">Contributing Indicators</Head>
-        {active ? (
-          <IndicatorMath indicators={active.indicators} composite={active.composite_score} />
-        ) : (
-          <Empty>—</Empty>
-        )}
-
-        <Head accent="var(--red)" margin={14}>Cluster Membership</Head>
-        <div className="flex flex-col" style={{ gap: 6, marginTop: 10 }}>
-          <div style={{ padding: 8, background: 'var(--bg-panel)', border: '1px dashed var(--rule)', fontSize: 11, color: 'var(--ink-faint)' }}>
-            Kinship clustering awaits entities / fleet_kinship_edges population — no linkages recorded yet.
-          </div>
-        </div>
-
-        <Head accent="var(--red)" margin={14}>Actions</Head>
-        <div className="flex flex-col" style={{ gap: 6, marginTop: 10 }}>
-          <SmallButton>Export Evidence Pack</SmallButton>
-          <SmallButton>Draft Tweet (Journalist)</SmallButton>
-          <SmallButton>Draft Email Pitch</SmallButton>
-          <SmallButton>Compliance Review</SmallButton>
-        </div>
-      </aside>
-      </div>
-    </div>
-  );
-}
-
-function EvidenceViewer({ lead }: { lead: Lead }) {
-  const [evidence, setEvidence] = useState<Evidence | null>(null);
-  const [loading, setLoading] = useState(true);
+  const selected = events.find(e => e.id === selectedId) ?? filtered[0] ?? null;
 
   useEffect(() => {
+    if (!selected) return;
     let cancelled = false;
-    setLoading(true);
-    setEvidence(null);
-    fetch(`/api/intel/shadow-fleet/evidence?mmsi=${encodeURIComponent(lead.mmsi)}`)
+    setTrackLoading(true);
+    fetch(`/api/intel/shadow-fleet/track?mmsi=${encodeURIComponent(selected.mmsi)}`)
       .then(r => r.json())
       .then(j => {
         if (cancelled) return;
-        setEvidence(j ?? { error: 'empty response' });
-        setLoading(false);
+        setTrack(j.fixes ?? []);
+        setTrackLoading(false);
       })
       .catch(() => {
-        if (cancelled) return;
-        setEvidence({ error: 'request failed' });
-        setLoading(false);
+        if (!cancelled) { setTrack([]); setTrackLoading(false); }
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [lead.mmsi]);
-
-  const identity = evidence?.identity;
-  const telemetry = evidence?.telemetry;
-  const contact = evidence?.contact;
-  const gapOpen = contact?.dark_gap_open ?? false;
-  const feedLag = evidence?.feed_lag_minutes ?? null;
-  const feedStalled = feedLag !== null && feedLag > 30;
-  const gapHours =
-    contact?.hours_since_contact !== null && contact?.hours_since_contact !== undefined
-      ? Math.round(contact.hours_since_contact)
-      : lead.silence_hours;
+    return () => { cancelled = true; };
+  }, [selected?.mmsi]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="flex flex-col" style={{ gap: 16 }}>
-      <header
-        className="flex items-start justify-between"
-        style={{ padding: 12, background: 'var(--bg-panel)', border: '1px solid var(--rule-soft)', borderLeft: '2px solid var(--red)' }}
+    <div className="flex flex-col" style={{ height: 'calc(100vh - 235px)', minHeight: 560 }}>
+      <BoardStrip coverage={coverage} summary={summary} dataClock={dataClock} feedLag={feedLag} />
+
+      <div
+        className="grid flex-1"
+        style={{
+          gridTemplateColumns: '322px minmax(0, 1fr) 326px',
+          gap: 1,
+          background: 'var(--rule-soft)',
+          minHeight: 0,
+        }}
       >
-        <div>
-          <div className="eyebrow">Vessel</div>
-          <div style={{ fontFamily: 'var(--f-display)', fontSize: 18, fontWeight: 500, letterSpacing: '0.04em' }}>
-            {lead.name}
-          </div>
-          <div style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--ink-dim)', marginTop: 4 }}>
-            MMSI {lead.mmsi} · Flag {lead.flag}
-            {identity?.foc ? ' (FOC)' : ''}
-            {lead.imo ? ` · IMO ${lead.imo}` : ''}
-            {lead.dwt ? ` · DWT ${lead.dwt.toLocaleString()}` : ''}
-            {identity?.built_year ? ` · Built ${identity.built_year}` : ''}
-          </div>
-        </div>
-        <div style={{ textAlign: 'right' }}>
-          <div className="eyebrow">Composite</div>
-          <div className="num-lg" style={{ fontSize: 28, color: 'var(--red)' }}>{(lead.composite_score * 100).toFixed(0)}</div>
-          <span
-            style={{
-              display: 'inline-block',
-              padding: '2px 8px',
-              fontFamily: 'var(--f-mono)',
-              fontSize: 9.5,
-              letterSpacing: '0.15em',
-              textTransform: 'uppercase',
-              background: gapOpen ? 'var(--red)' : 'var(--bg-navy)',
-              color: gapOpen ? 'var(--bg-void)' : 'var(--ink-dim)',
-              border: gapOpen ? 'none' : '1px solid var(--rule)',
-              marginTop: 6,
-            }}
-          >
-            {gapOpen ? `Dark · ${gapHours}h gap` : 'AIS current'}
-          </span>
-        </div>
-      </header>
-
-      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--rule-soft)', padding: 12 }}>
-        <div className="eyebrow" style={{ marginBottom: 8 }}>Live Telemetry · current AIS snapshot</div>
-        {feedStalled && (
-          <div
-            style={{
-              display: 'inline-block',
-              padding: '3px 8px',
-              marginBottom: 8,
-              fontFamily: 'var(--f-mono)',
-              fontSize: 9.5,
-              letterSpacing: '0.15em',
-              textTransform: 'uppercase',
-              color: 'var(--amber)',
-              border: '1px solid var(--amber)',
-              borderRadius: 2,
-            }}
-          >
-            AIS FEED STALLED · {feedLag} min behind
-          </div>
-        )}
-        {loading ? (
-          <p style={{ fontSize: 11.5, color: 'var(--ink-faint)', fontFamily: 'var(--f-mono)', letterSpacing: '0.08em' }}>
-            Fetching live vessel record…
-          </p>
-        ) : evidence?.error || !contact ? (
-          <p style={{ fontSize: 11.5, color: 'var(--ink-faint)', lineHeight: 1.5 }}>
-            Live telemetry unavailable{evidence?.error ? ` — ${evidence.error}` : ''}. No fabricated track is shown in its place.
-          </p>
-        ) : (
-          <>
-            <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 1, background: 'var(--rule-soft)', border: '1px solid var(--rule-soft)' }}>
-              <Fact
-                label="Last AIS contact"
-                value={
-                  contact.hours_since_contact !== null
-                    ? `${contact.hours_since_contact} h ${feedStalled ? 'before last feed tick' : 'ago'}`
-                    : '—'
-                }
-                sub={contact.last_contact_at ? fmtUtc(contact.last_contact_at) : undefined}
-              />
-              <Fact
-                label="Dark-gap status"
-                value={
-                  gapOpen
-                    ? `OPEN · > 6 h silent${feedStalled ? ' vs last feed tick' : ''}`
-                    : 'No open gap'
-                }
-                accent={gapOpen}
-              />
-              <Fact
-                label="Last dark episode"
-                value={contact.last_dark_at ? fmtUtc(contact.last_dark_at) : 'None recorded'}
-              />
-              <Fact
-                label="Destination (self-reported)"
-                value={telemetry?.destination || '—'}
-              />
-              <Fact
-                label="Speed / Heading"
-                value={`${telemetry?.speed ?? '—'} kn · ${telemetry?.heading ?? '—'}°`}
-              />
-              <Fact
-                label="Nav status"
-                value={telemetry?.nav_status_label ?? '—'}
-              />
-              <Fact
-                label="Position"
-                value={
-                  telemetry?.latitude != null && telemetry?.longitude != null
-                    ? `${Number(telemetry.latitude).toFixed(3)}, ${Number(telemetry.longitude).toFixed(3)}`
-                    : '—'
-                }
-              />
-              <Fact
-                label="Registry"
-                value={identity?.flag ? `${identity.flag}${identity.foc ? ' · flag of convenience' : ''}` : '—'}
-              />
+        {/* EVENT QUEUE */}
+        <aside style={{ background: 'var(--bg-navy)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div style={{ padding: '10px 12px 8px', borderBottom: '1px solid var(--rule-soft)', flex: 'none' }}>
+            <PanelHead>Event Queue</PanelHead>
+            <div className="flex" style={{ gap: 4, marginTop: 8 }}>
+              {(['all', 'open', 'resolved', 'void'] as const).map(fk => (
+                <button
+                  key={fk}
+                  onClick={() => setFilter(fk)}
+                  style={{
+                    padding: '3px 8px',
+                    fontFamily: 'var(--f-mono)',
+                    fontSize: 8.5,
+                    letterSpacing: '0.1em',
+                    textTransform: 'uppercase',
+                    color: filter === fk ? 'var(--red)' : 'var(--ink-faint)',
+                    background: filter === fk ? 'rgba(224,93,80,0.12)' : 'transparent',
+                    border: `1px solid ${filter === fk ? 'var(--red)' : 'var(--rule)'}`,
+                    borderRadius: 2,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {fk}
+                </button>
+              ))}
             </div>
-            <p style={{ marginTop: 8, fontSize: 10.5, color: 'var(--ink-faint)', lineHeight: 1.5 }}>
-              Single current-position snapshot from the live AIS feed. Historical track reconstruction requires AIS retention, which is not yet stored.
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="MMSI / Name"
+              style={{
+                width: '100%',
+                padding: '5px 8px',
+                background: 'var(--bg-panel)',
+                border: '1px solid var(--rule)',
+                color: 'var(--ink)',
+                fontFamily: 'var(--f-body)',
+                fontSize: 12,
+                marginTop: 8,
+                borderRadius: 2,
+              }}
+            />
+          </div>
+          <div style={{ overflowY: 'auto', flex: 1 }}>
+            {filtered.length === 0 ? (
+              <p style={{ padding: 14, fontSize: 11, color: 'var(--ink-faint)', fontFamily: 'var(--f-mono)', lineHeight: 1.6 }}>
+                No dark-contact events{filter !== 'all' ? ` with status "${filter}"` : ''} yet.
+                Events open when a vessel goes silent ≥ 12× its own observed cadence inside
+                a live coverage box.
+              </p>
+            ) : (
+              filtered.map(ev => (
+                <EventRow key={ev.id} ev={ev} active={selected?.id === ev.id} onClick={() => setSelectedId(ev.id)} />
+              ))
+            )}
+          </div>
+        </aside>
+
+        {/* MAP + TIMELINE */}
+        <section style={{ background: 'var(--bg-navy)', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
+          <BoardMap events={events} coverage={coverage} selected={selected} track={track} />
+          <CadenceTimeline selected={selected} track={track} loading={trackLoading} dataClock={dataClock} />
+        </section>
+
+        {/* DOSSIER */}
+        <aside style={{ background: 'var(--bg-navy)', overflowY: 'auto', minHeight: 0 }}>
+          {selected ? (
+            <EventDossier ev={selected} dataClock={dataClock} />
+          ) : (
+            <p style={{ padding: 16, fontSize: 11.5, color: 'var(--ink-faint)', fontFamily: 'var(--f-mono)' }}>
+              Select an event.
             </p>
-          </>
-        )}
-      </div>
-
-      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 1, background: 'var(--rule-soft)', border: '1px solid var(--rule-soft)' }}>
-        <Box title="Flag & Owner History">
-          <Pending>Registry history not yet integrated.</Pending>
-        </Box>
-        <Box title="Port Calls (last 12 mo)">
-          <Pending>Port-call history requires AIS retention — not yet stored.</Pending>
-        </Box>
-        <Box title="Ownership Graph">
-          <Pending>Ownership graph awaits entities / fleet_kinship_edges population.</Pending>
-        </Box>
-        <Box title="Sentinel Imagery">
-          <Pending>Satellite imagery not yet integrated.</Pending>
-        </Box>
+          )}
+        </aside>
       </div>
     </div>
   );
 }
 
-function Fact({ label, value, sub, accent = false }: { label: string; value: string; sub?: string; accent?: boolean }) {
-  return (
-    <div style={{ background: 'var(--bg-panel)', padding: '8px 10px' }}>
-      <div className="eyebrow" style={{ fontSize: 9 }}>{label}</div>
-      <div style={{ fontFamily: 'var(--f-mono)', fontSize: 12, marginTop: 2, color: accent ? 'var(--red)' : 'var(--ink)' }}>
-        {value}
-      </div>
-      {sub && (
-        <div style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--ink-faint)', marginTop: 2 }}>{sub}</div>
-      )}
-    </div>
-  );
-}
+/* ── The strip: coverage + resolution tallies + the data clock ─────────── */
 
-function Pending({ children }: { children: React.ReactNode }) {
-  return (
-    <p style={{ fontSize: 11.5, color: 'var(--ink-faint)', lineHeight: 1.5, fontStyle: 'italic', margin: 0 }}>
-      {children}
-    </p>
-  );
-}
-
-function fmtUtc(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return `${d.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
-}
-
-function Box({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div style={{ background: 'var(--bg-panel)', padding: 12 }}>
-      <div className="eyebrow" style={{ marginBottom: 6 }}>{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function SmallButton({ children }: { children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      style={{
-        padding: '8px 10px',
-        background: 'var(--bg-panel)',
-        border: '1px solid var(--rule)',
-        color: 'var(--ink)',
-        fontFamily: 'var(--f-mono)',
-        fontSize: 11,
-        letterSpacing: '0.1em',
-        textTransform: 'uppercase',
-        borderRadius: 2,
-        cursor: 'pointer',
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Head({ children, accent = 'var(--teal)', margin = 0 }: { children: React.ReactNode; accent?: string; margin?: number }) {
-  return (
-    <h3 className="panel-title" style={{ marginTop: margin, display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span style={{ width: 3, height: 12, background: accent }} />
-      {children}
-    </h3>
-  );
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        background: 'var(--bg-panel)',
-        padding: 20,
-        border: '1px dashed var(--rule)',
-        fontSize: 11.5,
-        color: 'var(--ink-faint)',
-        fontFamily: 'var(--f-mono)',
-        letterSpacing: '0.08em',
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function prettyKey(k: string): string {
-  return k.replaceAll('_', ' ');
-}
-
-/**
- * Dark-contact events rail (mig 112) — the workspace's first EVENT surface.
- * An event has a beginning, a deadline and an outcome; this rail shows the
- * most recent ones with their lifecycle state, and the 24 h resolution tally.
- * still_dark is always glossed as "not re-observed" — it is a statement about
- * our coverage, never about the transponder.
- */
-function EventsRail({ events, summary }: { events: DarkEvent[]; summary: EventsSummary | null }) {
-  if (events.length === 0 && !summary) return null;
-
-  const badge = (ev: DarkEvent): { text: string; color: string; solid: boolean } => {
-    if (ev.status === 'open') return { text: 'DARK', color: 'var(--red)', solid: true };
-    if (ev.status === 'void') return { text: 'VOID', color: 'var(--ink-faint)', solid: false };
-    return ev.resolution === 'reappeared'
-      ? { text: 'BACK', color: 'var(--teal)', solid: true }
-      : { text: 'NOT RE-OBSERVED 72H', color: 'var(--amber)', solid: false };
-  };
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        overflowX: 'auto',
-        padding: '7px 12px',
-        background: 'var(--bg-navy)',
-        borderBottom: '1px solid var(--rule-soft)',
-        marginBottom: 1,
-      }}
-    >
-      <span className="eyebrow" style={{ flex: 'none' }}>
-        Dark events
-        {summary && summary.open != null && (
-          <span style={{ color: 'var(--red)', marginLeft: 6 }}>{summary.open} open</span>
-        )}
-        {summary && summary.reappeared_24h != null && (
-          <span style={{ color: 'var(--ink-faint)', marginLeft: 6 }}>
-            · 24h: {summary.reappeared_24h} back / {summary.still_dark_24h ?? 0} not re-observed / {summary.void_24h ?? 0} void
-          </span>
-        )}
-      </span>
-      {events.map(ev => {
-        const b = badge(ev);
-        return (
-          <span
-            key={ev.id}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'baseline',
-              gap: 6,
-              padding: '3px 9px',
-              border: `1px solid ${b.color}`,
-              borderRadius: 2,
-              fontFamily: 'var(--f-mono)',
-              fontSize: 9.5,
-              whiteSpace: 'nowrap',
-              flex: 'none',
-              background: b.solid ? 'rgba(224,93,80,0.06)' : 'transparent',
-            }}
-          >
-            <span style={{ color: b.color, letterSpacing: '0.1em', fontSize: 8 }}>{b.text}</span>
-            <span style={{ color: 'var(--ink)' }}>{ev.name ?? ev.mmsi}</span>
-            <span style={{ color: 'var(--ink-faint)' }}>
-              {ev.status === 'open'
-                ? `${ev.silence_ratio_at_open.toFixed(0)}× cadence`
-                : ev.final_gap_hours != null
-                  ? `gap ${ev.final_gap_hours.toFixed(0)}h`
-                  : ''}
-            </span>
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
-/**
- * The coverage strip — permanently visible, allowed to look bad.
- *
- * One chip per subscription box: live with its fix rate, stale with its age,
- * dead with days-silent. A dead box is where the VOID gate applies: contacts
- * last seen inside it are held out of the leads list entirely, and the strip
- * says so rather than letting the list silently shrink. When the liveness
- * table is absent (migration 110 not applied) the strip renders a single
- * "coverage state unavailable" chip — unknown is displayed as unknown, never
- * as healthy.
- */
-function CoverageStrip({ coverage }: { coverage: Coverage | null }) {
-  const chip = (key: string, color: string, text: string, solid = false) => (
-    <span
-      key={key}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: '3px 10px',
-        border: `1px solid ${color}`,
-        borderRadius: 2,
-        fontFamily: 'var(--f-mono)',
-        fontSize: 9.5,
-        letterSpacing: '0.06em',
-        color,
-        background: solid ? 'rgba(224,93,80,0.08)' : 'transparent',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      <span style={{ width: 5, height: 5, borderRadius: '50%', background: color, display: 'inline-block' }} />
-      {text}
-    </span>
-  );
-
-  let chips: React.ReactNode[];
-  let note: string | null = null;
-  if (!coverage) {
-    chips = [chip('none', 'var(--ink-faint)', 'COVERAGE STATE UNAVAILABLE')];
-  } else {
-    const order = { dead: 0, stale: 1, unknown: 2, live: 3 } as const;
-    const boxes = [...coverage.boxes].sort((a, b) => order[a.state] - order[b.state]);
-    chips = boxes.map(b => {
-      const up = b.label.toUpperCase();
-      if (b.state === 'dead') {
-        const days = b.silent_hours != null ? (b.silent_hours / 24).toFixed(1) : '?';
-        return chip(b.slug, 'var(--red)', `${up} · NO AIS ${days}d`, true);
-      }
-      if (b.state === 'stale') {
-        return chip(b.slug, 'var(--amber)', `${up} · ${b.silent_hours ?? '?'}h STALE`);
-      }
-      if (b.state === 'unknown') {
-        return chip(b.slug, 'var(--ink-faint)', `${up} · —`);
-      }
-      return chip(b.slug, 'var(--teal-dim)', `${up} · ${b.fixes_last_hour.toLocaleString()}/h`);
-    });
-    if (coverage.dead_boxes > 0) {
-      note = `Contacts last seen inside a dead box are held VOID — never scored, never counted. Silence there is unmeasurable.`;
-    }
-  }
+function BoardStrip({
+  coverage, summary, dataClock, feedLag,
+}: { coverage: Coverage | null; summary: EventsSummary | null; dataClock: string | null; feedLag: number | null }) {
+  const order = { dead: 0, stale: 1, unknown: 2, live: 3 } as const;
+  const boxes = coverage ? [...coverage.boxes].sort((a, b) => order[a.state] - order[b.state]) : [];
 
   return (
     <div
@@ -679,33 +242,422 @@ function CoverageStrip({ coverage }: { coverage: Coverage | null }) {
         alignItems: 'center',
         gap: 6,
         flexWrap: 'wrap',
-        padding: '8px 12px',
+        padding: '7px 12px',
         background: 'var(--bg-navy)',
         borderBottom: '1px solid var(--rule-soft)',
         marginBottom: 1,
+        flex: 'none',
       }}
     >
-      <span className="eyebrow" style={{ marginRight: 6 }}>AIS coverage</span>
-      {chips}
-      {note && (
-        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--ink-faint)', marginLeft: 'auto' }}>
-          {note}
-        </span>
+      <span className="eyebrow" style={{ flex: 'none' }}>Coverage</span>
+      {!coverage ? (
+        <Chip color="var(--ink-faint)">STATE UNAVAILABLE</Chip>
+      ) : (
+        boxes.map(b => {
+          const up = b.label.toUpperCase();
+          if (b.state === 'dead') {
+            const days = b.silent_hours != null ? (b.silent_hours / 24).toFixed(1) : '?';
+            return <Chip key={b.slug} color="var(--red)" solid>{up} · NO AIS {days}d</Chip>;
+          }
+          if (b.state === 'stale') return <Chip key={b.slug} color="var(--amber)">{up} · {b.silent_hours ?? '?'}h STALE</Chip>;
+          if (b.state === 'unknown') return <Chip key={b.slug} color="var(--ink-faint)">{up} · —</Chip>;
+          return <Chip key={b.slug} color="var(--teal-dim)">{up} · {b.fixes_last_hour.toLocaleString()}/h</Chip>;
+        })
       )}
+      <span style={{ marginLeft: 'auto', fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--ink-dim)', whiteSpace: 'nowrap' }}>
+        {summary && summary.open != null && (
+          <>
+            <span style={{ color: 'var(--red)' }}>{summary.open} open</span>
+            {' · 24h: '}{summary.reappeared_24h ?? 0} back / {summary.still_dark_24h ?? 0} not re-observed / {summary.void_24h ?? 0} void
+            {' · '}
+          </>
+        )}
+        DATA CLOCK{' '}
+        <span style={{ color: 'var(--teal)' }}>
+          {dataClock ? `${dataClock.slice(0, 16).replace('T', ' ')}Z` : '—'}
+        </span>
+        {feedLag != null && ` · lag ${feedLag}m`}
+      </span>
     </div>
   );
 }
 
-/**
- * The score, shown as arithmetic that can be recomputed by eye.
- *
- * This panel used to render each raw feature VALUE prefixed with "+", which read
- * as a contribution and was not one: "ais gap hours log +3.98" is ln(1 + hours),
- * and "flag of convenience +1.00" is a boolean. Neither can be reconciled with a
- * composite of 57 without the weights and the intercept, which appeared nowhere.
- * Every term now shows value × weight = contribution, plus the intercept and the
- * logistic, so the displayed composite is checkable against the rows above it.
- */
+function Chip({ children, color, solid = false }: { children: React.ReactNode; color: string; solid?: boolean }) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '3px 10px',
+        border: `1px solid ${color}`,
+        borderRadius: 2,
+        fontFamily: 'var(--f-mono)',
+        fontSize: 9,
+        letterSpacing: '0.06em',
+        color,
+        background: solid ? 'rgba(224,93,80,0.08)' : 'transparent',
+        whiteSpace: 'nowrap',
+        flex: 'none',
+      }}
+    >
+      <span style={{ width: 5, height: 5, borderRadius: '50%', background: color, display: 'inline-block' }} />
+      {children}
+    </span>
+  );
+}
+
+/* ── Event queue row ───────────────────────────────────────────────────── */
+
+function eventBadge(ev: DarkEvent): { text: string; color: string } {
+  if (ev.status === 'open') return { text: 'DARK', color: 'var(--red)' };
+  if (ev.status === 'void') return { text: 'VOID', color: 'var(--ink-faint)' };
+  return ev.resolution === 'reappeared'
+    ? { text: 'BACK', color: 'var(--teal)' }
+    : { text: 'NOT RE-OBSERVED', color: 'var(--amber)' };
+}
+
+function liveSilenceHours(ev: DarkEvent, dataClock?: string | null): number {
+  const end = ev.closed_at
+    ? new Date(ev.closed_at).getTime()
+    : dataClock
+      ? new Date(dataClock).getTime()
+      : Date.now();
+  return Math.max(0, (end - new Date(ev.gap_started_at).getTime()) / 3600_000);
+}
+
+function EventRow({ ev, active, onClick }: { ev: DarkEvent; active: boolean; onClick: () => void }) {
+  const b = eventBadge(ev);
+  const dim = ev.status === 'void';
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'block',
+        width: '100%',
+        textAlign: 'left',
+        padding: '8px 12px',
+        background: active ? 'rgba(224,93,80,0.07)' : 'transparent',
+        border: 'none',
+        borderBottom: '1px solid var(--rule-soft)',
+        borderLeft: `2px solid ${active ? 'var(--red)' : 'transparent'}`,
+        cursor: 'pointer',
+        color: 'var(--ink)',
+        opacity: dim ? 0.55 : 1,
+      }}
+    >
+      <div className="flex items-baseline" style={{ gap: 6 }}>
+        <span
+          style={{
+            fontFamily: 'var(--f-mono)',
+            fontSize: 7.5,
+            letterSpacing: '0.1em',
+            padding: '1px 5px',
+            borderRadius: 2,
+            flex: 'none',
+            background: ev.status === 'open' ? 'var(--red)' : 'transparent',
+            border: ev.status === 'open' ? 'none' : `1px solid ${b.color}`,
+            color: ev.status === 'open' ? 'var(--bg-void)' : b.color,
+          }}
+        >
+          {b.text}
+        </span>
+        <span style={{ fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {ev.name ?? ev.mmsi}
+        </span>
+        <span style={{ marginLeft: 'auto', fontFamily: 'var(--f-mono)', fontSize: 10.5, color: b.color, flex: 'none' }}>
+          {(ev.confidence_at_open * 100).toFixed(0)}
+        </span>
+      </div>
+      <div style={{ fontFamily: 'var(--f-mono)', fontSize: 8.5, color: 'var(--ink-faint)', marginTop: 3 }}>
+        {ev.mmsi} · {ev.flag ?? '—'} · {ev.silence_ratio_at_open.toFixed(0)}× cadence
+        {ev.final_gap_hours != null ? ` · gap ${ev.final_gap_hours.toFixed(0)}h` : ''}
+        {ev.box_slug ? ` · ${ev.box_slug}` : ''}
+      </div>
+    </button>
+  );
+}
+
+/* ── The map — schematic basemap, to-scale boxes and contacts ──────────── */
+/* Frame: 20°W–110°E, 75°N–40°S. Landmass paths are deliberately coarse       */
+/* orientation shapes; boxes and markers are projected exactly.               */
+
+const FRAME = { lonMin: -20, lonMax: 110, latMin: -40, latMax: 75, w: 790, h: 727 };
+const px = (lon: number) => ((lon - FRAME.lonMin) / (FRAME.lonMax - FRAME.lonMin)) * FRAME.w;
+const py = (lat: number) => ((FRAME.latMax - lat) / (FRAME.latMax - FRAME.latMin)) * FRAME.h;
+const inFrame = (lat: number, lon: number) =>
+  lon >= FRAME.lonMin && lon <= FRAME.lonMax && lat >= FRAME.latMin && lat <= FRAME.latMax;
+
+const LANDMASSES = [
+  'M60,190 L94,162 L130,146 L182,131 L186,92 L210,60 L240,35 L273,24 L322,37 L430,18 L580,14 L700,22 L790,28 L790,300 L750,300 L720,318 L659,319 L640,300 L610,377 L593,408 L564,341 L540,300 L500,290 L470,300 L440,330 L431,352 L400,372 L383,383 L375,360 L360,320 L345,290 L332,262 L340,240 L355,232 L340,215 L300,210 L270,222 L240,228 L215,218 L195,232 L175,215 L130,222 L90,228 L67,215 Z',
+  'M85,250 L130,244 L182,240 L243,262 L304,268 L330,290 L346,335 L372,380 L431,390 L395,444 L363,481 L360,498 L333,577 L310,638 L233,663 L209,596 L202,510 L178,454 L142,417 L120,423 L41,405 L16,367 L24,347 L42,316 L63,271 Z',
+  'M87,152 L130,146 L112,122 L103,100 L85,110 L94,137 Z',
+  'M61,131 L85,122 L85,140 L61,143 Z',
+  'M385,529 L422,551 L407,609 L391,578 Z',
+  'M608,414 L619,414 L614,397 Z',
+  'M700,423 L765,492 L741,490 L699,469 Z',
+  'M729,417 L753,448 L747,449 L717,408 Z',
+  'M723,335 L766,335 L784,390 L760,402 L729,377 Z',
+];
+
+function BoardMap({
+  events, coverage, selected, track,
+}: { events: DarkEvent[]; coverage: Coverage | null; selected: DarkEvent | null; track: TrackFix[] }) {
+  const stateBySlug = new Map((coverage?.boxes ?? []).map(b => [b.slug, b] as const));
+
+  const placed = events.filter(e => e.last_fix_lat != null && e.last_fix_lon != null);
+  const onMap = placed.filter(e => inFrame(e.last_fix_lat as number, e.last_fix_lon as number));
+  const offFrame = placed.length - onMap.length;
+
+  const tail = (track ?? [])
+    .filter(f => f.latitude != null && f.longitude != null && inFrame(f.latitude, f.longitude))
+    .slice(-12);
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, background: '#070C16', position: 'relative', overflow: 'hidden' }}>
+      <svg viewBox={`0 0 ${FRAME.w} ${FRAME.h}`} style={{ width: '100%', height: '100%' }} preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <pattern id="sfgrid" width="60.8" height="60.9" patternUnits="userSpaceOnUse">
+            <path d="M60.8 0 L0 0 0 60.9" fill="none" stroke="#0E1729" strokeWidth="1" />
+          </pattern>
+          <radialGradient id="sfpulse">
+            <stop offset="0%" stopColor="#E05D50" stopOpacity=".5" />
+            <stop offset="100%" stopColor="#E05D50" stopOpacity="0" />
+          </radialGradient>
+        </defs>
+        <rect width={FRAME.w} height={FRAME.h} fill="#070C16" />
+        <rect width={FRAME.w} height={FRAME.h} fill="url(#sfgrid)" />
+
+        <g fill="#101B2E" stroke="#1B2941" strokeWidth=".9">
+          {LANDMASSES.map((d, i) => <path key={i} d={d} />)}
+        </g>
+
+        {/* coverage boxes, to scale */}
+        {AIS_BOXES.map(box => {
+          const [lat0, lon0, lat1, lon1] = box.bounds;
+          if (!inFrame(lat0, lon0) && !inFrame(lat1, lon1)) return null;
+          const st = stateBySlug.get(box.slug)?.state ?? 'unknown';
+          const x = px(lon0), y = py(lat1), w = px(lon1) - px(lon0), h = py(lat0) - py(lat1);
+          const dead = st === 'dead';
+          return (
+            <g key={box.slug}>
+              <rect
+                x={x} y={y} width={w} height={h}
+                fill={dead ? 'rgba(224,93,80,.13)' : 'none'}
+                stroke={dead ? '#E05D50' : st === 'stale' ? '#D4A24C' : '#19D0B8'}
+                strokeWidth={dead ? 1.2 : 1}
+                strokeDasharray={dead ? '3 3' : '4 4'}
+                opacity={dead ? 1 : 0.5}
+              />
+              {(dead || box.kind === 'chokepoint') && (
+                <text
+                  x={x + w + 4} y={y + 8}
+                  fontFamily="var(--f-mono)" fontSize="8"
+                  fill={dead ? '#E05D50' : '#19D0B8'}
+                  opacity={dead ? 1 : 0.7}
+                >
+                  {box.label.toUpperCase()}
+                  {dead && stateBySlug.get(box.slug)?.silent_hours != null
+                    ? ` · NO AIS ${((stateBySlug.get(box.slug)!.silent_hours as number) / 24).toFixed(1)}d`
+                    : ''}
+                </text>
+              )}
+            </g>
+          );
+        })}
+
+        {/* selection track tail — real fixes, drawn as points joined faintly */}
+        {selected && tail.length > 1 && (
+          <g>
+            <path
+              d={tail.map((f, i) => `${i === 0 ? 'M' : 'L'}${px(f.longitude as number).toFixed(1)},${py(f.latitude as number).toFixed(1)}`).join(' ')}
+              stroke="#E05D50" strokeWidth="1.1" fill="none" strokeDasharray="2.5 2.5" opacity=".8"
+            />
+            {tail.map((f, i) => (
+              <circle key={i} cx={px(f.longitude as number)} cy={py(f.latitude as number)} r="1.6" fill="#E05D50" opacity=".7" />
+            ))}
+          </g>
+        )}
+
+        {/* event markers at last known positions */}
+        {onMap.map(ev => {
+          const x = px(ev.last_fix_lon as number), y = py(ev.last_fix_lat as number);
+          const isSel = selected?.id === ev.id;
+          const color = ev.status === 'open' ? '#E05D50'
+            : ev.status === 'void' ? '#3A4256'
+            : ev.resolution === 'reappeared' ? '#19D0B8' : '#D4A24C';
+          return (
+            <g key={ev.id}>
+              {isSel && ev.status === 'open' && <circle cx={x} cy={y} r="16" fill="url(#sfpulse)" />}
+              <circle
+                cx={x} cy={y} r={isSel ? 4 : 2.8}
+                fill={ev.status === 'void' ? 'none' : color}
+                stroke={ev.status === 'void' ? color : '#05080F'}
+                strokeWidth="1"
+              />
+              {isSel && (
+                <text x={x + 8} y={y - 6} fontFamily="var(--f-mono)" fontSize="8.5" fill={color}>
+                  {ev.name ?? ev.mmsi} · {liveSilenceHours(ev).toFixed(0)}h
+                </text>
+              )}
+            </g>
+          );
+        })}
+
+        {offFrame > 0 && (
+          <text x="12" y={FRAME.h - 40} fontFamily="var(--f-mono)" fontSize="8.5" fill="#98A3B5">
+            +{offFrame} contact{offFrame > 1 ? 's' : ''} off-frame (Americas / Panama) — listed in the queue, states in the strip
+          </text>
+        )}
+
+        <text x={FRAME.w - 12} y={FRAME.h - 26} textAnchor="end" fontFamily="var(--f-mono)" fontSize="8" fill="#3A4256">
+          Marker = LAST KNOWN position. Absence of a marker is absence of a look, not absence of a ship.
+        </text>
+        <text x={FRAME.w - 12} y={FRAME.h - 14} textAnchor="end" fontFamily="var(--f-mono)" fontSize="8" fill="#3A4256">
+          Schematic basemap · frame 20°W–110°E · boxes and contacts to scale
+        </text>
+      </svg>
+    </div>
+  );
+}
+
+/* ── Cadence timeline — every tick a real fix, then the gap ────────────── */
+
+function CadenceTimeline({
+  selected, track, loading, dataClock,
+}: { selected: DarkEvent | null; track: TrackFix[]; loading: boolean; dataClock: string | null }) {
+  if (!selected) return null;
+
+  const W = 758, H = 56;
+  const nowMs = dataClock ? new Date(dataClock).getTime() : Date.now();
+  const startMs = nowMs - 14 * 24 * 3600_000;
+  const gapStartMs = new Date(selected.gap_started_at).getTime();
+  const endMs = selected.closed_at ? new Date(selected.closed_at).getTime() : nowMs;
+  const tx = (ms: number) => Math.max(0, Math.min(W, ((ms - startMs) / (nowMs - startMs)) * W));
+
+  const ticks = track
+    .map(f => new Date(f.recorded_at).getTime())
+    .filter(ms => ms >= startMs && ms <= nowMs);
+  const silence = liveSilenceHours(selected, dataClock);
+  const b = eventBadge(selected);
+
+  return (
+    <div style={{ borderTop: '1px solid var(--rule)', background: 'var(--bg-navy)', padding: '8px 14px 9px', flex: 'none' }}>
+      <div className="flex items-baseline" style={{ gap: 9, marginBottom: 6 }}>
+        <b style={{ fontFamily: 'var(--f-mono)', fontSize: 9.5, letterSpacing: '0.14em', textTransform: 'uppercase', color: b.color, fontWeight: 500 }}>
+          {selected.name ?? selected.mmsi} · silence vs its own cadence
+        </b>
+        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 8.5, color: 'var(--ink-faint)' }}>
+          baseline {selected.cadence_hours.toFixed(1)} h between fixes ·{' '}
+          {loading ? 'loading track…' : `${ticks.length} real fixes / 14 d — none interpolated`}
+        </span>
+      </div>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: 'block', maxHeight: 56 }}>
+        <line x1="0" y1="40" x2={W} y2="40" stroke="#1E2C49" />
+        {ticks.map((ms, i) => (
+          <rect key={i} x={tx(ms)} y="27" width="1.6" height="13" fill="#19D0B8" />
+        ))}
+        <rect
+          x={tx(gapStartMs)} y="22"
+          width={Math.max(2, tx(endMs) - tx(gapStartMs))} height="18"
+          fill="rgba(224,93,80,.14)" stroke="#E05D50" strokeDasharray="3 3" strokeWidth="1"
+        />
+        <text x={(tx(gapStartMs) + tx(endMs)) / 2} y="35" textAnchor="middle" fontFamily="var(--f-mono)" fontSize="9" fill="#E05D50" letterSpacing=".08em">
+          {selected.status === 'open' ? `SILENT — ${silence.toFixed(1)} h AND COUNTING` : `GAP ${silence.toFixed(1)} h · ${b.text}`}
+        </text>
+        <text x="2" y="14" fontFamily="var(--f-mono)" fontSize="7.5" fill="#5A6478">−14 d</text>
+        <text x={W - 2} y="14" textAnchor="end" fontFamily="var(--f-mono)" fontSize="7.5" fill="#5A6478">DATA CLOCK</text>
+      </svg>
+    </div>
+  );
+}
+
+/* ── Dossier ───────────────────────────────────────────────────────────── */
+
+function EventDossier({ ev, dataClock }: { ev: DarkEvent; dataClock: string | null }) {
+  const b = eventBadge(ev);
+  const silence = liveSilenceHours(ev, dataClock);
+  return (
+    <div>
+      <div style={{ padding: '11px 13px', borderBottom: '1px solid var(--rule-soft)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <div className="eyebrow">Vessel</div>
+          <div style={{ fontFamily: 'var(--f-display)', fontSize: 16, fontWeight: 500, letterSpacing: '0.05em', marginTop: 2 }}>
+            {ev.name ?? 'Unknown vessel'}
+          </div>
+          <div style={{ fontFamily: 'var(--f-mono)', fontSize: 9.5, color: 'var(--ink-dim)', marginTop: 3 }}>
+            MMSI {ev.mmsi} · {ev.flag ?? '—'}
+          </div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div className="eyebrow">Confidence at open</div>
+          <div style={{ fontFamily: 'var(--f-mono)', fontSize: 26, color: b.color, lineHeight: 1.1 }}>
+            {ev.confidence_at_open.toFixed(2)}
+          </div>
+          <div style={{ fontFamily: 'var(--f-mono)', fontSize: 8, color: b.color }}>{b.text}</div>
+        </div>
+      </div>
+
+      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 1, background: 'var(--rule-soft)' }}>
+        <Fact k="Gap started" v={`${ev.gap_started_at.slice(0, 16).replace('T', ' ')}Z`} />
+        <Fact k={ev.status === 'open' ? 'Silent for' : 'Final gap'} v={`${silence.toFixed(1)} h`} accent={ev.status === 'open'} />
+        <Fact k="Own cadence" v={`${ev.cadence_hours.toFixed(1)} h`} />
+        <Fact k="Ratio at open" v={`${ev.silence_ratio_at_open.toFixed(1)}×`} />
+        <Fact k="Last speed" v={ev.last_speed_kn != null ? `${ev.last_speed_kn} kn` : '—'} />
+        <Fact k="Box at last fix" v={ev.box_slug ?? 'outside boxes'} />
+        <Fact
+          k="Last position"
+          v={ev.last_fix_lat != null && ev.last_fix_lon != null ? `${ev.last_fix_lat.toFixed(3)}, ${ev.last_fix_lon.toFixed(3)}` : '—'}
+        />
+        <Fact k="Deadline" v={`${ev.deadline_at.slice(5, 16).replace('T', ' ')}Z`} />
+      </div>
+
+      {ev.status !== 'open' && (
+        <div style={{ padding: '9px 13px', borderBottom: '1px solid var(--rule-soft)', fontFamily: 'var(--f-mono)', fontSize: 9.5, lineHeight: 1.6, color: 'var(--ink-dim)' }}>
+          {ev.resolution === 'reappeared' && <>Resolved <b style={{ color: 'var(--teal)' }}>REAPPEARED</b> — a newer fix was observed; the gap closed at {ev.final_gap_hours?.toFixed(1)} h.</>}
+          {ev.resolution === 'still_dark' && <>Resolved <b style={{ color: 'var(--amber)' }}>NOT RE-OBSERVED</b> — no fix reached our coverage within 72 h. A statement about the instrument's view, never proof the transponder was off.</>}
+          {ev.status === 'void' && <>VOID — <b>{ev.void_reason}</b>. The box measuring this silence went dead; the claim resolves neither way. Absence of an observation is not a result.</>}
+        </div>
+      )}
+
+      <div style={{ padding: '9px 13px 0' }}>
+        <div className="eyebrow">Why this scored — full arithmetic</div>
+        <IndicatorMath indicators={ev.indicators ?? {}} composite={ev.confidence_at_open} />
+      </div>
+
+      <div style={{ fontFamily: 'var(--f-mono)', fontSize: 8, color: 'var(--ink-faint)', lineHeight: 1.6, padding: '10px 13px', letterSpacing: '0.01em' }}>
+        PROVENANCE — dark_contact_events (mig 112) · vessel_positions.updated_at · vessel_cadence (mig 111) ·
+        ais_box_liveness (mig 110) · AISStream free tier. Identity denormalised at open. No registry, owner or
+        cargo record is held for this vessel: those rows are absent, not empty.
+      </div>
+    </div>
+  );
+}
+
+function Fact({ k, v, accent = false }: { k: string; v: string; accent?: boolean }) {
+  return (
+    <div style={{ background: 'var(--bg-panel)', padding: '7px 10px' }}>
+      <div className="eyebrow" style={{ fontSize: 8 }}>{k}</div>
+      <div style={{ fontFamily: 'var(--f-mono)', fontSize: 11, marginTop: 2, color: accent ? 'var(--red)' : 'var(--ink)' }}>{v}</div>
+    </div>
+  );
+}
+
+function PanelHead({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span style={{ width: 3, height: 12, background: 'var(--red)' }} />
+      {children}
+    </h3>
+  );
+}
+
+/* ── Score arithmetic, recomputable by eye ─────────────────────────────── */
+
+function prettyKey(k: string): string {
+  return k.replaceAll('_', ' ');
+}
+
 function IndicatorMath({ indicators, composite }: { indicators: Record<string, number>; composite: number }) {
   const terms = weights.features.map(f => {
     const raw = Number(indicators?.[f.key] ?? 0);
@@ -715,7 +667,7 @@ function IndicatorMath({ indicators, composite }: { indicators: Record<string, n
   const z = terms.reduce((acc, t) => acc + t.contribution, weights.intercept);
 
   return (
-    <div style={{ marginTop: 10, fontFamily: 'var(--f-mono)', fontSize: 10.5 }}>
+    <div style={{ marginTop: 8, fontFamily: 'var(--f-mono)', fontSize: 10.5 }}>
       <div className="flex items-center justify-between" style={{ color: 'var(--ink-faint)', fontSize: 9, letterSpacing: '0.08em', paddingBottom: 4 }}>
         <span>value × weight</span>
         <span>contribution</span>
@@ -741,7 +693,7 @@ function IndicatorMath({ indicators, composite }: { indicators: Record<string, n
       </div>
       {typeof indicators?.silence_hours === 'number' && typeof indicators?.cadence_hours === 'number' && (
         <div style={{ color: 'var(--ink-dim)', fontSize: 9.5, marginTop: 5 }}>
-          silent {indicators.silence_hours} h = {(indicators.silence_hours / Math.max(0.5, indicators.cadence_hours)).toFixed(1)}×
+          at open: silent {indicators.silence_hours} h = {(indicators.silence_hours / Math.max(0.5, indicators.cadence_hours)).toFixed(1)}×
           its own cadence ({indicators.cadence_hours} h between fixes, 14 d)
         </div>
       )}
