@@ -19,6 +19,11 @@ export const maxDuration = 300;
 const ACTIVE_WINDOW_H = 72;
 const UPSERT_BATCH = 1000;
 const PAGE = 1000;
+// A dark-contact EVENT opens when silence reaches this multiple of the
+// vessel's own cadence (~12 h for an hourly reporter), and resolves at a 72 h
+// re-observation deadline. See migration 112 for the full lifecycle contract.
+const EVENT_OPEN_RATIO = 12;
+const EVENT_DEADLINE_H = 72;
 const MAX_SCAN = 60_000; // bounded, and reported — never silently truncated
 
 /**
@@ -156,6 +161,7 @@ export async function POST(req: NextRequest) {
   const upserts: any[] = [];
   const voidedMmsis: string[] = [];
   let unscoredNoBaseline = 0;
+  const eventCandidates: any[] = [];
   for (const p of latestByMmsi.values()) {
     const box = boxForPosition(p.latitude, p.longitude);
     const row = box ? liveness.get(box.slug) : undefined;
@@ -194,11 +200,33 @@ export async function POST(req: NextRequest) {
       cadenceHours: cadenceH,
       lastSpeedKn: p.speed ?? null,
     });
+    const composite = scoreVessel(features).composite;
+    const silenceRatio = gapHours / Math.max(0.5, cadenceH);
+    if (silenceRatio >= EVENT_OPEN_RATIO) {
+      // Dedup is structural: UNIQUE (mmsi, gap_started_at) makes the same
+      // ongoing gap un-reopenable, including after a still_dark resolution.
+      eventCandidates.push({
+        mmsi: p.mmsi,
+        name: p.name,
+        flag: p.flag,
+        box_slug: box?.slug ?? null,
+        last_fix_lat: p.latitude,
+        last_fix_lon: p.longitude,
+        last_speed_kn: p.speed ?? null,
+        cadence_hours: cadenceH,
+        silence_ratio_at_open: round1(silenceRatio),
+        confidence_at_open: composite,
+        indicators: { ...features, silence_hours: round1(gapHours), cadence_hours: round1(cadenceH) },
+        gap_started_at: p.updated_at,
+        opened_at: now.toISOString(),
+        deadline_at: new Date(now.getTime() + EVENT_DEADLINE_H * 3600_000).toISOString(),
+      });
+    }
     upserts.push({
       mmsi: p.mmsi,
       name: p.name,
       flag: p.flag,
-      composite_score: scoreVessel(features).composite,
+      composite_score: composite,
       // Context keys ride along with the scored features so the UI can print
       // "silence X h = R× own cadence" without a second query.
       indicators: {
@@ -237,6 +265,94 @@ export async function POST(req: NextRequest) {
     .delete()
     .lt('last_ais_at', since);
 
+  // ── Dark-contact event lifecycle (mig 112) ─────────────────────────────
+  // Close before open: a vessel that reappeared minutes ago closes its event
+  // here and cannot re-open below (its ratio is ~0 against the new fix).
+  let evReappeared = 0;
+  let evStillDark = 0;
+  let evVoided = 0;
+  let evOpened = 0;
+
+  const openEvents: any[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('dark_contact_events')
+      .select('id, mmsi, gap_started_at, deadline_at, box_slug')
+      .eq('status', 'open')
+      .range(from, from + PAGE - 1);
+    if (error) return NextResponse.json({ ok: false, error: `dark_contact_events: ${error.message}` }, { status: 500 });
+    if (!data || data.length === 0) break;
+    openEvents.push(...data);
+    if (data.length < PAGE) break;
+  }
+
+  if (openEvents.length > 0) {
+    // Reappearance is detected FEED-WIDE (vessels move between boxes), so we
+    // read fresh positions for the event vessels rather than the window batch —
+    // a vessel silent beyond the 72 h active window is exactly the one whose
+    // event is still open.
+    const posByMmsi = new Map<string, string>();
+    const evMmsis = openEvents.map(e => e.mmsi);
+    for (let i = 0; i < evMmsis.length; i += 400) {
+      const { data } = await supabase
+        .from('vessel_positions')
+        .select('mmsi, updated_at')
+        .in('mmsi', evMmsis.slice(i, i + 400));
+      for (const r of (data ?? []) as any[]) posByMmsi.set(r.mmsi, r.updated_at);
+    }
+
+    for (const ev of openEvents) {
+      const lastFix = posByMmsi.get(ev.mmsi);
+      const gapStartMs = new Date(ev.gap_started_at).getTime();
+      if (lastFix && new Date(lastFix).getTime() > gapStartMs) {
+        // A newer fix exists: the vessel was re-observed. Positive observation.
+        const gapH = (new Date(lastFix).getTime() - gapStartMs) / 3600_000;
+        await supabase.from('dark_contact_events').update({
+          status: 'resolved',
+          resolution: 'reappeared',
+          closed_at: lastFix,
+          final_gap_hours: round1(gapH),
+        }).eq('id', ev.id);
+        evReappeared++;
+      } else if (ev.box_slug && boxState(liveness.get(ev.box_slug), now.getTime()) === 'dead') {
+        // The box that measured this silence went dead: continued silence is
+        // unmeasurable. Never a win, never a loss.
+        await supabase.from('dark_contact_events').update({
+          status: 'void',
+          void_reason: `coverage_lost:${ev.box_slug}`,
+          closed_at: now.toISOString(),
+        }).eq('id', ev.id);
+        evVoided++;
+      } else if (now.getTime() > new Date(ev.deadline_at).getTime()) {
+        // Not re-observed by our coverage within the deadline. A statement
+        // about the instrument's view, and worded that way everywhere.
+        await supabase.from('dark_contact_events').update({
+          status: 'resolved',
+          resolution: 'still_dark',
+          closed_at: now.toISOString(),
+          final_gap_hours: round1((now.getTime() - gapStartMs) / 3600_000),
+        }).eq('id', ev.id);
+        evStillDark++;
+      }
+    }
+  }
+
+  if (eventCandidates.length > 0) {
+    for (let i = 0; i < eventCandidates.length; i += UPSERT_BATCH) {
+      const { data, error } = await supabase
+        .from('dark_contact_events')
+        .upsert(eventCandidates.slice(i, i + UPSERT_BATCH), {
+          onConflict: 'mmsi,gap_started_at',
+          ignoreDuplicates: true,
+        })
+        .select('id');
+      if (error) {
+        return NextResponse.json({ ok: false, error: `open events: ${error.message}` }, { status: 500 });
+      }
+      evOpened += (data ?? []).length;
+    }
+  }
+
   // Echo the inputs so a stale build is detectable from outside: `gap_source`
   // does not exist in any bundle before this change.
   return NextResponse.json({
@@ -252,6 +368,11 @@ export async function POST(req: NextRequest) {
     unscored_no_baseline: unscoredNoBaseline,
     cadence_baselines: cadence.size,
     voided_dead_box: voidedMmsis.length,
+    events_opened: evOpened,
+    events_reappeared: evReappeared,
+    events_still_dark: evStillDark,
+    events_voided: evVoided,
+    events_open_total: openEvents.length - evReappeared - evStillDark - evVoided + evOpened,
     voided_by_box: Object.fromEntries(voidedByBox),
     pruned: delErr ? `error: ${delErr.message}` : 'ok',
   });
