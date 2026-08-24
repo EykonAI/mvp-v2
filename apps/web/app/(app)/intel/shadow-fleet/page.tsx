@@ -2,7 +2,7 @@ import WorkspaceShell from '@/components/intel/shell/WorkspaceShell';
 import { citizenInertRedirect } from '@/lib/intel/citizen-gate';
 import ShadowFleetWorkspace from '@/components/intel/workspaces/shadowFleet/ShadowFleetWorkspace';
 
-export const metadata = { title: 'eYKON · Shadow Fleet Profiler' };
+export const metadata = { title: 'eYKON · Shadow Fleet — Dark Contact Board' };
 
 export default async function ShadowFleetPage() {
   await citizenInertRedirect('shadow-fleet');
@@ -10,8 +10,8 @@ export default async function ShadowFleetPage() {
     <WorkspaceShell
       accent="var(--red)"
       eyebrow="Investigation · Shadow Fleet"
-      title="Shadow Fleet Profiler"
-      subtitle="Features 2 · 10"
+      title="Dark Contact Board"
+      subtitle="Events, not vessels · sea"
     >
       <ShadowFleetWorkspace />
     </WorkspaceShell>
