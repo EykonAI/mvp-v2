@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { scoreVessel, computeRealFeatures } from '@/lib/intel/shadowFleet';
+import { boxForPosition, boxState, BOX_DEAD_AFTER_H, type BoxLiveness } from '@/lib/intel/aisCoverage';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -41,11 +42,14 @@ const MAX_SCAN = 60_000; // bounded, and reported — never silently truncated
  * Restore them (here, in computeRealFeatures, and the weights fixture) once the
  * enrichment pipeline lands.
  *
- * NOT IN SCOPE HERE: coverage. A gap is still scored without asking whether the
- * box the vessel was last seen in was alive to observe it. The active window
- * makes that safe for the leads list today (a dead box drops out of it within
- * ACTIVE_WINDOW_H) but it is not a guarantee, and no dark-gap CLAIM may be
- * issued from these scores until the per-box liveness gate lands.
+ * COVERAGE GATE (migration 110). Before scoring, this job refreshes
+ * ais_box_liveness and looks up the box each vessel was last seen in. A vessel
+ * whose box has been silent for more than BOX_DEAD_AFTER_H is NOT scored — its
+ * profile is deleted and it is counted in `voided_dead_box` — because a silence
+ * observed by a dead instrument is a fact about the instrument. The gate is a
+ * gate, not a term: a contact in a dead box is not scored low, it is not scored.
+ * Gaps for live-box vessels are measured against the BOX's own newest fix, so a
+ * regionally stale feed cannot inflate its vessels' gaps either.
  *
  * Profiles for vessels that have left the active window are pruned, so
  * vessel_profiles reflects the current tracked fleet with real scores only.
@@ -57,6 +61,28 @@ export async function POST(req: NextRequest) {
   const supabase = createServerSupabase();
   const now = new Date();
   const since = new Date(now.getTime() - ACTIVE_WINDOW_H * 3600_000).toISOString();
+
+  // Refresh the per-box liveness snapshot first, so the gate below reads the
+  // state of the feed as of this run. Failure is loud: without liveness the
+  // gate cannot be applied, and scoring without it is exactly the bug this
+  // migration exists to prevent.
+  const refresh = await supabase.rpc('refresh_ais_box_liveness');
+  if (refresh.error) {
+    return NextResponse.json(
+      { ok: false, error: `refresh_ais_box_liveness: ${refresh.error.message}` },
+      { status: 500 },
+    );
+  }
+  const livenessRes = await supabase.from('ais_box_liveness').select('*');
+  if (livenessRes.error || !livenessRes.data?.length) {
+    return NextResponse.json(
+      { ok: false, error: `ais_box_liveness unreadable: ${livenessRes.error?.message ?? 'no rows'}` },
+      { status: 500 },
+    );
+  }
+  const liveness = new Map<string, BoxLiveness>(
+    (livenessRes.data as BoxLiveness[]).map(r => [r.slug, r]),
+  );
 
   // Data clock = the fleet-wide freshest observation, so a stalled feed doesn't
   // mark every vessel dark. Read explicitly rather than taken from the batch:
@@ -74,12 +100,12 @@ export async function POST(req: NextRequest) {
     : now.getTime();
 
   // Page through the active window, oldest fix first.
-  const rows: Array<{ mmsi: string; name: string | null; flag: string | null; updated_at: string }> = [];
+  const rows: Array<{ mmsi: string; name: string | null; flag: string | null; latitude: number | null; longitude: number | null; updated_at: string }> = [];
   let truncated = false;
   for (let from = 0; from < MAX_SCAN; from += PAGE) {
     const { data, error } = await supabase
       .from('vessel_positions')
-      .select('mmsi, name, flag, updated_at')
+      .select('mmsi, name, flag, latitude, longitude, updated_at')
       .gte('updated_at', since)
       .order('updated_at', { ascending: true })
       .range(from, from + PAGE - 1);
@@ -98,10 +124,25 @@ export async function POST(req: NextRequest) {
   const latestByMmsi = new Map<string, any>();
   for (const p of rows) latestByMmsi.set(p.mmsi, p);
 
-  const upserts = Array.from(latestByMmsi.values()).map((p) => {
-    const gapHours = Math.max(0, (dataClockMs - new Date(p.updated_at).getTime()) / 3600_000);
+  // THE GATE. Assign each vessel to the box it was last seen in; vessels in a
+  // dead box are voided, not scored. Gaps for the rest are measured against the
+  // box's own newest fix (its local data clock), falling back to the fleet
+  // clock only for open-ocean positions outside every subscription box.
+  const voidedByBox = new Map<string, number>();
+  const upserts: any[] = [];
+  const voidedMmsis: string[] = [];
+  for (const p of latestByMmsi.values()) {
+    const box = boxForPosition(p.latitude, p.longitude);
+    const row = box ? liveness.get(box.slug) : undefined;
+    if (box && boxState(row, now.getTime()) === 'dead') {
+      voidedByBox.set(box.slug, (voidedByBox.get(box.slug) ?? 0) + 1);
+      voidedMmsis.push(p.mmsi);
+      continue;
+    }
+    const clockMs = row?.newest_fix ? new Date(row.newest_fix).getTime() : dataClockMs;
+    const gapHours = Math.max(0, (clockMs - new Date(p.updated_at).getTime()) / 3600_000);
     const features = computeRealFeatures({ flag: p.flag, gapHours });
-    return {
+    upserts.push({
       mmsi: p.mmsi,
       name: p.name,
       flag: p.flag,
@@ -110,8 +151,18 @@ export async function POST(req: NextRequest) {
       last_ais_at: p.updated_at,
       last_dark_at: gapHours > 6 ? p.updated_at : null,
       computed_at: now.toISOString(),
-    };
-  });
+    });
+  }
+
+  // A row exists iff we looked: profiles for voided vessels are removed so a
+  // previously-scored vessel whose box has since died cannot linger on the
+  // leads list with a frozen score.
+  for (let i = 0; i < voidedMmsis.length; i += UPSERT_BATCH) {
+    await supabase
+      .from('vessel_profiles')
+      .delete()
+      .in('mmsi', voidedMmsis.slice(i, i + UPSERT_BATCH));
+  }
 
   for (let i = 0; i < upserts.length; i += UPSERT_BATCH) {
     const { error: upErr } = await supabase
@@ -133,11 +184,15 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     ok: true,
     gap_source: 'updated_at',
+    gap_clock: 'per-box newest fix',
     active_window_h: ACTIVE_WINDOW_H,
+    box_dead_after_h: BOX_DEAD_AFTER_H,
     data_clock: new Date(dataClockMs).toISOString(),
     scanned: rows.length,
     truncated,
     scored: upserts.length,
+    voided_dead_box: voidedMmsis.length,
+    voided_by_box: Object.fromEntries(voidedByBox),
     pruned: delErr ? `error: ${delErr.message}` : 'ok',
   });
 }

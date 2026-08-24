@@ -51,6 +51,21 @@ interface Evidence {
   error?: string;
 }
 
+interface CoverageBox {
+  slug: string;
+  label: string;
+  kind: string;
+  state: 'live' | 'stale' | 'dead' | 'unknown';
+  newest_fix: string | null;
+  fixes_last_hour: number;
+  silent_hours: number | null;
+}
+interface Coverage {
+  boxes: CoverageBox[];
+  dead_boxes: number;
+  box_dead_after_h: number;
+}
+
 const COMMODITIES = ['oil', 'lng', 'grain'] as const;
 
 type Commodity = (typeof COMMODITIES)[number];
@@ -61,6 +76,7 @@ export default function ShadowFleetWorkspace() {
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [live, setLive] = useState(false);
+  const [coverage, setCoverage] = useState<Coverage | null>(null);
 
   useEffect(() => {
     fetch(`/api/intel/shadow-fleet/leads?commodity=${commodity}&min_score=0.3&limit=40`)
@@ -68,6 +84,7 @@ export default function ShadowFleetWorkspace() {
       .then(j => {
         setLeads(j.leads ?? []);
         setLive(!!j.live);
+        setCoverage(j.coverage ?? null);
         if (!selected && j.leads?.[0]) setSelected(j.leads[0].mmsi);
       });
   }, [commodity]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -83,15 +100,17 @@ export default function ShadowFleetWorkspace() {
   const active = filtered.find(l => l.mmsi === selected) ?? filtered[0];
 
   return (
-    <div
-      className="grid"
-      style={{
-        gridTemplateColumns: '340px 1fr 320px',
-        gap: 1,
-        background: 'var(--rule-soft)',
-        minHeight: 620,
-      }}
-    >
+    <div>
+      <CoverageStrip coverage={coverage} />
+      <div
+        className="grid"
+        style={{
+          gridTemplateColumns: '340px 1fr 320px',
+          gap: 1,
+          background: 'var(--rule-soft)',
+          minHeight: 620,
+        }}
+      >
       {/* LEADS LIST */}
       <aside style={{ background: 'var(--bg-navy)', padding: 14, overflowY: 'auto' }}>
         <Head accent="var(--red)">Leads List</Head>
@@ -205,6 +224,7 @@ export default function ShadowFleetWorkspace() {
           <SmallButton>Compliance Review</SmallButton>
         </div>
       </aside>
+      </div>
     </div>
   );
 }
@@ -477,6 +497,91 @@ function Empty({ children }: { children: React.ReactNode }) {
 
 function prettyKey(k: string): string {
   return k.replaceAll('_', ' ');
+}
+
+/**
+ * The coverage strip — permanently visible, allowed to look bad.
+ *
+ * One chip per subscription box: live with its fix rate, stale with its age,
+ * dead with days-silent. A dead box is where the VOID gate applies: contacts
+ * last seen inside it are held out of the leads list entirely, and the strip
+ * says so rather than letting the list silently shrink. When the liveness
+ * table is absent (migration 110 not applied) the strip renders a single
+ * "coverage state unavailable" chip — unknown is displayed as unknown, never
+ * as healthy.
+ */
+function CoverageStrip({ coverage }: { coverage: Coverage | null }) {
+  const chip = (key: string, color: string, text: string, solid = false) => (
+    <span
+      key={key}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '3px 10px',
+        border: `1px solid ${color}`,
+        borderRadius: 2,
+        fontFamily: 'var(--f-mono)',
+        fontSize: 9.5,
+        letterSpacing: '0.06em',
+        color,
+        background: solid ? 'rgba(224,93,80,0.08)' : 'transparent',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <span style={{ width: 5, height: 5, borderRadius: '50%', background: color, display: 'inline-block' }} />
+      {text}
+    </span>
+  );
+
+  let chips: React.ReactNode[];
+  let note: string | null = null;
+  if (!coverage) {
+    chips = [chip('none', 'var(--ink-faint)', 'COVERAGE STATE UNAVAILABLE')];
+  } else {
+    const order = { dead: 0, stale: 1, unknown: 2, live: 3 } as const;
+    const boxes = [...coverage.boxes].sort((a, b) => order[a.state] - order[b.state]);
+    chips = boxes.map(b => {
+      const up = b.label.toUpperCase();
+      if (b.state === 'dead') {
+        const days = b.silent_hours != null ? (b.silent_hours / 24).toFixed(1) : '?';
+        return chip(b.slug, 'var(--red)', `${up} · NO AIS ${days}d`, true);
+      }
+      if (b.state === 'stale') {
+        return chip(b.slug, 'var(--amber)', `${up} · ${b.silent_hours ?? '?'}h STALE`);
+      }
+      if (b.state === 'unknown') {
+        return chip(b.slug, 'var(--ink-faint)', `${up} · —`);
+      }
+      return chip(b.slug, 'var(--teal-dim)', `${up} · ${b.fixes_last_hour.toLocaleString()}/h`);
+    });
+    if (coverage.dead_boxes > 0) {
+      note = `Contacts last seen inside a dead box are held VOID — never scored, never counted. Silence there is unmeasurable.`;
+    }
+  }
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        flexWrap: 'wrap',
+        padding: '8px 12px',
+        background: 'var(--bg-navy)',
+        borderBottom: '1px solid var(--rule-soft)',
+        marginBottom: 1,
+      }}
+    >
+      <span className="eyebrow" style={{ marginRight: 6 }}>AIS coverage</span>
+      {chips}
+      {note && (
+        <span style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--ink-faint)', marginLeft: 'auto' }}>
+          {note}
+        </span>
+      )}
+    </div>
+  );
 }
 
 /**

@@ -24,6 +24,10 @@ export interface ClosingStatus {
   nightlightsNewestNight: string | null;
   convergences21d: number | null;
   aisDaysSince: number | null; // 0 = fresh today; null = unknown
+  /** Coverage boxes with no fix for >24h: [{label, daysSince}]. null = liveness
+   *  table absent (migration 110 not applied) — the cell then falls back to the
+   *  global figure alone rather than implying every box is healthy. */
+  aisDeadBoxes: Array<{ label: string; daysSince: number }> | null;
 }
 
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
@@ -70,7 +74,7 @@ export async function loadClosingStatus(): Promise<ClosingStatus> {
     }
   })();
 
-  const [thermal48h, conflict48h, nightlightsEvents, nl, convergences21d, aisNewest] =
+  const [thermal48h, conflict48h, nightlightsEvents, nl, convergences21d, aisNewest, aisDeadBoxes] =
     await Promise.all([
       count('firms_thermal_anomalies', (q: any) => q.gte('ingested_at', hoursAgo(48))),
       count('conflict_events', (q: any) => q.gte('ingested_at', hoursAgo(48))),
@@ -90,6 +94,27 @@ export async function loadClosingStatus(): Promise<ClosingStatus> {
           return null;
         }
       })(),
+      // Per-box AIS liveness (migration 110). The global MAX above cannot see a
+      // dead box: it reported the feed LIVE through 23 days of Hormuz silence,
+      // because Europe's fixes kept the aggregate fresh. An aggregate hides a
+      // broken component — so the board now also names the boxes that are dark.
+      (async (): Promise<Array<{ label: string; daysSince: number }> | null> => {
+        try {
+          const { data, error } = await admin
+            .from('ais_box_liveness')
+            .select('label, newest_fix');
+          if (error || !data?.length) return null;
+          return (data as Array<{ label: string; newest_fix: string | null }>)
+            .filter(r => r.newest_fix && Date.now() - new Date(r.newest_fix).getTime() > 24 * 3600_000)
+            .map(r => ({
+              label: r.label,
+              daysSince: Math.floor((Date.now() - new Date(r.newest_fix as string).getTime()) / 86_400_000),
+            }))
+            .sort((a, b) => b.daysSince - a.daysSince);
+        } catch {
+          return null;
+        }
+      })(),
     ]);
 
   let aisDaysSince: number | null = null;
@@ -105,5 +130,6 @@ export async function loadClosingStatus(): Promise<ClosingStatus> {
     nightlightsNewestNight: nl.night,
     convergences21d,
     aisDaysSince,
+    aisDeadBoxes,
   };
 }
