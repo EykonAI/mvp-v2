@@ -11,7 +11,7 @@ export default async function ShadowFleetPage() {
       accent="var(--red)"
       eyebrow="Investigation · Shadow Fleet"
       title="Dark Contact Board"
-      subtitle="Events, not vessels · sea"
+      subtitle="Events, not vessels · sea + air"
     >
       <ShadowFleetWorkspace />
     </WorkspaceShell>

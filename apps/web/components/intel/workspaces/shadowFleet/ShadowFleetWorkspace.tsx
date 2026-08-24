@@ -19,8 +19,17 @@ import { AIS_BOXES } from '@/lib/intel/aisCoverage';
  *
  * The map is deliberately SCHEMATIC: coarse landmasses as orientation, while
  * coverage boxes and contact positions are projected to scale (equirectangular,
- * 20°W–110°E). Events whose last fix falls outside the frame are surfaced as an
- * off-frame chip, not silently dropped. Sea only — the AIR domain is PR F.
+ * 20°W–110°E). Contacts outside the frame surface as an off-frame chip, never
+ * silently dropped.
+ *
+ * TWO DOMAINS, ASYMMETRIC ON PURPOSE (PR F). SEA contacts are scored events
+ * with a lifecycle. AIR contacts are OBSERVED ACTIVITY — recency-ranked
+ * military/anomalous tracks with no confidence number, because no aerial
+ * cadence baseline exists and a quiet transponder usually means a landed
+ * aircraft; dressing that as a probability would fabricate the exact signal
+ * class this workspace removed. The AIR domain earns its place through
+ * coverage complementarity: contacts inside a dead AIS box are flagged
+ * AIS BLIND HERE — the remaining sensor over water we cannot hear.
  *
  * The v2 leads list and its OIL/LNG/GRAIN tabs are gone: the tabs never
  * filtered (the parameter was read and ignored) and vessel_type exists on 0.8%
@@ -77,6 +86,25 @@ interface TrackFix {
   longitude: number | null;
   speed: number | null;
 }
+interface AirContact {
+  icao24: string;
+  callsign: string | null;
+  type: string | null;
+  registration: string | null;
+  squawk: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  altitude_ft: number | null;
+  velocity_kn: number | null;
+  on_ground: boolean | null;
+  last_seen_at: string;
+  last_seen_hours: number;
+  box_slug: string | null;
+  ais_blind_here: boolean;
+  tags: string[];
+}
+type Domain = 'both' | 'sea' | 'air';
+type Selection = { kind: 'event'; id: string } | { kind: 'air'; icao24: string };
 
 export default function ShadowFleetWorkspace() {
   const [events, setEvents] = useState<DarkEvent[]>([]);
@@ -84,7 +112,9 @@ export default function ShadowFleetWorkspace() {
   const [coverage, setCoverage] = useState<Coverage | null>(null);
   const [dataClock, setDataClock] = useState<string | null>(null);
   const [feedLag, setFeedLag] = useState<number | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selection, setSelection] = useState<Selection | null>(null);
+  const [domain, setDomain] = useState<Domain>('both');
+  const [air, setAir] = useState<AirContact[]>([]);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'open' | 'resolved' | 'void'>('all');
   const [track, setTrack] = useState<TrackFix[]>([]);
@@ -99,8 +129,12 @@ export default function ShadowFleetWorkspace() {
         setCoverage(j.coverage ?? null);
         setDataClock(j.data_clock ?? null);
         setFeedLag(j.feed_lag_minutes ?? null);
-        if (j.events?.[0]) setSelectedId((prev) => prev ?? j.events[0].id);
+        if (j.events?.[0]) setSelection((prev) => prev ?? { kind: 'event', id: j.events[0].id });
       })
+      .catch(() => {});
+    fetch('/api/intel/shadow-fleet/air?limit=200')
+      .then(r => r.json())
+      .then(j => setAir(j.contacts ?? []))
       .catch(() => {});
   }, []);
 
@@ -116,7 +150,21 @@ export default function ShadowFleetWorkspace() {
     [events, filter, search],
   );
 
-  const selected = events.find(e => e.id === selectedId) ?? filtered[0] ?? null;
+  const selected = selection?.kind === 'event'
+    ? (events.find(e => e.id === selection.id) ?? null)
+    : null;
+  const selectedAir = selection?.kind === 'air'
+    ? (air.find(a => a.icao24 === selection.icao24) ?? null)
+    : null;
+
+  const filteredAir = useMemo(
+    () =>
+      air.filter(a =>
+        !search ||
+        a.icao24.includes(search.toLowerCase()) ||
+        (a.callsign ?? '').toLowerCase().includes(search.toLowerCase())),
+    [air, search],
+  );
 
   useEffect(() => {
     if (!selected) return;
@@ -137,7 +185,7 @@ export default function ShadowFleetWorkspace() {
 
   return (
     <div className="flex flex-col" style={{ height: 'calc(100vh - 235px)', minHeight: 560 }}>
-      <BoardStrip coverage={coverage} summary={summary} dataClock={dataClock} feedLag={feedLag} />
+      <BoardStrip coverage={coverage} summary={summary} dataClock={dataClock} feedLag={feedLag} domain={domain} onDomain={setDomain} />
 
       <div
         className="grid flex-1"
@@ -192,33 +240,59 @@ export default function ShadowFleetWorkspace() {
             />
           </div>
           <div style={{ overflowY: 'auto', flex: 1 }}>
-            {filtered.length === 0 ? (
-              <p style={{ padding: 14, fontSize: 11, color: 'var(--ink-faint)', fontFamily: 'var(--f-mono)', lineHeight: 1.6 }}>
-                No dark-contact events{filter !== 'all' ? ` with status "${filter}"` : ''} yet.
-                Events open when a vessel goes silent ≥ 12× its own observed cadence inside
-                a live coverage box.
-              </p>
-            ) : (
-              filtered.map(ev => (
-                <EventRow key={ev.id} ev={ev} active={selected?.id === ev.id} onClick={() => setSelectedId(ev.id)} />
-              ))
+            {domain !== 'air' && (
+              filtered.length === 0 ? (
+                <p style={{ padding: 14, fontSize: 11, color: 'var(--ink-faint)', fontFamily: 'var(--f-mono)', lineHeight: 1.6 }}>
+                  No dark-contact events{filter !== 'all' ? ` with status "${filter}"` : ''} yet.
+                  Events open when a vessel goes silent ≥ 12× its own observed cadence inside
+                  a live coverage box.
+                </p>
+              ) : (
+                filtered.map(ev => (
+                  <EventRow
+                    key={ev.id}
+                    ev={ev}
+                    active={selected?.id === ev.id}
+                    onClick={() => setSelection({ kind: 'event', id: ev.id })}
+                  />
+                ))
+              )
+            )}
+            {domain !== 'sea' && filteredAir.length > 0 && (
+              <>
+                <div style={{ padding: '7px 12px 4px', fontFamily: 'var(--f-mono)', fontSize: 8, letterSpacing: '0.16em', color: 'var(--violet)', borderBottom: '1px solid var(--rule-soft)' }}>
+                  AIR · OBSERVED ACTIVITY — NOT SCORED
+                </div>
+                {filteredAir.slice(0, domain === 'air' ? 60 : 20).map(a => (
+                  <AirRow
+                    key={a.icao24}
+                    a={a}
+                    active={selectedAir?.icao24 === a.icao24}
+                    onClick={() => setSelection({ kind: 'air', icao24: a.icao24 })}
+                  />
+                ))}
+              </>
             )}
           </div>
         </aside>
 
         {/* MAP + TIMELINE */}
         <section style={{ background: 'var(--bg-navy)', display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
-          <BoardMap events={events} coverage={coverage} selected={selected} track={track} />
-          <CadenceTimeline selected={selected} track={track} loading={trackLoading} dataClock={dataClock} />
+          <BoardMap events={events} coverage={coverage} selected={selected} track={track} air={air} selectedAir={selectedAir} domain={domain} />
+          {selection?.kind !== 'air' && (
+            <CadenceTimeline selected={selected} track={track} loading={trackLoading} dataClock={dataClock} />
+          )}
         </section>
 
         {/* DOSSIER */}
         <aside style={{ background: 'var(--bg-navy)', overflowY: 'auto', minHeight: 0 }}>
-          {selected ? (
+          {selectedAir ? (
+            <AirDossier a={selectedAir} />
+          ) : selected ? (
             <EventDossier ev={selected} dataClock={dataClock} />
           ) : (
             <p style={{ padding: 16, fontSize: 11.5, color: 'var(--ink-faint)', fontFamily: 'var(--f-mono)' }}>
-              Select an event.
+              Select a contact.
             </p>
           )}
         </aside>
@@ -230,8 +304,8 @@ export default function ShadowFleetWorkspace() {
 /* ── The strip: coverage + resolution tallies + the data clock ─────────── */
 
 function BoardStrip({
-  coverage, summary, dataClock, feedLag,
-}: { coverage: Coverage | null; summary: EventsSummary | null; dataClock: string | null; feedLag: number | null }) {
+  coverage, summary, dataClock, feedLag, domain, onDomain,
+}: { coverage: Coverage | null; summary: EventsSummary | null; dataClock: string | null; feedLag: number | null; domain: Domain; onDomain: (d: Domain) => void }) {
   const order = { dead: 0, stale: 1, unknown: 2, live: 3 } as const;
   const boxes = coverage ? [...coverage.boxes].sort((a, b) => order[a.state] - order[b.state]) : [];
 
@@ -249,6 +323,28 @@ function BoardStrip({
         flex: 'none',
       }}
     >
+      <span style={{ display: 'inline-flex', border: '1px solid var(--rule)', borderRadius: 2, overflow: 'hidden', flex: 'none' }}>
+        {(['both', 'sea', 'air'] as const).map(d => (
+          <button
+            key={d}
+            onClick={() => onDomain(d)}
+            style={{
+              padding: '3px 10px',
+              fontFamily: 'var(--f-mono)',
+              fontSize: 8.5,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              cursor: 'pointer',
+              border: 'none',
+              borderRight: d !== 'air' ? '1px solid var(--rule)' : 'none',
+              background: domain === d ? 'var(--teal)' : 'transparent',
+              color: domain === d ? 'var(--bg-void)' : 'var(--ink-dim)',
+            }}
+          >
+            {d}
+          </button>
+        ))}
+      </span>
       <span className="eyebrow" style={{ flex: 'none' }}>Coverage</span>
       {!coverage ? (
         <Chip color="var(--ink-faint)">STATE UNAVAILABLE</Chip>
@@ -378,6 +474,50 @@ function EventRow({ ev, active, onClick }: { ev: DarkEvent; active: boolean; onC
   );
 }
 
+function AirRow({ a, active, onClick }: { a: AirContact; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'block',
+        width: '100%',
+        textAlign: 'left',
+        padding: '8px 12px',
+        background: active ? 'rgba(139,127,216,0.08)' : 'transparent',
+        border: 'none',
+        borderBottom: '1px solid var(--rule-soft)',
+        borderLeft: `2px solid ${active ? 'var(--violet)' : 'transparent'}`,
+        cursor: 'pointer',
+        color: 'var(--ink)',
+      }}
+    >
+      <div className="flex items-baseline" style={{ gap: 6 }}>
+        <span
+          style={{
+            fontFamily: 'var(--f-mono)', fontSize: 7.5, letterSpacing: '0.1em',
+            padding: '1px 5px', borderRadius: 2, flex: 'none',
+            background: 'var(--violet)', color: 'var(--bg-void)',
+          }}
+        >
+          AIR
+        </span>
+        <span style={{ fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {a.callsign ?? a.icao24}{a.type ? ` · ${a.type}` : ''}
+        </span>
+        <span style={{ marginLeft: 'auto', fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--ink-dim)', flex: 'none' }}>
+          seen {a.last_seen_hours.toFixed(1)}h
+        </span>
+      </div>
+      <div style={{ fontFamily: 'var(--f-mono)', fontSize: 8.5, color: 'var(--ink-faint)', marginTop: 3 }}>
+        {a.icao24} · reg {a.registration ?? '—'}
+        {a.tags.includes('no_callsign') ? ' · NO CALLSIGN' : ''}
+        {a.squawk && ['7500','7600','7700'].includes(a.squawk) ? ` · SQUAWK ${a.squawk}` : ''}
+        {a.ais_blind_here && <span style={{ color: 'var(--violet)' }}> · AIS BLIND HERE</span>}
+      </div>
+    </button>
+  );
+}
+
 /* ── The map — schematic basemap, to-scale boxes and contacts ──────────── */
 /* Frame: 20°W–110°E, 75°N–40°S. Landmass paths are deliberately coarse       */
 /* orientation shapes; boxes and markers are projected exactly.               */
@@ -401,13 +541,17 @@ const LANDMASSES = [
 ];
 
 function BoardMap({
-  events, coverage, selected, track,
-}: { events: DarkEvent[]; coverage: Coverage | null; selected: DarkEvent | null; track: TrackFix[] }) {
+  events, coverage, selected, track, air, selectedAir, domain,
+}: { events: DarkEvent[]; coverage: Coverage | null; selected: DarkEvent | null; track: TrackFix[]; air: AirContact[]; selectedAir: AirContact | null; domain: Domain }) {
   const stateBySlug = new Map((coverage?.boxes ?? []).map(b => [b.slug, b] as const));
 
-  const placed = events.filter(e => e.last_fix_lat != null && e.last_fix_lon != null);
+  const seaVisible = domain !== 'air';
+  const airVisible = domain !== 'sea';
+  const placed = seaVisible ? events.filter(e => e.last_fix_lat != null && e.last_fix_lon != null) : [];
   const onMap = placed.filter(e => inFrame(e.last_fix_lat as number, e.last_fix_lon as number));
-  const offFrame = placed.length - onMap.length;
+  const airPlaced = airVisible ? air.filter(a => a.latitude != null && a.longitude != null) : [];
+  const airOnMap = airPlaced.filter(a => inFrame(a.latitude as number, a.longitude as number));
+  const offFrame = (placed.length - onMap.length) + (airPlaced.length - airOnMap.length);
 
   const tail = (track ?? [])
     .filter(f => f.latitude != null && f.longitude != null && inFrame(f.latitude, f.longitude))
@@ -504,9 +648,33 @@ function BoardMap({
           );
         })}
 
+        {/* AIR contacts — triangles; violet; AIS-blind ones pulse-highlighted */}
+        {airOnMap.map(a => {
+          const x = px(a.longitude as number), y = py(a.latitude as number);
+          const isSel = selectedAir?.icao24 === a.icao24;
+          const r = isSel ? 5 : 3.4;
+          return (
+            <g key={a.icao24}>
+              {a.ais_blind_here && <circle cx={x} cy={y} r="12" fill="#8B7FD8" opacity=".12" />}
+              <path
+                d={`M${x},${y - r} L${x + r * 0.87},${y + r * 0.6} L${x - r * 0.87},${y + r * 0.6} Z`}
+                fill="#8B7FD8"
+                stroke="#05080F"
+                strokeWidth=".8"
+                opacity={a.last_seen_hours > 12 ? 0.5 : 1}
+              />
+              {isSel && (
+                <text x={x + 8} y={y - 6} fontFamily="var(--f-mono)" fontSize="8.5" fill="#8B7FD8">
+                  {a.callsign ?? a.icao24} · seen {a.last_seen_hours.toFixed(1)}h
+                </text>
+              )}
+            </g>
+          );
+        })}
+
         {offFrame > 0 && (
           <text x="12" y={FRAME.h - 40} fontFamily="var(--f-mono)" fontSize="8.5" fill="#98A3B5">
-            +{offFrame} contact{offFrame > 1 ? 's' : ''} off-frame (Americas / Panama) — listed in the queue, states in the strip
+            +{offFrame} contact{offFrame > 1 ? 's' : ''} off-frame — listed in the queue, never dropped
           </text>
         )}
 
@@ -514,7 +682,7 @@ function BoardMap({
           Marker = LAST KNOWN position. Absence of a marker is absence of a look, not absence of a ship.
         </text>
         <text x={FRAME.w - 12} y={FRAME.h - 14} textAnchor="end" fontFamily="var(--f-mono)" fontSize="8" fill="#3A4256">
-          Schematic basemap · frame 20°W–110°E · boxes and contacts to scale
+          Schematic basemap · frame 20°W–110°E · to scale · ▲ AIR = observed activity, not scored
         </text>
       </svg>
     </div>
@@ -629,6 +797,63 @@ function EventDossier({ ev, dataClock }: { ev: DarkEvent; dataClock: string | nu
         PROVENANCE — dark_contact_events (mig 112) · vessel_positions.updated_at · vessel_cadence (mig 111) ·
         ais_box_liveness (mig 110) · AISStream free tier. Identity denormalised at open. No registry, owner or
         cargo record is held for this vessel: those rows are absent, not empty.
+      </div>
+    </div>
+  );
+}
+
+function AirDossier({ a }: { a: AirContact }) {
+  return (
+    <div>
+      <div style={{ padding: '11px 13px', borderBottom: '1px solid var(--rule-soft)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <div className="eyebrow">Aircraft</div>
+          <div style={{ fontFamily: 'var(--f-display)', fontSize: 16, fontWeight: 500, letterSpacing: '0.05em', marginTop: 2 }}>
+            {a.callsign ?? a.icao24}
+          </div>
+          <div style={{ fontFamily: 'var(--f-mono)', fontSize: 9.5, color: 'var(--ink-dim)', marginTop: 3 }}>
+            ICAO24 {a.icao24}{a.type ? ` · ${a.type}` : ''}{a.tags.includes('military') ? ' · MILITARY' : ''}
+          </div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div className="eyebrow">Last seen</div>
+          <div style={{ fontFamily: 'var(--f-mono)', fontSize: 26, color: 'var(--violet)', lineHeight: 1.1 }}>
+            {a.last_seen_hours.toFixed(1)}h
+          </div>
+          <div style={{ fontFamily: 'var(--f-mono)', fontSize: 8, color: 'var(--violet)' }}>OBSERVED · NOT SCORED</div>
+        </div>
+      </div>
+
+      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 1, background: 'var(--rule-soft)' }}>
+        <Fact k="Registration" v={a.registration ?? '—'} />
+        <Fact k="Squawk" v={a.squawk ?? '—'} accent={['7500','7600','7700'].includes(a.squawk ?? '')} />
+        <Fact k="Altitude" v={a.altitude_ft != null ? `${a.altitude_ft.toLocaleString()} ft` : '—'} />
+        <Fact k="Speed" v={a.velocity_kn != null ? `${a.velocity_kn} kn` : '—'} />
+        <Fact
+          k="Position"
+          v={a.latitude != null && a.longitude != null ? `${a.latitude.toFixed(3)}, ${a.longitude.toFixed(3)}` : '—'}
+        />
+        <Fact k="AIS box here" v={a.box_slug ?? 'outside boxes'} accent={a.ais_blind_here} />
+      </div>
+
+      {a.ais_blind_here && (
+        <div style={{ padding: '9px 13px', borderBottom: '1px solid var(--rule-soft)', fontFamily: 'var(--f-mono)', fontSize: 9.5, lineHeight: 1.6, color: 'var(--violet)' }}>
+          AIS BLIND HERE — the AIS box at this position has been silent past the dead
+          threshold. This aircraft track is the remaining sensor over water we cannot
+          currently hear.
+        </div>
+      )}
+
+      <div style={{ padding: '9px 13px', fontFamily: 'var(--f-mono)', fontSize: 9, lineHeight: 1.6, color: 'var(--ink-dim)' }}>
+        Aerial contacts carry no confidence number by design: no aerial cadence
+        baseline exists (there is no aircraft position history), and a quiet
+        transponder usually means a landed aircraft. Recency is shown as recency.
+      </div>
+
+      <div style={{ fontFamily: 'var(--f-mono)', fontSize: 8, color: 'var(--ink-faint)', lineHeight: 1.6, padding: '2px 13px 10px', letterSpacing: '0.01em' }}>
+        PROVENANCE — aircraft_positions (ADSBexchange / RapidAPI) · ingested_at is a
+        true last-seen (refreshed on every upsert) · "Registration" is the
+        registration string from the feed, not a country · ais_box_liveness (mig 110).
       </div>
     </div>
   );
