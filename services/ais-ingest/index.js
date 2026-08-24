@@ -59,6 +59,10 @@ const STARVED_FLOOR_MAX = 1_800_000;   // 30 minutes
 // stretches outside the named regions lose coverage — acceptable
 // trade-off for a geopolitical-intelligence product, and easy to
 // extend later if a new region matters.
+// SYNC WARNING: these boxes are duplicated in apps/web/lib/intel/aisCoverage.ts
+// (canonical — slugs + precedence) and in migration 110's
+// refresh_ais_box_liveness(). Railway's root directory for this service
+// excludes apps/web, so the copy cannot be imported. Change one, change all three.
 const BOUNDING_BOXES = [
   // Broad regions (replace the previous single global box)
   [[30, -15],     [70, 45]],         // Europe + Mediterranean

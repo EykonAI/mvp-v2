@@ -21,12 +21,23 @@ import type { ClosingStatus } from '@/lib/closing/status';
 const fmt = (n: number | null) => (n == null ? '—' : n.toLocaleString('en-US'));
 
 export function HonestyBoard({ status }: { status: ClosingStatus }) {
+  // Per-box first (migration 110): the global figure alone reported the feed
+  // LIVE while Hormuz had been silent for weeks, because a Europe-dense
+  // aggregate cannot see one dead corridor. If any box is dark, say which.
+  const deadBoxes = status.aisDeadBoxes ?? [];
   const ais =
     status.aisDaysSince == null
       ? { label: 'AIS vessels', note: '—' }
-      : status.aisDaysSince < 1
-        ? { label: 'AIS vessels', note: 'LIVE · thin, chokepoint-only' }
-        : { label: 'AIS vessels', note: `DOWN ${status.aisDaysSince}d · provider quota` };
+      : status.aisDaysSince >= 1
+        ? { label: 'AIS vessels', note: `DOWN ${status.aisDaysSince}d · provider quota` }
+        : deadBoxes.length > 0
+          ? {
+              label: 'AIS vessels',
+              note: `LIVE · thin — ${deadBoxes
+                .map(b => `${b.label} dark ${b.daysSince}d`)
+                .join(', ')}`,
+            }
+          : { label: 'AIS vessels', note: 'LIVE · thin, regional' };
 
   return (
     <section className="cs-section" id="honesty">
