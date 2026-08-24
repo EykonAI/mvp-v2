@@ -66,6 +66,28 @@ interface Coverage {
   box_dead_after_h: number;
 }
 
+interface DarkEvent {
+  id: string;
+  mmsi: string;
+  name: string | null;
+  flag: string | null;
+  box_slug: string | null;
+  silence_ratio_at_open: number;
+  confidence_at_open: number;
+  status: 'open' | 'resolved' | 'void';
+  resolution: 'reappeared' | 'still_dark' | null;
+  void_reason: string | null;
+  opened_at: string;
+  closed_at: string | null;
+  final_gap_hours: number | null;
+}
+interface EventsSummary {
+  open: number | null;
+  reappeared_24h: number | null;
+  still_dark_24h: number | null;
+  void_24h: number | null;
+}
+
 const COMMODITIES = ['oil', 'lng', 'grain'] as const;
 
 type Commodity = (typeof COMMODITIES)[number];
@@ -77,6 +99,18 @@ export default function ShadowFleetWorkspace() {
   const [search, setSearch] = useState('');
   const [live, setLive] = useState(false);
   const [coverage, setCoverage] = useState<Coverage | null>(null);
+  const [events, setEvents] = useState<DarkEvent[]>([]);
+  const [evSummary, setEvSummary] = useState<EventsSummary | null>(null);
+
+  useEffect(() => {
+    fetch('/api/intel/shadow-fleet/events?limit=8')
+      .then(r => r.json())
+      .then(j => {
+        setEvents(j.events ?? []);
+        setEvSummary(j.summary ?? null);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch(`/api/intel/shadow-fleet/leads?commodity=${commodity}&min_score=0.3&limit=40`)
@@ -102,6 +136,7 @@ export default function ShadowFleetWorkspace() {
   return (
     <div>
       <CoverageStrip coverage={coverage} />
+      <EventsRail events={events} summary={evSummary} />
       <div
         className="grid"
         style={{
@@ -497,6 +532,83 @@ function Empty({ children }: { children: React.ReactNode }) {
 
 function prettyKey(k: string): string {
   return k.replaceAll('_', ' ');
+}
+
+/**
+ * Dark-contact events rail (mig 112) — the workspace's first EVENT surface.
+ * An event has a beginning, a deadline and an outcome; this rail shows the
+ * most recent ones with their lifecycle state, and the 24 h resolution tally.
+ * still_dark is always glossed as "not re-observed" — it is a statement about
+ * our coverage, never about the transponder.
+ */
+function EventsRail({ events, summary }: { events: DarkEvent[]; summary: EventsSummary | null }) {
+  if (events.length === 0 && !summary) return null;
+
+  const badge = (ev: DarkEvent): { text: string; color: string; solid: boolean } => {
+    if (ev.status === 'open') return { text: 'DARK', color: 'var(--red)', solid: true };
+    if (ev.status === 'void') return { text: 'VOID', color: 'var(--ink-faint)', solid: false };
+    return ev.resolution === 'reappeared'
+      ? { text: 'BACK', color: 'var(--teal)', solid: true }
+      : { text: 'NOT RE-OBSERVED 72H', color: 'var(--amber)', solid: false };
+  };
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        overflowX: 'auto',
+        padding: '7px 12px',
+        background: 'var(--bg-navy)',
+        borderBottom: '1px solid var(--rule-soft)',
+        marginBottom: 1,
+      }}
+    >
+      <span className="eyebrow" style={{ flex: 'none' }}>
+        Dark events
+        {summary && summary.open != null && (
+          <span style={{ color: 'var(--red)', marginLeft: 6 }}>{summary.open} open</span>
+        )}
+        {summary && summary.reappeared_24h != null && (
+          <span style={{ color: 'var(--ink-faint)', marginLeft: 6 }}>
+            · 24h: {summary.reappeared_24h} back / {summary.still_dark_24h ?? 0} not re-observed / {summary.void_24h ?? 0} void
+          </span>
+        )}
+      </span>
+      {events.map(ev => {
+        const b = badge(ev);
+        return (
+          <span
+            key={ev.id}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'baseline',
+              gap: 6,
+              padding: '3px 9px',
+              border: `1px solid ${b.color}`,
+              borderRadius: 2,
+              fontFamily: 'var(--f-mono)',
+              fontSize: 9.5,
+              whiteSpace: 'nowrap',
+              flex: 'none',
+              background: b.solid ? 'rgba(224,93,80,0.06)' : 'transparent',
+            }}
+          >
+            <span style={{ color: b.color, letterSpacing: '0.1em', fontSize: 8 }}>{b.text}</span>
+            <span style={{ color: 'var(--ink)' }}>{ev.name ?? ev.mmsi}</span>
+            <span style={{ color: 'var(--ink-faint)' }}>
+              {ev.status === 'open'
+                ? `${ev.silence_ratio_at_open.toFixed(0)}× cadence`
+                : ev.final_gap_hours != null
+                  ? `gap ${ev.final_gap_hours.toFixed(0)}h`
+                  : ''}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 /**
