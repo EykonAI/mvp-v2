@@ -344,11 +344,11 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'query_shadow_fleet_leads',
-    description: 'Ranked shadow-fleet vessel leads. Filterable by commodity and minimum composite score.',
+    description: 'Ranked shadow-fleet vessel leads, scored from AIS dark-gap + flag-of-convenience. Each lead carries silence_hours = hours since its last AIS fix, measured against the data clock. NOTE: the commodity argument is accepted but NOT applied — vessel type is known for under 1% of the tracked fleet, so all values return the same list; do not tell the user results were filtered by commodity. Coverage is not gated: a gap observed in a coverage box that was itself dead is not evidence of darkness.',
     input_schema: {
       type: 'object' as const,
       properties: {
-        commodity: { type: 'string', description: 'oil | lng | grain' },
+        commodity: { type: 'string', description: 'oil | lng | grain — ACCEPTED BUT NOT APPLIED, see the tool description' },
         min_score: { type: 'number', description: 'Minimum composite score (default 0.4)' },
         limit: { type: 'number' },
       },
