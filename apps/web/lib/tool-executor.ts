@@ -795,9 +795,20 @@ async function queryShadowFleetLeads(input: Record<string, any>): Promise<string
   if (input.commodity) params.set('commodity', String(input.commodity));
   if (input.min_score !== undefined) params.set('min_score', String(input.min_score));
   if (input.limit !== undefined) params.set('limit', String(input.limit));
-  const res = await fetch(`${APP_URL()}/api/intel/shadow-fleet/leads?${params.toString()}`);
+  const res = await fetch(`${APP_URL()}/api/intel/shadow-fleet/leads?${params.toString()}`, { cache: 'no-store' });
   const j = await res.json();
-  return JSON.stringify({ count: (j.leads ?? []).length, leads: j.leads ?? [], live: j.live ?? false });
+  // silence_hours is hours since the vessel's last AIS fix, measured against the
+  // data clock. It replaced last_dark_hours, which reported the age of the
+  // database row and so described vessels that were transmitting as "dark".
+  return JSON.stringify({
+    count: (j.leads ?? []).length,
+    leads: j.leads ?? [],
+    live: j.live ?? false,
+    gap_source: j.gap_source ?? null,
+    data_clock: j.data_clock ?? null,
+    feed_lag_minutes: j.feed_lag_minutes ?? null,
+    note: 'silence_hours = hours since last AIS fix vs the data clock. Coverage is not yet gated: a gap in a coverage box that was itself dead is not evidence of darkness.',
+  });
 }
 
 async function queryCalibration(input: Record<string, any>): Promise<string> {

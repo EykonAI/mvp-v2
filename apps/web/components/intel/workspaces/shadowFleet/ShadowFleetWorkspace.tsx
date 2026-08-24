@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import ScoreBar from '@/components/intel/shared/ScoreBar';
+import weights from '@/lib/fixtures/shadow_fleet_weights.json';
 
 interface Lead {
   mmsi: string;
@@ -11,7 +12,8 @@ interface Lead {
   composite_score: number;
   indicators: Record<string, number>;
   last_ais_at: string | null;
-  last_dark_hours: number;
+  /** Hours since the vessel's last AIS fix, vs the data clock. Never row age. */
+  silence_hours: number;
 }
 
 interface Evidence {
@@ -164,7 +166,7 @@ export default function ShadowFleetWorkspace() {
                 </span>
               </div>
               <div style={{ fontSize: 10.5, color: 'var(--ink-faint)', fontFamily: 'var(--f-mono)', marginTop: 2 }}>
-                MMSI {l.mmsi} · flag {l.flag} · gap {l.last_dark_hours}h
+                MMSI {l.mmsi} · flag {l.flag} · silent {l.silence_hours}h
               </div>
               <div style={{ marginTop: 6 }}>
                 <ScoreBar value={l.composite_score} width={280} />
@@ -183,14 +185,7 @@ export default function ShadowFleetWorkspace() {
       <aside style={{ background: 'var(--bg-navy)', padding: 14, overflowY: 'auto' }}>
         <Head accent="var(--red)">Contributing Indicators</Head>
         {active ? (
-          <div className="flex flex-col" style={{ gap: 4, marginTop: 10, fontFamily: 'var(--f-mono)', fontSize: 11 }}>
-            {Object.entries(active.indicators).map(([k, v]) => (
-              <div key={k} className="flex items-center justify-between" style={{ padding: '4px 0', borderBottom: '1px solid var(--rule-soft)' }}>
-                <span style={{ color: 'var(--ink-dim)' }}>{prettyKey(k)}</span>
-                <span style={{ color: 'var(--red)' }}>+{Number(v).toFixed(2)}</span>
-              </div>
-            ))}
-          </div>
+          <IndicatorMath indicators={active.indicators} composite={active.composite_score} />
         ) : (
           <Empty>—</Empty>
         )}
@@ -248,7 +243,7 @@ function EvidenceViewer({ lead }: { lead: Lead }) {
   const gapHours =
     contact?.hours_since_contact !== null && contact?.hours_since_contact !== undefined
       ? Math.round(contact.hours_since_contact)
-      : lead.last_dark_hours;
+      : lead.silence_hours;
 
   return (
     <div className="flex flex-col" style={{ gap: 16 }}>
@@ -482,4 +477,55 @@ function Empty({ children }: { children: React.ReactNode }) {
 
 function prettyKey(k: string): string {
   return k.replaceAll('_', ' ');
+}
+
+/**
+ * The score, shown as arithmetic that can be recomputed by eye.
+ *
+ * This panel used to render each raw feature VALUE prefixed with "+", which read
+ * as a contribution and was not one: "ais gap hours log +3.98" is ln(1 + hours),
+ * and "flag of convenience +1.00" is a boolean. Neither can be reconciled with a
+ * composite of 57 without the weights and the intercept, which appeared nowhere.
+ * Every term now shows value × weight = contribution, plus the intercept and the
+ * logistic, so the displayed composite is checkable against the rows above it.
+ */
+function IndicatorMath({ indicators, composite }: { indicators: Record<string, number>; composite: number }) {
+  const terms = weights.features.map(f => {
+    const raw = Number(indicators?.[f.key] ?? 0);
+    const value = Math.max(f.clip[0], Math.min(f.clip[1], raw));
+    return { key: f.key, value, weight: f.weight, contribution: value * f.weight };
+  });
+  const z = terms.reduce((acc, t) => acc + t.contribution, weights.intercept);
+
+  return (
+    <div style={{ marginTop: 10, fontFamily: 'var(--f-mono)', fontSize: 10.5 }}>
+      <div className="flex items-center justify-between" style={{ color: 'var(--ink-faint)', fontSize: 9, letterSpacing: '0.08em', paddingBottom: 4 }}>
+        <span>value × weight</span>
+        <span>contribution</span>
+      </div>
+      {terms.map(t => (
+        <div key={t.key} style={{ padding: '4px 0', borderBottom: '1px solid var(--rule-soft)' }}>
+          <div className="flex items-center justify-between">
+            <span style={{ color: 'var(--ink-dim)' }}>{prettyKey(t.key)}</span>
+            <span style={{ color: 'var(--red)' }}>{t.contribution >= 0 ? '+' : ''}{t.contribution.toFixed(3)}</span>
+          </div>
+          <div style={{ color: 'var(--ink-faint)', fontSize: 9.5, marginTop: 1 }}>
+            {t.value.toFixed(2)} × {t.weight}
+          </div>
+        </div>
+      ))}
+      <div className="flex items-center justify-between" style={{ padding: '4px 0', borderBottom: '1px solid var(--rule-soft)' }}>
+        <span style={{ color: 'var(--ink-dim)' }}>intercept</span>
+        <span style={{ color: 'var(--ink-dim)' }}>{weights.intercept.toFixed(3)}</span>
+      </div>
+      <div className="flex items-center justify-between" style={{ padding: '6px 0 2px' }}>
+        <span style={{ color: 'var(--ink-dim)' }}>z = {z.toFixed(3)}</span>
+        <span style={{ color: 'var(--red)', fontSize: 12 }}>{(composite * 100).toFixed(0)}</span>
+      </div>
+      <div style={{ color: 'var(--ink-faint)', fontSize: 9, lineHeight: 1.5, marginTop: 4 }}>
+        composite = 1 / (1 + e^−z). Silence is measured from the vessel's last AIS
+        fix against the data clock — never from the age of its database row.
+      </div>
+    </div>
+  );
 }
