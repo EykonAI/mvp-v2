@@ -73,6 +73,30 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     );
   }
+
+  // Refresh per-vessel cadence baselines (mig 111) — the denominator of the
+  // v3 silence feature. Loud failure for the same reason as liveness: scoring
+  // absolute silence against no baseline is the v2 bug this replaces.
+  const cadRefresh = await supabase.rpc('refresh_vessel_cadence');
+  if (cadRefresh.error) {
+    return NextResponse.json(
+      { ok: false, error: `refresh_vessel_cadence: ${cadRefresh.error.message}` },
+      { status: 500 },
+    );
+  }
+  const cadence = new Map<string, number>();
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('vessel_cadence')
+      .select('mmsi, median_interval_h')
+      .range(from, from + PAGE - 1);
+    if (error) {
+      return NextResponse.json({ ok: false, error: `vessel_cadence: ${error.message}` }, { status: 500 });
+    }
+    if (!data || data.length === 0) break;
+    for (const r of data as any[]) cadence.set(r.mmsi, r.median_interval_h);
+    if (data.length < PAGE) break;
+  }
   const livenessRes = await supabase.from('ais_box_liveness').select('*');
   if (livenessRes.error || !livenessRes.data?.length) {
     return NextResponse.json(
@@ -100,12 +124,12 @@ export async function POST(req: NextRequest) {
     : now.getTime();
 
   // Page through the active window, oldest fix first.
-  const rows: Array<{ mmsi: string; name: string | null; flag: string | null; latitude: number | null; longitude: number | null; updated_at: string }> = [];
+  const rows: Array<{ mmsi: string; name: string | null; flag: string | null; latitude: number | null; longitude: number | null; speed: number | null; updated_at: string }> = [];
   let truncated = false;
   for (let from = 0; from < MAX_SCAN; from += PAGE) {
     const { data, error } = await supabase
       .from('vessel_positions')
-      .select('mmsi, name, flag, latitude, longitude, updated_at')
+      .select('mmsi, name, flag, latitude, longitude, speed, updated_at')
       .gte('updated_at', since)
       .order('updated_at', { ascending: true })
       .range(from, from + PAGE - 1);
@@ -131,6 +155,7 @@ export async function POST(req: NextRequest) {
   const voidedByBox = new Map<string, number>();
   const upserts: any[] = [];
   const voidedMmsis: string[] = [];
+  let unscoredNoBaseline = 0;
   for (const p of latestByMmsi.values()) {
     const box = boxForPosition(p.latitude, p.longitude);
     const row = box ? liveness.get(box.slug) : undefined;
@@ -141,13 +166,46 @@ export async function POST(req: NextRequest) {
     }
     const clockMs = row?.newest_fix ? new Date(row.newest_fix).getTime() : dataClockMs;
     const gapHours = Math.max(0, (clockMs - new Date(p.updated_at).getTime()) / 3600_000);
-    const features = computeRealFeatures({ flag: p.flag, gapHours });
+
+    // No cadence baseline yet: the profile row is KEPT with composite NULL —
+    // "observed, not yet scorable" — never scored with a default. Keeping the
+    // row matters structurally: sample-ais-history samples vessel_profiles,
+    // so deleting these would stop the very sampling that builds their
+    // baseline, and the pipeline would strangle itself.
+    const cadenceH = cadence.get(p.mmsi);
+    if (cadenceH === undefined) {
+      unscoredNoBaseline++;
+      upserts.push({
+        mmsi: p.mmsi,
+        name: p.name,
+        flag: p.flag,
+        composite_score: null,
+        indicators: { unscored: 'no_cadence_baseline', silence_hours: round1(gapHours) },
+        last_ais_at: p.updated_at,
+        last_dark_at: null,
+        computed_at: now.toISOString(),
+      });
+      continue;
+    }
+
+    const features = computeRealFeatures({
+      flag: p.flag,
+      gapHours,
+      cadenceHours: cadenceH,
+      lastSpeedKn: p.speed ?? null,
+    });
     upserts.push({
       mmsi: p.mmsi,
       name: p.name,
       flag: p.flag,
       composite_score: scoreVessel(features).composite,
-      indicators: features,
+      // Context keys ride along with the scored features so the UI can print
+      // "silence X h = R× own cadence" without a second query.
+      indicators: {
+        ...features,
+        silence_hours: round1(gapHours),
+        cadence_hours: round1(cadenceH),
+      },
       last_ais_at: p.updated_at,
       last_dark_at: gapHours > 6 ? p.updated_at : null,
       computed_at: now.toISOString(),
@@ -190,9 +248,15 @@ export async function POST(req: NextRequest) {
     data_clock: new Date(dataClockMs).toISOString(),
     scanned: rows.length,
     truncated,
-    scored: upserts.length,
+    scored: upserts.length - unscoredNoBaseline,
+    unscored_no_baseline: unscoredNoBaseline,
+    cadence_baselines: cadence.size,
     voided_dead_box: voidedMmsis.length,
     voided_by_box: Object.fromEntries(voidedByBox),
     pruned: delErr ? `error: ${delErr.message}` : 'ok',
   });
+}
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
 }

@@ -627,9 +627,16 @@ function IndicatorMath({ indicators, composite }: { indicators: Record<string, n
         <span style={{ color: 'var(--ink-dim)' }}>z = {z.toFixed(3)}</span>
         <span style={{ color: 'var(--red)', fontSize: 12 }}>{(composite * 100).toFixed(0)}</span>
       </div>
+      {typeof indicators?.silence_hours === 'number' && typeof indicators?.cadence_hours === 'number' && (
+        <div style={{ color: 'var(--ink-dim)', fontSize: 9.5, marginTop: 5 }}>
+          silent {indicators.silence_hours} h = {(indicators.silence_hours / Math.max(0.5, indicators.cadence_hours)).toFixed(1)}×
+          its own cadence ({indicators.cadence_hours} h between fixes, 14 d)
+        </div>
+      )}
       <div style={{ color: 'var(--ink-faint)', fontSize: 9, lineHeight: 1.5, marginTop: 4 }}>
-        composite = 1 / (1 + e^−z). Silence is measured from the vessel's last AIS
-        fix against the data clock — never from the age of its database row.
+        composite = 1 / (1 + e^−z). Silence is judged against this vessel's own
+        observed cadence, measured from its last AIS fix against the box's data
+        clock — never from the age of its database row.
       </div>
     </div>
   );
