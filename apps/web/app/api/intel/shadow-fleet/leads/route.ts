@@ -129,24 +129,44 @@ export async function GET(req: NextRequest) {
     const sinceIso = new Date(dataClockMs - 72 * 3600_000).toISOString();
     const positions = await supabase
       .from('vessel_positions')
-      .select('mmsi, name, flag, latitude, longitude, updated_at')
+      .select('mmsi, name, flag, latitude, longitude, speed, updated_at')
       .gte('updated_at', sinceIso)
       .order('updated_at', { ascending: true })
       .limit(1000);
 
     const rows = (positions.data ?? []).filter(Boolean);
 
+    // Cadence baselines for the candidates — the fallback scores with the SAME
+    // v3 model as the cron; a diverging fallback model would be the two-halves-
+    // of-the-screen defect all over again. Vessels without a baseline are not
+    // ranked ("observed, not yet scorable").
+    const candidateMmsis = rows.map((v: any) => String(v.mmsi));
+    const cadence = new Map<string, number>();
+    for (let i = 0; i < candidateMmsis.length; i += 400) {
+      const { data } = await supabase
+        .from('vessel_cadence')
+        .select('mmsi, median_interval_h')
+        .in('mmsi', candidateMmsis.slice(i, i + 400));
+      for (const r of (data ?? []) as any[]) cadence.set(r.mmsi, r.median_interval_h);
+    }
+
     let voidedDeadBox = 0;
+    let unscoredNoBaseline = 0;
     const leads: Lead[] = rows
       .filter((v: any) => {
         const box = boxForPosition(v.latitude, v.longitude);
-        if (!box) return true; // outside every box: observed, liveness untracked
-        if (boxState(livenessMap.get(box.slug)) === 'dead') { voidedDeadBox++; return false; }
+        if (box && boxState(livenessMap.get(box.slug)) === 'dead') { voidedDeadBox++; return false; }
+        if (!cadence.has(String(v.mmsi))) { unscoredNoBaseline++; return false; }
         return true;
       })
       .map((v: any) => {
         const gapHours = silenceHours(v.updated_at);
-        const features = computeRealFeatures({ flag: v.flag, gapHours });
+        const features = computeRealFeatures({
+          flag: v.flag,
+          gapHours,
+          cadenceHours: cadence.get(String(v.mmsi)) as number,
+          lastSpeedKn: v.speed ?? null,
+        });
         const score = scoreVessel(features);
         return {
           mmsi: String(v.mmsi ?? 'unknown'),
@@ -174,6 +194,7 @@ export async function GET(req: NextRequest) {
       feed_lag_minutes: feedLagMinutes,
       coverage,
       voided_dead_box: voidedDeadBox,
+      unscored_no_baseline: unscoredNoBaseline,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown error';

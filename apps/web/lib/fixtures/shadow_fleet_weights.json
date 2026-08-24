@@ -1,12 +1,13 @@
 {
   "model": "logistic_regression",
-  "version": "v2.0.0-2026-06-22-real-signals",
+  "version": "v3.0.0-2026-08-24-cadence-baseline",
   "features": [
-    { "key": "ais_gap_hours_log",   "weight": 0.6,  "clip": [0, 10], "note": "log1p(hours since last AIS fix, measured against the feed's freshest observation). Primary dark-fleet signal." },
-    { "key": "flag_of_convenience", "weight": 0.9,  "clip": [0, 1],  "note": "Binary: current flag in the FOC list. Elevates risk only in combination with AIS darkness." }
+    { "key": "silence_vs_cadence",  "weight": 3.5, "clip": [0, 1.5], "note": "ln(1 + silence_hours / own_median_cadence_hours) / ln(31). Reaches 1.0 when a vessel has been silent 30x its own observed reporting interval; clipped at 1.5 (ratio ~170x) so extreme gaps keep separating instead of saturating. THE ranking signal — deviation from the vessel's own baseline, the same invariant FIRMS uses." },
+    { "key": "vanished_under_way",  "weight": 1.2, "clip": [0, 1],   "note": "Binary: last reported speed > 5 kn. A vessel that stops transmitting mid-passage is a stronger signal than one that goes quiet at anchor." },
+    { "key": "flag_of_convenience", "weight": 0.9, "clip": [0, 1],   "note": "Binary: current flag in the FOC list. Elevates risk only in combination with anomalous silence." }
   ],
-  "intercept": -3.0,
+  "intercept": -3.4,
   "threshold_alert": 0.6,
   "threshold_review": 0.4,
-  "notes": "v2: scored ONLY from signals derivable from the live AIS feed (dark-gap + flag-of-convenience). The v1 cargo_mismatch / port_call_anomaly / beneficial_owner_opaque / flag_changes_90d / vessel_age placeholders had NO data source and made the composite saturate near 1.0 (~95% of vessels flagged); they were removed. Restore them here (and in computeRealFeatures) once the enrichment pipeline lands. An active, non-FOC vessel scores ~0.05; a vessel dark for days under a flag of convenience clears the 0.4 review / 0.6 alert thresholds."
+  "notes": "v3: silence is scored against each vessel's OWN cadence (vessel_cadence, mig 111) instead of an absolute log-hours term. v2's single monotone gap feature made the top of the leaderboard a 22-way tie at the window-bounded maximum; ranking reduced to 'oldest fix wearing a convenient flag'. Weights validated against production 2026-08-24: 519 scoreable vessels -> 204 leads >=0.3, 98 alerts >=0.6, top-25 nearly all distinct at 3dp, top lead a vessel silent 54x its own cadence having vanished at 13.5 kn. Vessels WITHOUT a cadence baseline are not scored (composite NULL, 'observed, not yet scorable') - never defaulted. GATED upstream by the mig-110 dead-box VOID gate. The v1 cargo/port-call/owner placeholders remain removed; restore only with a real data source."
 }

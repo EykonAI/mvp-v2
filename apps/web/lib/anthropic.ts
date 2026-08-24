@@ -344,7 +344,7 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'query_shadow_fleet_leads',
-    description: 'Ranked shadow-fleet vessel leads, scored from AIS dark-gap + flag-of-convenience. Each lead carries silence_hours = hours since its last AIS fix, measured against the data clock. NOTE: the commodity argument is accepted but NOT applied — vessel type is known for under 1% of the tracked fleet, so all values return the same list; do not tell the user results were filtered by commodity. Coverage IS gated: vessels last seen in a coverage box that has itself been silent >12h are VOID, never ranked; the response carries per-box coverage state (live/stale/dead) you should relay when a corridor the user asks about is dark.',
+    description: 'Ranked shadow-fleet vessel leads, scored from silence relative to the OWN observed reporting cadence of each vessel (14-day baseline), vanished-under-way, and flag-of-convenience. Vessels without a cadence baseline yet are unscored, not defaulted. Each lead carries silence_hours = hours since its last AIS fix, measured against the data clock. NOTE: the commodity argument is accepted but NOT applied — vessel type is known for under 1% of the tracked fleet, so all values return the same list; do not tell the user results were filtered by commodity. Coverage IS gated: vessels last seen in a coverage box that has itself been silent >12h are VOID, never ranked; the response carries per-box coverage state (live/stale/dead) you should relay when a corridor the user asks about is dark.',
     input_schema: {
       type: 'object' as const,
       properties: {

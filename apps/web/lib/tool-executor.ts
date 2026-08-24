@@ -808,7 +808,7 @@ async function queryShadowFleetLeads(input: Record<string, any>): Promise<string
     data_clock: j.data_clock ?? null,
     feed_lag_minutes: j.feed_lag_minutes ?? null,
     coverage: j.coverage ?? null,
-    note: 'silence_hours = hours since last AIS fix vs the data clock. Coverage IS gated: vessels last seen in a coverage box that has itself been silent >12h are held VOID and never ranked — see the coverage object for per-box state.',
+    note: 'silence_hours = hours since last AIS fix vs the data clock; confidence ranks silence against each vessel_s OWN 14-day cadence baseline (indicators carry cadence_hours), and vessels without a baseline are unscored rather than defaulted. Coverage IS gated: vessels last seen in a coverage box that has itself been silent >12h are held VOID and never ranked — see the coverage object for per-box state.',
   });
 }
 
