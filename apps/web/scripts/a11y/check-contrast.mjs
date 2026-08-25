@@ -14,12 +14,22 @@ import { dirname, resolve } from 'node:path';
 import { hexToRgb, contrast, parseTokens } from './lib/color.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const CSS = resolve(HERE, '../../app/globals.css');
+/**
+ * There are TWO token systems, and a gate that reads only one is a gate
+ * with a blind spot. globals.css drives the product surfaces; the
+ * marketing pages carry their own set scoped under .eykon-landing. The
+ * second one shipped a 2.89:1 text token that this gate could not see
+ * until the DOM check found it on the rendered page.
+ */
+const SHEETS = [
+  { file: resolve(HERE, '../../app/globals.css'),
+    text: ['ink', 'ink-dim', 'ink-faint'],
+    surfaces: ['bg-void', 'bg-navy', 'bg-panel', 'bg-raised', 'bg-hover'] },
+  { file: resolve(HERE, '../../app/(marketing)/landing.css'),
+    text: ['text-primary', 'text-secondary', 'text-tertiary'],
+    surfaces: ['bg-base', 'bg-panel', 'bg-panel-hi', 'bg-panel-mute'] },
+];
 
-/** Tokens used as `color:` on text. */
-const TEXT_TOKENS = ['ink', 'ink-dim', 'ink-faint'];
-/** Every surface text can land on. */
-const SURFACES = ['bg-void', 'bg-navy', 'bg-panel', 'bg-raised', 'bg-hover'];
 const AA_NORMAL = 4.5;
 
 /**
@@ -31,32 +41,43 @@ const AA_NORMAL = 4.5;
  */
 const KNOWN_EXCEPTIONS = { 'ink-ghost': 'non-text tint (disabled/placeholder); 1 color: consumer' };
 
-const tokens = parseTokens(readFileSync(CSS, 'utf8'));
 const failures = [];
 const rows = [];
 
-for (const t of TEXT_TOKENS) {
-  if (!tokens[t]) { failures.push(`token --${t} not found in globals.css`); continue; }
-  for (const s of SURFACES) {
-    if (!tokens[s]) continue;
-    const ratio = contrast(hexToRgb(tokens[t]), hexToRgb(tokens[s]));
-    rows.push({ t, s, ratio });
-    if (ratio < AA_NORMAL) {
-      failures.push(`--${t} ${tokens[t]} on --${s} ${tokens[s]} = ${ratio.toFixed(2)}:1 (AA needs ${AA_NORMAL}:1)`);
+for (const sheet of SHEETS) {
+  const name = sheet.file.split('/').slice(-1)[0];
+  let tokens;
+  try { tokens = parseTokens(readFileSync(sheet.file, 'utf8')); }
+  catch { failures.push(`stylesheet not readable: ${sheet.file}`); continue; }
+  for (const t of sheet.text) {
+    if (!tokens[t]) { failures.push(`token --${t} not found in ${name}`); continue; }
+    for (const s of sheet.surfaces) {
+      if (!tokens[s]) continue;
+      const ratio = contrast(hexToRgb(tokens[t]), hexToRgb(tokens[s]));
+      rows.push({ sheet: name, t, s, ratio, hex: tokens[t] });
+      if (ratio < AA_NORMAL) {
+        failures.push(`${name}: --${t} ${tokens[t]} on --${s} ${tokens[s]} = ${ratio.toFixed(2)}:1 (AA needs ${AA_NORMAL}:1)`);
+      }
     }
   }
 }
 
 const worst = rows.reduce((a, b) => (a && a.ratio < b.ratio ? a : b), null);
-console.log('a11y/contrast — text tokens vs every surface');
-for (const t of TEXT_TOKENS) {
-  const mine = rows.filter(r => r.t === t);
-  if (!mine.length) continue;
-  const lo = Math.min(...mine.map(r => r.ratio));
-  console.log(`  --${t.padEnd(10)} ${tokens[t]}  worst ${lo.toFixed(2)}:1  ${lo >= AA_NORMAL ? 'PASS' : 'FAIL'}`);
+console.log('a11y/contrast — text tokens vs every surface, both stylesheets');
+for (const sheet of SHEETS) {
+  const name = sheet.file.split('/').slice(-1)[0];
+  const mineAll = rows.filter(r => r.sheet === name);
+  if (!mineAll.length) continue;
+  console.log(`  ${name}`);
+  for (const t of sheet.text) {
+    const mine = mineAll.filter(r => r.t === t);
+    if (!mine.length) continue;
+    const lo = Math.min(...mine.map(r => r.ratio));
+    console.log(`    --${t.padEnd(15)} ${mine[0].hex}  worst ${lo.toFixed(2)}:1  ${lo >= AA_NORMAL ? 'PASS' : 'FAIL'}`);
+  }
 }
 for (const [k, why] of Object.entries(KNOWN_EXCEPTIONS)) {
-  if (tokens[k]) console.log(`  --${k.padEnd(10)} ${tokens[k]}  EXEMPT — ${why}`);
+  console.log(`  --${k.padEnd(10)} EXEMPT — ${why}`);
 }
 if (worst) console.log(`  worst overall: --${worst.t} on --${worst.s} = ${worst.ratio.toFixed(2)}:1`);
 

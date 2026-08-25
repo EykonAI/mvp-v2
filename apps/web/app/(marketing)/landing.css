@@ -16,7 +16,13 @@
   --border-hi:      #2A3F5F;
   --text-primary:   #E6EDF7;
   --text-secondary: #8BA3B8;
-  --text-tertiary:  #566A82;
+  /* Was #566A82 — 2.89:1 on --bg-panel-hi, a WCAG AA failure that produced
+   * 44 distinct contrast failures on / and /pricing. The source-level gate
+   * never saw it: it only read globals.css, and the marketing pages carry
+   * their own token system. #758CA2 is the darkest value clearing 4.5:1 on
+   * all four marketing surfaces (worst 4.61:1), keeping ~28% luminance
+   * separation from --text-secondary. */
+  --text-tertiary:  #758CA2;
   --cyan:           #19D0B8;
   --cyan-dim:       #0E8A7A;
   --cyan-soft:      rgba(25, 208, 184, 0.08);

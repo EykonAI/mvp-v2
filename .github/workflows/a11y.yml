@@ -37,3 +37,44 @@ jobs:
       - name: Structural budgets (ratchet)
         working-directory: apps/web
         run: node scripts/a11y/check-budgets.mjs
+
+  # DOM-level check. Separate job because it needs a build, a server and a
+  # browser — the source gates above stay fast so PR feedback stays fast.
+  #
+  # Public routes only. The authenticated surfaces need .env.local and a
+  # session, so they cannot run unattended here; run `npm run a11y:dom:app`
+  # locally against a dev server before shipping UI work.
+  dom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install
+        working-directory: apps/web
+        run: npm ci
+      - name: Install Chromium
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+      - name: Build
+        working-directory: apps/web
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder
+      - name: Start server
+        working-directory: apps/web
+        run: |
+          npx next start -p 3100 &
+          npx wait-on http://localhost:3100 -t 60000
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder
+      - name: DOM accessibility check (public routes)
+        working-directory: apps/web
+        run: node scripts/a11y/check-dom.mjs
+        env:
+          A11Y_BASE_URL: http://localhost:3100
