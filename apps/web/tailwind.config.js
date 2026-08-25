@@ -35,7 +35,6 @@ module.exports = {
           green:       '#4ABF8A',
           violet:      '#8B7FD8',
           coral:       '#DE7F70',
-          wheat:       '#D4A24C',
         },
         // shadcn/ui semantic tokens (components/ui/*)
         background: sc('background'),

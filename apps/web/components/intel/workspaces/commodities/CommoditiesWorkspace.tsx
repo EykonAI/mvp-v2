@@ -243,9 +243,9 @@ export default function CommoditiesWorkspace() {
               fontSize: 10.5,
               letterSpacing: '0.12em',
               textTransform: 'uppercase',
-              background: selected === c.slug ? 'var(--wheat)' : 'var(--bg-raised)',
+              background: selected === c.slug ? 'var(--amber)' : 'var(--bg-raised)',
               color: selected === c.slug ? 'var(--bg-void)' : 'var(--ink-dim)',
-              border: `1px solid ${selected === c.slug ? 'var(--wheat)' : 'var(--rule)'}`,
+              border: `1px solid ${selected === c.slug ? 'var(--amber)' : 'var(--rule)'}`,
               borderRadius: 2,
               cursor: 'pointer',
               fontWeight: selected === c.slug ? 500 : 400,
@@ -261,7 +261,7 @@ export default function CommoditiesWorkspace() {
           style={{
             padding: 10,
             background: 'rgba(212, 162, 76, 0.04)',
-            borderLeft: '2px solid var(--wheat)',
+            borderLeft: '2px solid var(--amber)',
             fontSize: 11.5,
             color: 'var(--ink-dim)',
           }}
@@ -291,7 +291,7 @@ export default function CommoditiesWorkspace() {
                       {d.reporter}
                     </span>
                     <div style={{ flex: 1, height: 5, background: 'var(--bg-raised)', border: '1px solid var(--rule)' }}>
-                      <div style={{ width: `${Math.min(100, d.share * 100)}%`, height: '100%', background: 'var(--wheat)' }} />
+                      <div style={{ width: `${Math.min(100, d.share * 100)}%`, height: '100%', background: 'var(--amber)' }} />
                     </div>
                     <span className="num-lg" style={{ width: 40, fontSize: 10.5, color: 'var(--ink)', textAlign: 'right' }}>
                       {(d.share * 100).toFixed(0)}%
@@ -321,7 +321,7 @@ export default function CommoditiesWorkspace() {
                     {d.country}
                   </span>
                   <div style={{ flex: 1, height: 5, background: 'var(--bg-raised)', border: '1px solid var(--rule)' }}>
-                    <div style={{ width: `${d.share * 100}%`, height: '100%', background: 'var(--wheat)' }} />
+                    <div style={{ width: `${d.share * 100}%`, height: '100%', background: 'var(--amber)' }} />
                   </div>
                   <span className="num-lg" style={{ width: 40, fontSize: 10.5, color: 'var(--ink)', textAlign: 'right' }}>
                     {(d.share * 100).toFixed(0)}%
@@ -342,7 +342,7 @@ export default function CommoditiesWorkspace() {
                 values={markets.prices.series}
                 width={420}
                 height={120}
-                stroke="var(--wheat)"
+                stroke="var(--amber)"
                 fill="rgba(212, 162, 76, 0.14)"
               />
               <div className="flex items-baseline justify-between" style={{ marginTop: 8 }}>
@@ -354,7 +354,7 @@ export default function CommoditiesWorkspace() {
                   <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10.5, color: 'var(--ink-dim)' }}>
                     {markets.prices.latest.period}
                   </span>
-                  <span className="num-lg" style={{ fontSize: 18, color: 'var(--wheat)' }}>
+                  <span className="num-lg" style={{ fontSize: 18, color: 'var(--amber)' }}>
                     {markets.prices.latest.value.toLocaleString()} {markets.prices.unit}
                   </span>
                 </span>
@@ -370,7 +370,7 @@ export default function CommoditiesWorkspace() {
                   {markets.volatility_30d && (
                     <div style={{ flex: 1.4, padding: '6px 4px', background: 'var(--bg-panel)', textAlign: 'center' }} title={markets.volatility_30d.method}>
                       <div className="eyebrow" style={{ marginBottom: 2 }}>30d vol</div>
-                      <div className="num-lg" style={{ fontSize: 12.5, color: 'var(--wheat)' }}>{markets.volatility_30d.pct}%</div>
+                      <div className="num-lg" style={{ fontSize: 12.5, color: 'var(--amber)' }}>{markets.volatility_30d.pct}%</div>
                     </div>
                   )}
                 </div>
@@ -445,7 +445,7 @@ export default function CommoditiesWorkspace() {
                             {cp.delta_pct >= 0 ? '+' : '−'}{Math.abs(cp.delta_pct)}% vs 14d avg
                           </span>
                         )}
-                        <span className="num-lg" style={{ fontSize: 14, color: 'var(--wheat)' }}>
+                        <span className="num-lg" style={{ fontSize: 14, color: 'var(--amber)' }}>
                           {cp.latest_count}
                         </span>
                       </span>
@@ -585,16 +585,16 @@ export default function CommoditiesWorkspace() {
           <Panel title="06 · Cushing Crude Stocks · EIA weekly">
             {!liveError && live?.eia ? (
               <>
-                <Sparkline values={live.eia.series} width={420} height={120} stroke="var(--wheat)" fill="rgba(212, 162, 76, 0.14)" />
+                <Sparkline values={live.eia.series} width={420} height={120} stroke="var(--amber)" fill="rgba(212, 162, 76, 0.14)" />
                 <div className="flex items-baseline justify-between" style={{ marginTop: 8 }}>
                   <span className="eyebrow">Week of {live.eia.latest.period}</span>
                   <span className="flex items-baseline" style={{ gap: 8 }}>
                     {live.eia.weekly_delta_pct != null && (
-                      <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10.5, color: 'var(--wheat)' }}>
+                      <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10.5, color: 'var(--amber)' }}>
                         {live.eia.weekly_delta_pct >= 0 ? '+' : '−'}{Math.abs(live.eia.weekly_delta_pct)}% w/w
                       </span>
                     )}
-                    <span className="num-lg" style={{ fontSize: 18, color: 'var(--wheat)' }}>
+                    <span className="num-lg" style={{ fontSize: 18, color: 'var(--amber)' }}>
                       {live.eia.latest.value.toLocaleString()} MBBL
                     </span>
                   </span>

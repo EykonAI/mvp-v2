@@ -167,7 +167,7 @@ function nightlightsColor(d: any): [number, number, number, number] {
   if (d.event_type === 'went_dark_lights') return [130, 145, 175, 235];
   if (d.event_type === 'surge' || d.event_type === 'first_light') return [255, 255, 240, 245];
   const t = nightlightsIntensity(d);
-  // warm gold (var(--wheat) #D4A24C) → pale warm white
+  // warm gold (var(--amber) #D4A24C) → pale warm white
   return [
     Math.round(212 + (255 - 212) * t),
     Math.round(162 + (248 - 162) * t),

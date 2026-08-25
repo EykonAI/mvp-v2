@@ -8,7 +8,7 @@ export default async function CommoditiesPage() {
   await citizenInertRedirect('commodities');
   return (
     <WorkspaceShell
-      accent="var(--wheat)"
+      accent="var(--amber)"
       eyebrow="Persona · Commodities & Trade"
       title="Commodities"
       subtitle="Features 3 · 4 · 6 · 13"
