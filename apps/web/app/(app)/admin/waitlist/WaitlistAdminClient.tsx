@@ -1,4 +1,12 @@
 'use client';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { useMemo, useState } from 'react';
 
 export type WaitlistRow = {
@@ -335,35 +343,22 @@ export function WaitlistAdminClient({
             overflow: 'hidden',
           }}
         >
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead>
-              <tr>
+          <Table>
+            <TableHeader>
+              <TableRow>
                 {['Email', 'Tier', 'Country', 'Status', 'Referral', 'Joined', 'Note'].map(h => (
-                  <th
-                    key={h}
-                    style={{
-                      textAlign: 'left',
-                      padding: '10px 14px',
-                      fontFamily: 'var(--f-mono)',
-                      fontSize: 9.5,
-                      letterSpacing: '0.16em',
-                      textTransform: 'uppercase',
-                      color: 'var(--ink-faint)',
-                      borderBottom: '1px solid var(--rule-soft)',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
+                  <TableHead key={h}>
                     {h}
-                  </th>
+                  </TableHead>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {filtered.map(r => (
                 <Row key={r.id} row={r} />
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
 
@@ -380,17 +375,17 @@ export function WaitlistAdminClient({
 function Row({ row }: { row: WaitlistRow }) {
   const st = statusOf(row);
   return (
-    <tr style={{ borderBottom: '1px solid var(--rule-soft)' }}>
-      <td style={{ padding: '10px 14px' }}>
+    <TableRow>
+      <TableCell>
         <CopyEmail email={row.email} />
-      </td>
-      <td style={{ padding: '10px 14px', color: 'var(--ink-dim)' }}>
+      </TableCell>
+      <TableCell className="text-eykon-ink-dim">
         {row.tier === 'enterprise' ? 'Enterprise' : 'Pro'}
-      </td>
-      <td style={{ padding: '10px 14px', color: 'var(--ink-dim)', whiteSpace: 'nowrap' }}>
+      </TableCell>
+      <TableCell className="whitespace-nowrap text-eykon-ink-dim">
         {row.country ? `${flag(row.country)} ${row.country}`.trim() : '—'}
-      </td>
-      <td style={{ padding: '10px 14px' }}>
+      </TableCell>
+      <TableCell>
         <span
           style={{
             fontFamily: 'var(--f-mono)',
@@ -405,8 +400,8 @@ function Row({ row }: { row: WaitlistRow }) {
         >
           {st}
         </span>
-      </td>
-      <td
+      </TableCell>
+      <TableCell
         style={{
           padding: '10px 14px',
           color: 'var(--ink-faint)',
@@ -415,11 +410,11 @@ function Row({ row }: { row: WaitlistRow }) {
         }}
       >
         {row.referral_code ?? '—'}
-      </td>
-      <td style={{ padding: '10px 14px', color: 'var(--ink-dim)', whiteSpace: 'nowrap' }}>
+      </TableCell>
+      <TableCell className="whitespace-nowrap text-eykon-ink-dim">
         {formatDate(row.created_at)}
-      </td>
-      <td style={{ padding: '10px 14px', color: 'var(--ink-faint)', maxWidth: 220 }}>
+      </TableCell>
+      <TableCell className="max-w-[220px] text-eykon-ink-faint">
         {row.note ? (
           <span title={row.note} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {row.note}
@@ -427,8 +422,8 @@ function Row({ row }: { row: WaitlistRow }) {
         ) : (
           '—'
         )}
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }
 

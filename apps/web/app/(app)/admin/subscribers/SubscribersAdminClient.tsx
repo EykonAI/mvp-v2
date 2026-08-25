@@ -1,4 +1,12 @@
 'use client';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 
 import { useMemo, useState } from 'react';
 
@@ -485,9 +493,9 @@ export function SubscribersAdminClient({
             overflowX: 'auto',
           }}
         >
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead>
-              <tr>
+          <Table>
+            <TableHeader>
+              <TableRow>
                 {[
                   'Customer',
                   'Type',
@@ -502,31 +510,18 @@ export function SubscribersAdminClient({
                   'Settled',
                   'Renews',
                 ].map(h => (
-                  <th
-                    key={h}
-                    style={{
-                      textAlign: 'left',
-                      padding: '10px 14px',
-                      fontFamily: 'var(--f-mono)',
-                      fontSize: 9.5,
-                      letterSpacing: '0.16em',
-                      textTransform: 'uppercase',
-                      color: 'var(--ink-faint)',
-                      borderBottom: '1px solid var(--rule-soft)',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
+                  <TableHead key={h}>
                     {h}
-                  </th>
+                  </TableHead>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {filtered.map(r => (
                 <Row key={r.user_id} row={r} />
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
     </section>
@@ -572,28 +567,22 @@ function EmptyState({ hasAnyRows, abandoned }: { hasAnyRows: boolean; abandoned:
 }
 
 function Row({ row }: { row: SubscriberRow }) {
-  const td: React.CSSProperties = {
-    padding: '11px 14px',
-    borderBottom: '1px solid var(--rule-soft)',
-    verticalAlign: 'top',
-    whiteSpace: 'nowrap',
-  };
   const dim = { color: 'var(--ink-faint)' };
   return (
-    <tr>
-      <td style={{ ...td, whiteSpace: 'normal', minWidth: 200 }}>
+    <TableRow className="align-top [&>td]:whitespace-nowrap">
+      <TableCell className="min-w-[200px] whitespace-normal">
         <CopyEmail email={row.email} />
         {row.display_name && (
           <div style={{ fontSize: 11, ...dim, marginTop: 2 }}>{row.display_name}</div>
         )}
-      </td>
-      <td style={td}>
+      </TableCell>
+      <TableCell>
         {TYPE_LABEL[row.type]}
         {row.purchase_count > 1 && (
           <span style={{ fontSize: 11, ...dim }}> ·{row.purchase_count}</span>
         )}
-      </td>
-      <td style={td}>
+      </TableCell>
+      <TableCell>
         {row.tier ?? <span style={dim}>—</span>}
         {row.cadence && <div style={{ fontSize: 11, ...dim }}>{row.cadence}</div>}
         {/*
@@ -611,37 +600,37 @@ function Row({ row }: { row: SubscriberRow }) {
             SEAT LOCKED
           </div>
         )}
-      </td>
-      <td style={{ ...td, color: STATUS_COLOR[row.status] }}>{STATUS_LABEL[row.status]}</td>
-      <td style={td}>
+      </TableCell>
+      <TableCell style={{ color: STATUS_COLOR[row.status] }}>{STATUS_LABEL[row.status]}</TableCell>
+      <TableCell>
         {row.country ? `${flag(row.country)} ${row.country}` : <span style={dim}>—</span>}
-      </td>
-      <td style={{ ...td, fontFamily: 'var(--f-mono)', fontSize: 11.5 }}>
+      </TableCell>
+      <TableCell className="font-mono text-[11.5px]">
         {row.landing_path ?? <span style={dim}>—</span>}
-      </td>
-      <td style={{ ...td, fontFamily: 'var(--f-mono)', fontSize: 11.5 }}>
+      </TableCell>
+      <TableCell className="font-mono text-[11.5px]">
         {row.referral_code ?? <span style={dim}>—</span>}
-      </td>
-      <td style={{ ...td, fontFamily: 'var(--f-mono)', fontSize: 11.5 }}>
+      </TableCell>
+      <TableCell className="font-mono text-[11.5px]">
         {row.utm_source ?? <span style={dim}>—</span>}
         {row.utm_campaign && <div style={{ fontSize: 10.5, ...dim }}>{row.utm_campaign}</div>}
-      </td>
-      <td style={{ ...td, fontSize: 11.5 }}>
+      </TableCell>
+      <TableCell className="text-[11.5px]">
         {row.payment_provider ?? <span style={dim}>—</span>}
         {row.pay_currency && (
           <div style={{ fontSize: 10.5, ...dim }}>{row.pay_currency.toUpperCase()}</div>
         )}
-      </td>
-      <td style={td}>{formatDate(row.joined_at)}</td>
-      <td style={td}>
+      </TableCell>
+      <TableCell>{formatDate(row.joined_at)}</TableCell>
+      <TableCell>
         {money(row.settled_cents, row.currency)}
         {row.refunded_cents > 0 && (
           <div style={{ fontSize: 10.5, color: 'var(--ink-faint)' }}>
             −{money(row.refunded_cents, row.currency)} refunded
           </div>
         )}
-      </td>
-      <td style={td}>
+      </TableCell>
+      <TableCell>
         {row.type === 'pass' ? (
           row.pass_expires_at ? (
             formatDate(row.pass_expires_at)
@@ -651,8 +640,8 @@ function Row({ row }: { row: SubscriberRow }) {
         ) : (
           formatDate(row.renews_at)
         )}
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }
 
