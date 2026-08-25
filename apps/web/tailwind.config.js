@@ -1,5 +1,12 @@
 /** @type {import('tailwindcss').Config} */
+
+// rgb(var(--sc-*) / <alpha-value>) lets Tailwind opacity modifiers
+// (bg-primary/10 etc.) work against the CSS-variable palette defined
+// in globals.css. The --sc-* triplets are the eYKON brand tokens.
+const sc = (name) => `rgb(var(--sc-${name}) / <alpha-value>)`;
+
 module.exports = {
+  darkMode: 'class',
   content: [
     './app/**/*.{js,ts,jsx,tsx,mdx}',
     './components/**/*.{js,ts,jsx,tsx,mdx}',
@@ -30,6 +37,36 @@ module.exports = {
           coral:       '#DE7F70',
           wheat:       '#D4A24C',
         },
+        // shadcn/ui semantic tokens (components/ui/*)
+        background: sc('background'),
+        foreground: sc('foreground'),
+        card: { DEFAULT: sc('card'), foreground: sc('card-foreground') },
+        popover: { DEFAULT: sc('popover'), foreground: sc('popover-foreground') },
+        primary: { DEFAULT: sc('primary'), foreground: sc('primary-foreground') },
+        secondary: { DEFAULT: sc('secondary'), foreground: sc('secondary-foreground') },
+        muted: { DEFAULT: sc('muted'), foreground: sc('muted-foreground') },
+        accent: { DEFAULT: sc('accent'), foreground: sc('accent-foreground') },
+        destructive: { DEFAULT: sc('destructive'), foreground: sc('destructive-foreground') },
+        border: sc('border'),
+        input: sc('input'),
+        ring: sc('ring'),
+        chart: {
+          1: sc('chart-1'),
+          2: sc('chart-2'),
+          3: sc('chart-3'),
+          4: sc('chart-4'),
+          5: sc('chart-5'),
+        },
+        sidebar: {
+          DEFAULT: sc('sidebar'),
+          foreground: sc('sidebar-foreground'),
+          primary: sc('sidebar-primary'),
+          'primary-foreground': sc('sidebar-primary-foreground'),
+          accent: sc('sidebar-accent'),
+          'accent-foreground': sc('sidebar-accent-foreground'),
+          border: sc('sidebar-border'),
+          ring: sc('sidebar-ring'),
+        },
       },
       fontFamily: {
         display: ['Jura', 'sans-serif'],
@@ -57,5 +94,5 @@ module.exports = {
       },
     },
   },
-  plugins: [],
+  plugins: [require('tailwindcss-animate')],
 };

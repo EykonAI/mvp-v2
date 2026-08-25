@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
+import { AppShell } from '@/components/shell/AppShell';
 
 // The (app) route group wraps the authenticated product surfaces:
 //   /app        — the 3D globe
@@ -39,5 +40,5 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     }
   }
 
-  return <>{children}</>;
+  return <AppShell>{children}</AppShell>;
 }
