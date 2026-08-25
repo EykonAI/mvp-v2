@@ -1,4 +1,5 @@
 'use client';
+import ChartFigure from '@/components/intel/shared/ChartFigure';
 import { useState } from 'react';
 import ScenarioLayout from '@/components/intel/shared/ScenarioLayout';
 import IllustrativeBadge from '@/components/intel/shared/IllustrativeBadge';
@@ -302,7 +303,12 @@ function NetworkGraph({ result }: { result: SanctionsOutput | null }) {
 
   return (
     <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--rule-soft)', position: 'relative' }}>
-      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
+      <ChartFigure
+        title="Sanctions exposure network"
+        desc={`${result.nodes.length} entities connected by ${result.edges.length} exposure edges.`}
+        table={{ columns: ['From', 'To'], rows: result.edges.map(e => [e.from, e.to]) }}
+      >
+      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
         {result.edges.map((e, i) => {
           const a = pos.get(e.from);
           const b = pos.get(e.to);
@@ -363,6 +369,7 @@ function NetworkGraph({ result }: { result: SanctionsOutput | null }) {
           );
         })}
       </svg>
+      </ChartFigure>
     </div>
   );
 }

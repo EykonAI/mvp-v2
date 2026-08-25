@@ -102,7 +102,7 @@ export function EykonSidebar() {
             <SidebarMenuButton size="lg" asChild tooltip="eYKON.ai — back to the globe">
               <Link href="/app">
                 <div className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary/10">
-                  <svg viewBox="0 0 28 18" width="22" height="14">
+                  <svg viewBox="0 0 28 18" width="22" height="14" aria-hidden="true" focusable="false">
                     <path
                       d="M2 9 L14 2 L26 9 L14 16 Z"
                       fill="none"

@@ -170,7 +170,7 @@ function StylizedMap({
           ]),
         }}
       >
-      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
+      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
         {/* Stylised continents — simple polygons inspired by the wireframe */}
         <g opacity={0.18}>
           <path

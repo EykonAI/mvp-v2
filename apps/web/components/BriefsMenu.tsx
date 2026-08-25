@@ -15,19 +15,19 @@ import { TAB_BASE_STYLE, activeStyle } from '@/components/navTabStyles';
 
 const I = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
 const TodayIcon = (
-  <svg width="14" height="14" viewBox="0 0 14 14"><rect x="2.2" y="3" width="9.6" height="8.4" rx="1" {...I} /><line x1="2.2" y1="5.4" x2="11.8" y2="5.4" {...I} /><line x1="4.6" y1="1.8" x2="4.6" y2="3.4" {...I} /><line x1="9.4" y1="1.8" x2="9.4" y2="3.4" {...I} /></svg>
+  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false"><rect x="2.2" y="3" width="9.6" height="8.4" rx="1" {...I} /><line x1="2.2" y1="5.4" x2="11.8" y2="5.4" {...I} /><line x1="4.6" y1="1.8" x2="4.6" y2="3.4" {...I} /><line x1="9.4" y1="1.8" x2="9.4" y2="3.4" {...I} /></svg>
 );
 const BriefingsIcon = (
-  <svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 2.4h5l3 3v6.2H3z" {...I} /><line x1="4.6" y1="7" x2="9.4" y2="7" {...I} /><line x1="4.6" y1="9.2" x2="8" y2="9.2" {...I} /></svg>
+  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false"><path d="M3 2.4h5l3 3v6.2H3z" {...I} /><line x1="4.6" y1="7" x2="9.4" y2="7" {...I} /><line x1="4.6" y1="9.2" x2="8" y2="9.2" {...I} /></svg>
 );
 const ForecastIcon = (
-  <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2.2 9.8l3-3 2.2 2.2 4.4-4.4" {...I} /><path d="M9.4 4.4h2.4v2.4" {...I} /></svg>
+  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false"><path d="M2.2 9.8l3-3 2.2 2.2 4.4-4.4" {...I} /><path d="M9.4 4.4h2.4v2.4" {...I} /></svg>
 );
 const ConvergenceIcon = (
-  <svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="1.6" {...I} /><path d="M7 1.8v3M7 9.2v3M1.8 7h3M9.2 7h3" {...I} /></svg>
+  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="1.6" {...I} /><path d="M7 1.8v3M7 9.2v3M1.8 7h3M9.2 7h3" {...I} /></svg>
 );
 const DeliveryIcon = (
-  <svg width="14" height="14" viewBox="0 0 14 14"><rect x="2" y="3.4" width="10" height="7.2" rx="1.2" {...I} /><path d="M2.4 4.2L7 8l4.6-3.8" {...I} /></svg>
+  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false"><rect x="2" y="3.4" width="10" height="7.2" rx="1.2" {...I} /><path d="M2.4 4.2L7 8l4.6-3.8" {...I} /></svg>
 );
 
 interface NavItem {
