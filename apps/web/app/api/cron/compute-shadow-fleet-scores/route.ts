@@ -398,14 +398,27 @@ export async function POST(req: NextRequest) {
   let claimsIssued = 0;
   let claimsSkipped = 0;
   {
+    // COMPLETED COHORTS ONLY — the censoring fix. Counting all resolved
+    // events biases the rate upward while the family is young: before the
+    // first 72 h deadline passes, no event has HAD TIME to fail, so the
+    // resolved population can only contain reappearances and the "measured"
+    // rate reads ~1.0 (observed 0.979 on the first emission tick). That is
+    // the EIA base-rate lesson mirrored: scoring "has not had time to fail"
+    // as a success rate. An event's cohort is complete only once its
+    // deadline has passed — both outcomes were possible — so only those
+    // events inform the rate. Until the first cohort completes this yields
+    // the flat 0.5 prior, honestly labelled.
+    const nowIso = now.toISOString();
     const { count: kCount } = await supabase
       .from('dark_contact_events')
       .select('*', { count: 'exact', head: true })
-      .eq('resolution', 'reappeared');
+      .eq('resolution', 'reappeared')
+      .lte('deadline_at', nowIso);
     const { count: nCount } = await supabase
       .from('dark_contact_events')
       .select('*', { count: 'exact', head: true })
-      .eq('status', 'resolved');
+      .eq('status', 'resolved')
+      .lte('deadline_at', nowIso);
     const k = kCount ?? 0;
     const n = nCount ?? 0;
     const baseRate = { p: familyBaseRate(k, n), k, n };

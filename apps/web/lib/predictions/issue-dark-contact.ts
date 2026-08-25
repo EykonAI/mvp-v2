@@ -20,12 +20,15 @@ import { computePredictionHash } from './hash';
  * Reputation Note. This family is exactly that.
  *
  * THE FORECAST is the family's own measured base rate, Laplace-shrunk toward
- * 0.5: p = (reappeared + 1) / (resolved_nonvoid + 2). Computed from RESOLVED
- * events only, so the anchor is disjoint from the claim being issued (the
- * §17.1 lesson: an anchor that contains the window it anchors measures
- * nothing). At n=0 this is exactly 0.5 — a flat prior, honestly labelled in
- * context.forecast_basis, the same starting posture the EIA issuer shipped
- * with. A base-rate forecast scores ~zero skill BY CONSTRUCTION; for the
+ * 0.5: p = (reappeared + 1) / (resolved + 2), computed over COMPLETED
+ * COHORTS ONLY — events whose 72 h deadline has already passed, so both
+ * outcomes were possible. Two anchor disciplines stack here: disjointness
+ * (resolved events only — §17.1: an anchor containing its own window
+ * measures nothing) and completeness (deadline elapsed — counting young
+ * resolved events reads "has not had time to fail" as a success rate; the
+ * first emission tick measured 0.979 that way before this fix). At n=0 the
+ * rate is exactly 0.5 — a flat prior, honestly labelled in
+ * context.forecast_basis. A base-rate forecast scores ~zero skill BY CONSTRUCTION; for the
  * machine track that is fine — the register is measuring the instrument,
  * not competing on foresight.
  *
@@ -90,8 +93,8 @@ export function buildDarkContactClaimRow(
       board_confidence_at_open: ev.confidence_at_open,
       forecast_basis:
         baseRate.n === 0
-          ? 'flat_prior_no_resolved_events_yet'
-          : 'laplace_shrunk_family_base_rate_resolved_events_only',
+          ? 'flat_prior_no_completed_cohorts_yet'
+          : 'laplace_shrunk_base_rate_completed_cohorts_only',
       forecast_base_rate_k: baseRate.k,
       forecast_base_rate_n: baseRate.n,
       // The board confidence is suspicion, not reappearance probability —
