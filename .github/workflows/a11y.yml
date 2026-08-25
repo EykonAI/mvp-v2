@@ -1,0 +1,39 @@
+name: a11y
+
+# First CI workflow in this repo. Scoped deliberately narrow: it runs the
+# accessibility gates only, in seconds, with no install step, so it is
+# cheap enough that nobody has a reason to skip it.
+#
+# It exists because PRs #406 and #407 fixed contrast across 281 call
+# sites and gave 21 visualisations accessible names — and nothing
+# prevented the next commit undoing either.
+
+on:
+  pull_request:
+    paths:
+      - 'apps/web/app/globals.css'
+      - 'apps/web/components/**'
+      - 'apps/web/app/**'
+      - 'apps/web/scripts/a11y/**'
+      - '.github/workflows/a11y.yml'
+  push:
+    branches: [main]
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # No npm install: the gates use Node built-ins only, by design.
+      - name: Text contrast (hard gate — WCAG 2.2 AA)
+        working-directory: apps/web
+        run: node scripts/a11y/check-contrast.mjs
+      - name: Signal palette separation (ratchet)
+        working-directory: apps/web
+        run: node scripts/a11y/check-palette.mjs
+      - name: Structural budgets (ratchet)
+        working-directory: apps/web
+        run: node scripts/a11y/check-budgets.mjs

@@ -17,8 +17,16 @@
      #7E8A9E is the darkest value clearing 4.5:1 on every surface
      (worst 4.63:1 on --bg-raised) while keeping ~31% luminance
      separation from --ink-dim, so the ramp keeps its tier.
-     Consumed as `color` 281x via var() — this one line fixes all of them. */
-  --ink-faint: #7E8A9E;
+     Consumed as `color` 281x via var() — this one line fixes all of them.
+
+     Raised again to #8791A4 by the a11y CI gate, which checks all FIVE
+     surfaces: #7E8A9E cleared void/navy/panel/raised but landed at
+     4.19:1 on --bg-hover (#1A2846), which is lighter than --bg-raised.
+     A text token has to be safe wherever it is used, or every future
+     call site needs its own contrast audit. Worst case is now 4.61:1
+     on --bg-hover; the cost is ~22% luminance separation from
+     --ink-dim instead of ~31%, which still reads as a distinct tier. */
+  --ink-faint: #8791A4;
   --ink-ghost: #3A4256;
   --teal: #19D0B8;
   --teal-dim: #0E9A88;
