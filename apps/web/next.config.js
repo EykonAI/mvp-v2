@@ -112,6 +112,16 @@ const nextConfig = {
     serverActions: { bodySizeLimit: '2mb' },
     // Required on Next.js 14 for instrumentation.ts to run (stable in Next 15).
     instrumentationHook: true,
+    // pdfkit must NOT be webpack-bundled: it reads its standard-font metric
+    // files (Helvetica.afm etc.) from its own package directory at runtime,
+    // and bundling strands them — every pdfkit route 500'd in production with
+    // "ENOENT .next/server/chunks/data/Helvetica.afm" the first time one was
+    // actually exercised (2026-08-25, the Shadow Fleet evidence pack; the
+    // analyst session PDF, project dossier and commodities export shared the
+    // same latent failure, unclicked since ship). Externalising makes the
+    // server require() it from node_modules, where the data files live.
+    // Railway runs `next start` with full node_modules present (railway.toml).
+    serverComponentsExternalPackages: ['pdfkit'],
   },
   // Transpile deck.gl ESM packages
   transpilePackages: [
