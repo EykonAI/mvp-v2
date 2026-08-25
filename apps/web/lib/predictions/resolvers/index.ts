@@ -4,6 +4,7 @@ import { resolveEia } from './eia';
 import { resolveOfac } from './ofac';
 import { resolveAisChokepoint } from './ais-chokepoint';
 import { resolveFirms } from './firms';
+import { resolveAisDarkgap } from './ais-darkgap';
 import type { PredictionRow, Resolution, SupabaseAny } from './types';
 
 export type { PredictionRow, Resolution } from './types';
@@ -29,6 +30,8 @@ export async function resolveBySource(
       return resolveAisChokepoint(row, supabase);
     case 'firms':
       return resolveFirms(row, supabase);
+    case 'ais-darkgap':
+      return resolveAisDarkgap(row, supabase);
     case 'manual':
     default:
       return resolveManual(row, supabase);

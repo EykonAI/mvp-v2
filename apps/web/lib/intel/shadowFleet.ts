@@ -8,6 +8,7 @@ export interface ShadowFeatures {
   silence_vs_cadence: number;
   vanished_under_way: number;
   flag_of_convenience: number;
+  ofac_designation_match: number;
 }
 
 /**
@@ -38,12 +39,16 @@ export function computeRealFeatures(args: {
   gapHours: number;
   cadenceHours: number;
   lastSpeedKn: number | null;
+  /** IMO-exact OFAC designation match (v3.1). Name matches are NOT this —
+   *  they are a non-scored context tag, because vessel names are reused. */
+  ofacDesignationMatch?: boolean;
 }): ShadowFeatures {
   const ratio = Math.max(0, args.gapHours) / Math.max(0.5, args.cadenceHours);
   return {
     silence_vs_cadence: Math.log1p(ratio) / Math.log(1 + SILENCE_SATURATION_RATIO),
     vanished_under_way: args.lastSpeedKn != null && args.lastSpeedKn > UNDER_WAY_KN ? 1 : 0,
     flag_of_convenience: FOC_CODES.has((args.flag ?? '').toUpperCase()) ? 1 : 0,
+    ofac_designation_match: args.ofacDesignationMatch ? 1 : 0,
   };
 }
 

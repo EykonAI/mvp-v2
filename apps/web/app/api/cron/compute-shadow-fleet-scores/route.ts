@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { scoreVessel, computeRealFeatures } from '@/lib/intel/shadowFleet';
 import { boxForPosition, boxState, BOX_DEAD_AFTER_H, type BoxLiveness } from '@/lib/intel/aisCoverage';
+import { buildDarkContactClaimRow, darkContactObservable, familyBaseRate } from '@/lib/predictions/issue-dark-contact';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -113,6 +114,29 @@ export async function POST(req: NextRequest) {
     (livenessRes.data as BoxLiveness[]).map(r => [r.slug, r]),
   );
 
+  // OFAC designation sets (weekly build-entity-graph cron populates entities).
+  // IMO-exact is the SCORED feature; the name set feeds only a non-scored
+  // context tag, because vessel names are reused and a name match is a weak
+  // identifier. Yield caveat lives in the weights fixture and every surface
+  // that renders the feature: IMO exists on ~0.5% of AIS records.
+  const ofacImos = new Set<string>();
+  const ofacNames = new Set<string>();
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('entities')
+      .select('canonical_name, metadata')
+      .eq('entity_type', 'vessel')
+      .range(from, from + PAGE - 1);
+    if (error) break; // OFAC enrichment is additive — score without it rather than fail the tick
+    if (!data || data.length === 0) break;
+    for (const e of data as any[]) {
+      const imo = e.metadata?.imo;
+      if (imo) ofacImos.add(String(imo).trim());
+      if (e.canonical_name) ofacNames.add(String(e.canonical_name).trim().toUpperCase());
+    }
+    if (data.length < PAGE) break;
+  }
+
   // Data clock = the fleet-wide freshest observation, so a stalled feed doesn't
   // mark every vessel dark. Read explicitly rather than taken from the batch:
   // the batch is ordered oldest-first so that the silent vessels — the ones this
@@ -129,12 +153,12 @@ export async function POST(req: NextRequest) {
     : now.getTime();
 
   // Page through the active window, oldest fix first.
-  const rows: Array<{ mmsi: string; name: string | null; flag: string | null; latitude: number | null; longitude: number | null; speed: number | null; updated_at: string }> = [];
+  const rows: Array<{ mmsi: string; name: string | null; imo: string | null; flag: string | null; latitude: number | null; longitude: number | null; speed: number | null; updated_at: string }> = [];
   let truncated = false;
   for (let from = 0; from < MAX_SCAN; from += PAGE) {
     const { data, error } = await supabase
       .from('vessel_positions')
-      .select('mmsi, name, flag, latitude, longitude, speed, updated_at')
+      .select('mmsi, name, imo, flag, latitude, longitude, speed, updated_at')
       .gte('updated_at', since)
       .order('updated_at', { ascending: true })
       .range(from, from + PAGE - 1);
@@ -194,11 +218,14 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
+    const ofacImoMatch = !!(p.imo && ofacImos.has(String(p.imo).trim()));
+    const ofacNameMatch = !!(p.name && ofacNames.has(String(p.name).trim().toUpperCase()));
     const features = computeRealFeatures({
       flag: p.flag,
       gapHours,
       cadenceHours: cadenceH,
       lastSpeedKn: p.speed ?? null,
+      ofacDesignationMatch: ofacImoMatch,
     });
     const composite = scoreVessel(features).composite;
     const silenceRatio = gapHours / Math.max(0.5, cadenceH);
@@ -216,7 +243,12 @@ export async function POST(req: NextRequest) {
         cadence_hours: cadenceH,
         silence_ratio_at_open: round1(silenceRatio),
         confidence_at_open: composite,
-        indicators: { ...features, silence_hours: round1(gapHours), cadence_hours: round1(cadenceH) },
+        indicators: {
+          ...features,
+          silence_hours: round1(gapHours),
+          cadence_hours: round1(cadenceH),
+          ...(ofacNameMatch && !ofacImoMatch ? { ofac_name_match: 1 } : {}),
+        },
         gap_started_at: p.updated_at,
         opened_at: now.toISOString(),
         deadline_at: new Date(now.getTime() + EVENT_DEADLINE_H * 3600_000).toISOString(),
@@ -233,6 +265,9 @@ export async function POST(req: NextRequest) {
         ...features,
         silence_hours: round1(gapHours),
         cadence_hours: round1(cadenceH),
+        // Non-scored context: a NAME-only OFAC match. Weak identifier
+        // (names are reused); displayed as a caveated tag, never weighted.
+        ...(ofacNameMatch && !ofacImoMatch ? { ofac_name_match: 1 } : {}),
       },
       last_ais_at: p.updated_at,
       last_dark_at: gapHours > 6 ? p.updated_at : null,
@@ -353,6 +388,77 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ── Machine-track ledger emission (PR H) ────────────────────────────────
+  // One hash-bound claim per OPEN event that lacks one, forecast = the
+  // family's own Laplace-shrunk base rate from RESOLVED events only (disjoint
+  // anchor). Track 'machine' per mig 098: thousands of auto-resolving claims
+  // answering "do our instruments work?" — never blended with house/creator,
+  // never feeding the Reputation Note. Idempotent via target_observable,
+  // which mirrors the event table's UNIQUE (mmsi, gap_started_at).
+  let claimsIssued = 0;
+  let claimsSkipped = 0;
+  {
+    const { count: kCount } = await supabase
+      .from('dark_contact_events')
+      .select('*', { count: 'exact', head: true })
+      .eq('resolution', 'reappeared');
+    const { count: nCount } = await supabase
+      .from('dark_contact_events')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'resolved');
+    const k = kCount ?? 0;
+    const n = nCount ?? 0;
+    const baseRate = { p: familyBaseRate(k, n), k, n };
+
+    const openForClaims: any[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data } = await supabase
+        .from('dark_contact_events')
+        .select('id, mmsi, name, flag, box_slug, cadence_hours, silence_ratio_at_open, confidence_at_open, gap_started_at, opened_at, deadline_at')
+        .eq('status', 'open')
+        .range(from, from + PAGE - 1);
+      if (!data || data.length === 0) break;
+      openForClaims.push(...data);
+      if (data.length < PAGE) break;
+    }
+
+    if (openForClaims.length > 0) {
+      // Which observables already have claims? Checked in chunks so the
+      // issuance is idempotent across ticks and across parallel deploys.
+      const existing = new Set<string>();
+      const observables = openForClaims.map(e => darkContactObservable(e));
+      for (let i = 0; i < observables.length; i += 200) {
+        const { data } = await supabase
+          .from('predictions_register')
+          .select('target_observable')
+          .eq('source', 'ais-darkgap')
+          .in('target_observable', observables.slice(i, i + 200));
+        for (const r of (data ?? []) as any[]) existing.add(r.target_observable);
+      }
+
+      const toInsert = openForClaims
+        .filter(e => !existing.has(darkContactObservable(e)))
+        .map(e => buildDarkContactClaimRow(e, baseRate, now));
+      claimsSkipped = openForClaims.length - toInsert.length;
+
+      for (let i = 0; i < toInsert.length; i += UPSERT_BATCH) {
+        const { data, error } = await supabase
+          .from('predictions_register')
+          .insert(toInsert.slice(i, i + UPSERT_BATCH))
+          .select('id');
+        if (error) {
+          // Loud but non-fatal: scoring and events already committed; report
+          // the failure so the tick is visibly partial rather than green.
+          return NextResponse.json(
+            { ok: false, error: `ledger emission: ${error.message}`, scored: upserts.length - unscoredNoBaseline, events_opened: evOpened, claims_issued: claimsIssued },
+            { status: 500 },
+          );
+        }
+        claimsIssued += (data ?? []).length;
+      }
+    }
+  }
+
   // Echo the inputs so a stale build is detectable from outside: `gap_source`
   // does not exist in any bundle before this change.
   return NextResponse.json({
@@ -373,6 +479,8 @@ export async function POST(req: NextRequest) {
     events_still_dark: evStillDark,
     events_voided: evVoided,
     events_open_total: openEvents.length - evReappeared - evStillDark - evVoided + evOpened,
+    claims_issued: claimsIssued,
+    claims_already_present: claimsSkipped,
     voided_by_box: Object.fromEntries(voidedByBox),
     pruned: delErr ? `error: ${delErr.message}` : 'ok',
   });
