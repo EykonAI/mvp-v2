@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start -H 0.0.0.0",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "a11y": "node scripts/a11y/check-contrast.mjs && node scripts/a11y/check-palette.mjs && node scripts/a11y/check-budgets.mjs",
+    "a11y:update": "node scripts/a11y/check-palette.mjs --update && node scripts/a11y/check-budgets.mjs --update"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
