@@ -129,7 +129,7 @@ export async function GET(req: NextRequest) {
     const sinceIso = new Date(dataClockMs - 72 * 3600_000).toISOString();
     const positions = await supabase
       .from('vessel_positions')
-      .select('mmsi, name, flag, latitude, longitude, speed, updated_at')
+      .select('mmsi, name, imo, flag, latitude, longitude, speed, updated_at')
       .gte('updated_at', sinceIso)
       .order('updated_at', { ascending: true })
       .limit(1000);
@@ -150,6 +150,20 @@ export async function GET(req: NextRequest) {
       for (const r of (data ?? []) as any[]) cadence.set(r.mmsi, r.median_interval_h);
     }
 
+    // OFAC IMO set for the fallback — the same feature the cron scores with;
+    // a fallback scoring a different model is the two-halves defect again.
+    const ofacImos = new Set<string>();
+    for (let from = 0; from < 3000; from += 1000) {
+      const { data } = await supabase
+        .from('entities')
+        .select('metadata')
+        .eq('entity_type', 'vessel')
+        .range(from, from + 999);
+      if (!data || data.length === 0) break;
+      for (const e of data as any[]) if (e.metadata?.imo) ofacImos.add(String(e.metadata.imo).trim());
+      if (data.length < 1000) break;
+    }
+
     let voidedDeadBox = 0;
     let unscoredNoBaseline = 0;
     const leads: Lead[] = rows
@@ -166,6 +180,7 @@ export async function GET(req: NextRequest) {
           gapHours,
           cadenceHours: cadence.get(String(v.mmsi)) as number,
           lastSpeedKn: v.speed ?? null,
+          ofacDesignationMatch: !!(v.imo && ofacImos.has(String(v.imo).trim())),
         });
         const score = scoreVessel(features);
         return {

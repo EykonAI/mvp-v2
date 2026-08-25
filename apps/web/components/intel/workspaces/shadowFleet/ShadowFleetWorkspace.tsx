@@ -469,6 +469,12 @@ function EventRow({ ev, active, onClick }: { ev: DarkEvent; active: boolean; onC
         {ev.mmsi} · {ev.flag ?? '—'} · {ev.silence_ratio_at_open.toFixed(0)}× cadence
         {ev.final_gap_hours != null ? ` · gap ${ev.final_gap_hours.toFixed(0)}h` : ''}
         {ev.box_slug ? ` · ${ev.box_slug}` : ''}
+        {ev.indicators?.ofac_designation_match === 1 && (
+          <span style={{ color: 'var(--red)', fontWeight: 500 }}> · OFAC DESIGNATED (IMO)</span>
+        )}
+        {ev.indicators?.ofac_name_match === 1 && (
+          <span style={{ color: 'var(--amber)' }}> · OFAC NAME (weak match)</span>
+        )}
       </div>
     </button>
   );
@@ -809,6 +815,9 @@ function EventDossier({ ev, dataClock }: { ev: DarkEvent; dataClock: string | nu
         PROVENANCE — dark_contact_events (mig 112) · vessel_positions.updated_at · vessel_cadence (mig 111) ·
         ais_box_liveness (mig 110) · AISStream free tier. Identity denormalised at open. No registry, owner or
         cargo record is held for this vessel: those rows are absent, not empty.
+        OFAC join is IMO-exact against the weekly SDN entity graph — IMO exists on ~0.5% of AIS records, so
+        absence of a match is overwhelmingly absence of an identifier, not evidence of a clean vessel. A
+        name-only match is tagged separately and never scored.
       </div>
     </div>
   );

@@ -1,13 +1,46 @@
 {
   "model": "logistic_regression",
-  "version": "v3.0.0-2026-08-24-cadence-baseline",
+  "version": "v3.1.0-2026-08-25-ofac-designation",
   "features": [
-    { "key": "silence_vs_cadence",  "weight": 3.5, "clip": [0, 1.5], "note": "ln(1 + silence_hours / own_median_cadence_hours) / ln(31). Reaches 1.0 when a vessel has been silent 30x its own observed reporting interval; clipped at 1.5 (ratio ~170x) so extreme gaps keep separating instead of saturating. THE ranking signal — deviation from the vessel's own baseline, the same invariant FIRMS uses." },
-    { "key": "vanished_under_way",  "weight": 1.2, "clip": [0, 1],   "note": "Binary: last reported speed > 5 kn. A vessel that stops transmitting mid-passage is a stronger signal than one that goes quiet at anchor." },
-    { "key": "flag_of_convenience", "weight": 0.9, "clip": [0, 1],   "note": "Binary: current flag in the FOC list. Elevates risk only in combination with anomalous silence." }
+    {
+      "key": "silence_vs_cadence",
+      "weight": 3.5,
+      "clip": [
+        0,
+        1.5
+      ],
+      "note": "ln(1 + silence_hours / own_median_cadence_hours) / ln(31). Reaches 1.0 when a vessel has been silent 30x its own observed reporting interval; clipped at 1.5 (ratio ~170x) so extreme gaps keep separating instead of saturating. THE ranking signal \u2014 deviation from the vessel's own baseline, the same invariant FIRMS uses."
+    },
+    {
+      "key": "vanished_under_way",
+      "weight": 1.2,
+      "clip": [
+        0,
+        1
+      ],
+      "note": "Binary: last reported speed > 5 kn. A vessel that stops transmitting mid-passage is a stronger signal than one that goes quiet at anchor."
+    },
+    {
+      "key": "flag_of_convenience",
+      "weight": 0.9,
+      "clip": [
+        0,
+        1
+      ],
+      "note": "Binary: current flag in the FOC list. Elevates risk only in combination with anomalous silence."
+    },
+    {
+      "key": "ofac_designation_match",
+      "weight": 1.2,
+      "clip": [
+        0,
+        1
+      ],
+      "note": "Binary: vessel IMO exactly matches an OFAC SDN-designated vessel entity. The strongest prior available, but the join is THIN and must be disclosed wherever it renders: IMO is present on ~0.5% of AIS records, so absence of a match is overwhelmingly absence of an identifier, not evidence of a clean vessel. Weight is structural (like FOC), not fitted \u2014 the matched population (~8 fleet-wide at ship time) is far too small to fit."
+    }
   ],
   "intercept": -3.4,
   "threshold_alert": 0.6,
   "threshold_review": 0.4,
-  "notes": "v3: silence is scored against each vessel's OWN cadence (vessel_cadence, mig 111) instead of an absolute log-hours term. v2's single monotone gap feature made the top of the leaderboard a 22-way tie at the window-bounded maximum; ranking reduced to 'oldest fix wearing a convenient flag'. Weights validated against production 2026-08-24: 519 scoreable vessels -> 204 leads >=0.3, 98 alerts >=0.6, top-25 nearly all distinct at 3dp, top lead a vessel silent 54x its own cadence having vanished at 13.5 kn. Vessels WITHOUT a cadence baseline are not scored (composite NULL, 'observed, not yet scorable') - never defaulted. GATED upstream by the mig-110 dead-box VOID gate. The v1 cargo/port-call/owner placeholders remain removed; restore only with a real data source."
+  "notes": "v3.1 adds ofac_designation_match (IMO-exact only; name matches are a NON-scored context tag ofac_name_match because vessel names are reused and 1,293 name matches certainly contain false positives). v3: silence is scored against each vessel's OWN cadence (vessel_cadence, mig 111) instead of an absolute log-hours term. v2's single monotone gap feature made the top of the leaderboard a 22-way tie at the window-bounded maximum; ranking reduced to 'oldest fix wearing a convenient flag'. Weights validated against production 2026-08-24: 519 scoreable vessels -> 204 leads >=0.3, 98 alerts >=0.6, top-25 nearly all distinct at 3dp, top lead a vessel silent 54x its own cadence having vanished at 13.5 kn. Vessels WITHOUT a cadence baseline are not scored (composite NULL, 'observed, not yet scorable') - never defaulted. GATED upstream by the mig-110 dead-box VOID gate. The v1 cargo/port-call/owner placeholders remain removed; restore only with a real data source."
 }
