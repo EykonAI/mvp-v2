@@ -103,9 +103,14 @@ html, body {
 /* Globe-view body behaviour (no horizontal overflow) */
 body.globe-view { overflow: hidden; }
 
-/* Intel views use horizontal scroll for 1440px min-width */
+/* Intel views used to carry `min-width: 1440px`, which meant a 1280px
+ * laptop — the most common professional resolution — lost 12.5% of every
+ * workspace behind a horizontal scrollbar, and tablets were unusable.
+ * Density is correct for this product; fixed width is not the same thing
+ * as density, so the layouts below reflow instead. overflow-x stays as a
+ * safety valve for any single stubborn child (a wide table, say) rather
+ * than as the navigation model for the whole page. */
 body.intel-view {
-  min-width: 1440px;
   overflow-x: auto;
 }
 
@@ -213,12 +218,69 @@ body.intel-view {
 /* ── Intel grid + columns ─────────────────────────────────────── */
 .intel-main {
   display: grid;
-  grid-template-columns: 300px 1fr 340px;
+  grid-template-columns: 300px minmax(0, 1fr) 340px;
   gap: 1px;
   background: var(--rule-soft);
   min-height: 820px;
 }
-.intel-col { background: var(--bg-navy); display: flex; flex-direction: column; }
+.intel-col { background: var(--bg-navy); display: flex; flex-direction: column; min-width: 0; }
+
+/* Narrower desktops keep three columns, just tighter rails. */
+@media (max-width: 1400px) {
+  .intel-main { grid-template-columns: 260px minmax(0, 1fr) 300px; }
+}
+/* Below that the right rail (persona / actions / workspaces) drops under
+ * the two analytical columns rather than squeezing them. */
+@media (max-width: 1180px) {
+  .intel-main { grid-template-columns: 260px minmax(0, 1fr); }
+  .intel-main > .intel-col:nth-child(3) { grid-column: 1 / -1; }
+}
+/* Tablet and below: one column, source order. */
+@media (max-width: 860px) {
+  .intel-main { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .intel-main > .intel-col:nth-child(3) { grid-column: auto; }
+}
+
+/* ── Shared intel layout primitives ───────────────────────────────
+ * These exist as CSS classes rather than inline styles because a media
+ * query has no inline form — the same structural reason the focus ring
+ * had to live here. */
+
+/* Three-column scenario shell (Chokepoint / Sanctions / Cascade) and the
+ * fixed-rail workspace grids. Column widths come from --intel-l and
+ * --intel-r so each caller keeps its own desktop proportions. */
+.intel-3col {
+  display: grid;
+  /* minmax(0, 1fr), not 1fr: a bare 1fr is minmax(auto, 1fr) and refuses to
+   * shrink below the centre column's min-content, which is what pushed the
+   * right rail off-screen at 1280 even though the maths said it fit. */
+  grid-template-columns: var(--intel-l, 320px) minmax(0, 1fr) var(--intel-r, 360px);
+  gap: 1px;
+  background: var(--rule-soft);
+}
+.intel-3col > * { min-width: 0; }
+@media (max-width: 1180px) {
+  .intel-3col { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .intel-3col > *:nth-child(3) { grid-column: 1 / -1; }
+}
+@media (max-width: 780px) {
+  .intel-3col { grid-template-columns: minmax(0, 1fr); }
+  .intel-3col > *:nth-child(3) { grid-column: auto; }
+}
+
+/* The 5-up calibration strip wraps instead of crushing its cells. */
+.intel-strip {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+}
+@media (max-width: 1180px) { .intel-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 700px)  { .intel-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* On a phone the strip header stacks rather than shoving the ledger link
+ * off the right edge. */
+@media (max-width: 640px) {
+  .intel-calstrip { grid-template-columns: minmax(0, 1fr) !important; row-gap: 8px; }
+}
 
 /* ── Radial accents on intel dashboard ────────────────────────── */
 .intel-bg {

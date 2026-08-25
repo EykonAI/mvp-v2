@@ -36,9 +36,9 @@ export default function CalibrationStrip() {
 
   return (
     <div
-      className="grid items-center gap-7 px-6"
+      className="intel-calstrip grid items-center gap-7 px-6"
       style={{
-        gridTemplateColumns: 'auto 1fr auto',
+        gridTemplateColumns: 'auto minmax(0, 1fr) auto',
         padding: '10px 24px',
         borderBottom: '1px solid var(--rule-soft)',
         background: 'linear-gradient(180deg, rgba(25, 208, 184, 0.03), transparent)',
@@ -60,9 +60,8 @@ export default function CalibrationStrip() {
       </div>
 
       <div
-        className="grid gap-7"
+        className="intel-strip gap-7"
         style={{
-          gridTemplateColumns: 'repeat(5, 1fr)',
           fontFamily: 'var(--f-mono)',
           fontSize: 11,
         }}

@@ -76,8 +76,8 @@ export default function CalibrationWorkspace() {
 
   return (
     <div
-      className="grid"
-      style={{ gridTemplateColumns: '250px 1fr 300px', gap: 1, background: 'var(--rule-soft)', minHeight: 620 }}
+      className="intel-3col"
+      style={{ ['--intel-l' as string]: '250px', ['--intel-r' as string]: '300px', minHeight: 620 } as React.CSSProperties}
     >
       {/* ── LEFT ── */}
       <aside style={{ background: 'var(--bg-navy)', padding: 14 }}>
