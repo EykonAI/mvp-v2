@@ -1,4 +1,5 @@
 'use client';
+import { Button } from '@/components/ui/button';
 import { useEffect, useState } from 'react';
 import {
   PERSONA_STORAGE_KEY,
@@ -84,24 +85,9 @@ export function AdvancedPersonasCard() {
   };
 
   return (
-    <section
-      style={{
-        background: 'var(--bg-panel)',
-        border: '1px solid var(--rule)',
-        borderRadius: 6,
-        padding: '24px 28px',
-        marginBottom: 24,
-      }}
-    >
+    <section className="mb-6 rounded-md border border-eykon-rule bg-eykon-bg-panel px-7 py-6">
       <div
-        style={{
-          fontFamily: 'var(--f-mono)',
-          fontSize: 10.5,
-          letterSpacing: '0.18em',
-          textTransform: 'uppercase',
-          color: 'var(--ink-dim)',
-          marginBottom: 4,
-        }}
+        className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.18em] text-eykon-ink-dim"
       >
         Personas
       </div>
@@ -139,7 +125,7 @@ export function AdvancedPersonasCard() {
 
 function Switch({ on, onClick }: { on: boolean; onClick: () => void }) {
   return (
-    <button
+    <Button
       type="button"
       onClick={onClick}
       role="switch"
@@ -169,7 +155,7 @@ function Switch({ on, onClick }: { on: boolean; onClick: () => void }) {
           transition: 'left 120ms',
         }}
       />
-    </button>
+    </Button>
   );
 }
 
@@ -226,12 +212,12 @@ function ConfirmDialog({
           Analyst now, or keep the current persona active?
         </p>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-          <button type="button" onClick={onKeepCurrent} style={btnGhost}>
+          <Button type="button" onClick={onKeepCurrent} variant="eykonGhost" size="eykonSm">
             Keep current
-          </button>
-          <button type="button" onClick={onSwitchAndHide} style={btnPrimary}>
+          </Button>
+          <Button type="button" onClick={onSwitchAndHide} variant="eykon" size="eykon">
             Switch and hide
-          </button>
+          </Button>
         </div>
       </div>
     </div>

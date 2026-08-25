@@ -1,4 +1,6 @@
 'use client';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { useEffect, useState } from 'react';
 
 // Channel-handle management for the Notification Center. Mounts on
@@ -194,28 +196,13 @@ export function ChannelsCard() {
   }
 
   return (
-    <section
-      style={{
-        background: 'var(--bg-panel)',
-        border: '1px solid var(--rule)',
-        borderRadius: 6,
-        padding: '24px 28px',
-        marginBottom: 24,
-      }}
-    >
+    <section className="mb-6 rounded-md border border-eykon-rule bg-eykon-bg-panel px-7 py-6">
       <div
-        style={{
-          fontFamily: 'var(--f-mono)',
-          fontSize: 10.5,
-          letterSpacing: '0.18em',
-          textTransform: 'uppercase',
-          color: 'var(--ink-dim)',
-          marginBottom: 4,
-        }}
+        className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.18em] text-eykon-ink-dim"
       >
         Notification channels
       </div>
-      <p style={{ color: 'var(--ink-faint)', fontSize: 12.5, marginBottom: 16 }}>
+      <p className="mb-4 text-[12.5px] text-eykon-ink-faint">
         Verified handles your alerts can fire to. WhatsApp arrives in a later release.
       </p>
 
@@ -223,15 +210,8 @@ export function ChannelsCard() {
 
       {error && (
         <div
-          style={{
-            background: 'rgba(224, 93, 80, 0.1)',
-            border: '1px solid rgba(224, 93, 80, 0.4)',
-            color: 'var(--red)',
-            padding: '8px 12px',
-            borderRadius: 4,
-            marginBottom: 12,
-            fontSize: 12.5,
-          }}
+          role="alert"
+          className="mb-3 rounded border border-eykon-red/40 bg-eykon-red/10 px-3 py-2 text-[12.5px] text-eykon-red"
         >
           {error}
         </div>
@@ -240,7 +220,7 @@ export function ChannelsCard() {
       {channels === null ? (
         <p style={{ color: 'var(--ink-faint)', fontSize: 12.5 }}>Loading…</p>
       ) : channels.length === 0 ? (
-        <p style={{ color: 'var(--ink-faint)', fontSize: 12.5, marginBottom: 16 }}>
+        <p className="mb-4 text-[12.5px] text-eykon-ink-faint">
           No channels yet. Add one below.
         </p>
       ) : (
@@ -282,38 +262,39 @@ export function ChannelsCard() {
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 {!c.verified_at && (
                   <>
-                    <button
+                    <Button
                       type="button"
                       onClick={() => {
                         setPendingVerifyId(c.id);
                         setCode('');
                         setError(null);
                       }}
-                      style={btnGhost}
+                      variant="eykonGhost" size="eykonSm"
                     >
                       Verify
-                    </button>
-                    <button type="button" onClick={() => void onResend(c.id)} style={btnGhost}>
+                    </Button>
+                    <Button type="button" onClick={() => void onResend(c.id)} variant="eykonGhost" size="eykonSm">
                       Resend code
-                    </button>
+                    </Button>
                   </>
                 )}
                 {c.verified_at && (
-                  <button
+                  <Button
                     type="button"
                     onClick={() => void onToggleActive(c)}
-                    style={btnGhost}
+                    variant="eykonGhost" size="eykonSm"
                   >
                     {c.active ? 'Pause' : 'Resume'}
-                  </button>
+                  </Button>
                 )}
-                <button
+                <Button
                   type="button"
                   onClick={() => void onDelete(c.id)}
-                  style={{ ...btnGhost, color: 'var(--red)' }}
+                  variant="eykonDanger"
+                  size="eykonSm"
                 >
                   Delete
-                </button>
+                </Button>
               </div>
             </li>
           ))}
@@ -338,29 +319,29 @@ export function ChannelsCard() {
           <span style={{ fontSize: 12.5, color: 'var(--ink)' }}>
             Enter the 6-digit code we sent.
           </span>
-          <input
+          <Input
             inputMode="numeric"
             autoComplete="one-time-code"
             pattern="\d{6}"
             maxLength={6}
             value={code}
             onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            style={inputStyle}
+            className={INPUT_CLS}
             placeholder="000000"
           />
-          <button type="submit" disabled={verifying || code.length !== 6} style={btnPrimary}>
+          <Button type="submit" disabled={verifying || code.length !== 6} variant="eykon" size="eykon">
             {verifying ? 'Verifying…' : 'Verify'}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={() => {
               setPendingVerifyId(null);
               setCode('');
             }}
-            style={btnGhost}
+            variant="eykonGhost" size="eykonSm"
           >
             Cancel
-          </button>
+          </Button>
         </form>
       )}
 
@@ -382,7 +363,7 @@ export function ChannelsCard() {
             onChange={e =>
               setForm({ ...form, type: e.target.value as 'email' | 'sms' | 'whatsapp' })
             }
-            style={inputStyle}
+            className={INPUT_CLS}
           >
             <option value="email">Email</option>
             <option value="sms">SMS</option>
@@ -391,27 +372,27 @@ export function ChannelsCard() {
         </label>
         <label style={fieldLabel}>
           Handle
-          <input
+          <Input
             type={form.type === 'email' ? 'email' : 'tel'}
             value={form.handle}
             onChange={e => setForm({ ...form, handle: e.target.value })}
             placeholder={form.type === 'email' ? 'you@example.com' : '+14155550123'}
-            style={inputStyle}
+            className={INPUT_CLS}
             required
           />
         </label>
         <label style={fieldLabel}>
           Label (optional)
-          <input
+          <Input
             value={form.label}
             onChange={e => setForm({ ...form, label: e.target.value })}
             placeholder="Work email"
-            style={inputStyle}
+            className={INPUT_CLS}
           />
         </label>
-        <button type="submit" disabled={creating || !form.handle} style={btnPrimary}>
+        <Button type="submit" disabled={creating || !form.handle} variant="eykon" size="eykon">
           {creating ? 'Sending…' : 'Add channel'}
-        </button>
+        </Button>
       </form>
     </section>
   );
@@ -548,16 +529,10 @@ function pill(color: string, bg: string): React.CSSProperties {
   };
 }
 
-const inputStyle: React.CSSProperties = {
-  background: 'var(--bg-void)',
-  border: '1px solid var(--rule)',
-  borderRadius: 3,
-  padding: '6px 10px',
-  color: 'var(--ink)',
-  fontFamily: 'var(--f-body)',
-  fontSize: 13,
-  outline: 'none',
-};
+/* The Input primitive supplies the box, the focus-visible ring and the
+ * disabled state; this only restates the eYKON surface colours on top. */
+const INPUT_CLS =
+  'h-auto rounded-sm border-eykon-rule bg-eykon-bg-void px-2.5 py-1.5 text-[13px] text-eykon-ink';
 
 const fieldLabel: React.CSSProperties = {
   display: 'flex',
@@ -568,33 +543,6 @@ const fieldLabel: React.CSSProperties = {
   letterSpacing: '0.16em',
   textTransform: 'uppercase',
   color: 'var(--ink-faint)',
-};
-
-const btnPrimary: React.CSSProperties = {
-  fontFamily: 'var(--f-mono)',
-  fontSize: 11,
-  letterSpacing: '0.14em',
-  textTransform: 'uppercase',
-  padding: '8px 14px',
-  background: 'var(--teal)',
-  color: 'var(--bg-void)',
-  border: '1px solid var(--teal)',
-  borderRadius: 2,
-  cursor: 'pointer',
-  fontWeight: 500,
-};
-
-const btnGhost: React.CSSProperties = {
-  fontFamily: 'var(--f-mono)',
-  fontSize: 10.5,
-  letterSpacing: '0.14em',
-  textTransform: 'uppercase',
-  padding: '4px 10px',
-  background: 'transparent',
-  color: 'var(--ink-dim)',
-  border: '1px solid var(--rule-strong)',
-  borderRadius: 2,
-  cursor: 'pointer',
 };
 
 function humanizeVerifyError(code: string | undefined): string {
