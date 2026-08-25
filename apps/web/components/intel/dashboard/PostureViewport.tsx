@@ -1,4 +1,5 @@
 'use client';
+import ChartFigure from '@/components/intel/shared/ChartFigure';
 import { useEffect, useState } from 'react';
 import Glyph5Segment from '@/components/intel/shared/Glyph5Segment';
 import Sparkline from '@/components/intel/shared/Sparkline';
@@ -144,6 +145,31 @@ function StylizedMap({
 
   return (
     <div style={{ position: 'relative', background: 'var(--bg-panel)', border: '1px solid var(--rule-soft)' }}>
+      <ChartFigure
+        title={`Posture map — ${theatres.length} pinned theatre${theatres.length === 1 ? '' : 's'}`}
+        desc={
+          theatres.length
+            ? `Composite posture score per theatre. ${theatres
+                .slice()
+                .sort((a, b) => b.composite - a.composite)
+                .slice(0, 3)
+                .map(t => `${t.label} ${t.composite.toFixed(2)}`)
+                .join(', ')}${theatres.length > 3 ? `, and ${theatres.length - 3} more` : ''}.`
+            : 'No theatres pinned yet.'
+        }
+        table={{
+          columns: ['Theatre', 'Composite', 'Air', 'Sea', 'Conflict', 'Grid', 'Imagery'],
+          rows: theatres.map(t => [
+            t.label,
+            t.composite.toFixed(2),
+            t.air.toFixed(2),
+            t.sea.toFixed(2),
+            t.conflict.toFixed(2),
+            t.grid.toFixed(2),
+            t.imagery.toFixed(2),
+          ]),
+        }}
+      >
       <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
         {/* Stylised continents — simple polygons inspired by the wireframe */}
         <g opacity={0.18}>
@@ -217,6 +243,7 @@ function StylizedMap({
           );
         })}
       </svg>
+      </ChartFigure>
     </div>
   );
 }
