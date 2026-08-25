@@ -120,7 +120,9 @@ export async function renderEvidencePackPdf(input: EvidencePackInput): Promise<B
       doc.text(`  ${f.key.padEnd(22)} ${v.toFixed(3)} × ${String(f.weight).padEnd(5)} = ${contrib >= 0 ? '+' : ''}${contrib.toFixed(3)}`);
     }
     doc.text(`  ${'intercept'.padEnd(22)} ${' '.repeat(15)} ${(weights as any).intercept.toFixed(3)}`);
-    doc.text(`  z = ${z.toFixed(3)}   →   confidence = 1 / (1 + e^−z) = ${ev.confidence_at_open.toFixed(3)}`);
+    // ASCII only in pdfkit standard-font strings: Helvetica's charmap lacks
+    // the unicode arrow and minus, which render as garbage glyphs.
+    doc.text(`  z = ${z.toFixed(3)}   =>   confidence = 1 / (1 + e^-z) = ${ev.confidence_at_open.toFixed(3)}`);
     if (typeof ind.silence_hours === 'number' && typeof ind.cadence_hours === 'number') {
       doc.moveDown(0.2);
       doc.font(FONT).fontSize(8.5).fillColor(C.dim)
