@@ -286,7 +286,7 @@ export default function Home() {
   );
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden">
+    <div className="h-screen w-full flex flex-col overflow-hidden">
       <TopNav chatOpen={chatOpen} onChatToggle={() => setChatOpen(!chatOpen)} />
 
       <div className="flex-1 flex overflow-hidden">

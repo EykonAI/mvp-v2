@@ -36,6 +36,44 @@
    * (which is aligned so GLOBE's left edge sits above this column).
    * Previous width was 380px; brief §3.1 widens by ~33%. */
   --chat-panel-width: 506px;
+
+  /* ── shadcn/ui token layer (dashboard shell) ─────────────────────
+   * RGB triplets consumed by tailwind.config.js as
+   * rgb(var(--sc-*) / <alpha-value>) so opacity modifiers work.
+   * Values are the eYKON palette above, expressed as R G B. */
+  --sc-background: 5 8 15;          /* --bg-void   */
+  --sc-foreground: 232 237 245;     /* --ink       */
+  --sc-card: 15 24 42;              /* --bg-panel  */
+  --sc-card-foreground: 232 237 245;
+  --sc-popover: 15 24 42;
+  --sc-popover-foreground: 232 237 245;
+  --sc-primary: 25 208 184;         /* --teal      */
+  --sc-primary-foreground: 5 8 15;
+  --sc-secondary: 21 32 58;         /* --bg-raised */
+  --sc-secondary-foreground: 232 237 245;
+  --sc-muted: 21 32 58;
+  --sc-muted-foreground: 152 163 181;  /* --ink-dim */
+  --sc-accent: 26 40 70;            /* --bg-hover  */
+  --sc-accent-foreground: 232 237 245;
+  --sc-destructive: 224 93 80;      /* --red       */
+  --sc-destructive-foreground: 232 237 245;
+  --sc-border: 30 44 73;            /* --rule      */
+  --sc-input: 30 44 73;
+  --sc-ring: 25 208 184;
+  --sc-chart-1: 25 208 184;
+  --sc-chart-2: 212 162 76;         /* --amber  */
+  --sc-chart-3: 139 127 216;        /* --violet */
+  --sc-chart-4: 74 191 138;         /* --green  */
+  --sc-chart-5: 222 127 112;        /* --coral  */
+  --sc-sidebar: 10 18 32;           /* --bg-navy   */
+  --sc-sidebar-foreground: 232 237 245;
+  --sc-sidebar-primary: 25 208 184;
+  --sc-sidebar-primary-foreground: 5 8 15;
+  --sc-sidebar-accent: 21 32 58;
+  --sc-sidebar-accent-foreground: 232 237 245;
+  --sc-sidebar-border: 30 44 73;
+  --sc-sidebar-ring: 25 208 184;
+
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
