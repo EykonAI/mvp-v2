@@ -108,6 +108,19 @@ body.intel-view {
 ::-webkit-scrollbar-thumb:hover { background: var(--rule-strong); }
 
 /* ── Typography utilities ─────────────────────────────────────── */
+/* Visually hidden, still announced. Used by ChartFigure and
+ * ProvenanceChip to carry names and state to assistive technology
+ * without changing a single rendered pixel. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .font-mono-tnum { font-family: var(--f-mono); font-feature-settings: "tnum"; }
 .font-display   { font-family: var(--f-display); letter-spacing: 0.04em; }
 .eyebrow {

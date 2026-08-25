@@ -1,4 +1,5 @@
 'use client';
+import ProvenanceChip from '@/components/intel/shared/ProvenanceChip';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
@@ -131,18 +132,16 @@ export default function ConvergenceFeed({ linkBase = '/briefs/convergence' }: { 
               }}
             >
               {c.location}
-              <span
-                style={{
-                  fontFamily: 'var(--f-mono)',
-                  fontSize: 9.5,
-                  fontWeight: 400,
-                  letterSpacing: '0.08em',
-                  textTransform: 'uppercase',
-                  color: 'var(--ink-faint)',
-                  marginLeft: 8,
-                }}
-              >
-                {degraded ? 'sample' : timeAgo(c.created_at)}
+              <span style={{ marginLeft: 8 }}>
+                {degraded ? (
+                  <ProvenanceChip
+                    state="fixture"
+                    label="sample"
+                    title="Illustrative sample — no convergence has been recorded yet"
+                  />
+                ) : (
+                  <ProvenanceChip state="live" label={timeAgo(c.created_at)} />
+                )}
               </span>
             </span>
             <span

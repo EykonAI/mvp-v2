@@ -1,4 +1,5 @@
 'use client';
+import ChartFigure from '@/components/intel/shared/ChartFigure';
 import { useMemo } from 'react';
 
 interface Node {
@@ -54,6 +55,19 @@ export default function InterestGraph() {
   const center = pos.find(n => n.id === 'maritime')!;
 
   return (
+    <ChartFigure
+      title="Interest graph — your tracked entities and their adjacencies"
+      desc={`${nodes.filter(n => n.ring !== 'blind').length} tracked entities arranged around ${
+        nodes.find(n => n.ring === 0)?.label ?? 'the centre'
+      }, with ${nodes.filter(n => n.ring === 'blind').length} blind-spot candidates shown as dashed outlines.`}
+      table={{
+        columns: ['Entity', 'Ring'],
+        rows: nodes.map(n => [
+          n.label,
+          n.ring === 0 ? 'Centre' : n.ring === 'blind' ? 'Blind-spot candidate' : `Ring ${n.ring}`,
+        ]),
+      }}
+    >
     <div style={{ height: 340, position: 'relative', background: 'radial-gradient(circle at 50% 45%, rgba(25,208,184,0.05), transparent 55%)' }}>
       <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} style={{ position: 'absolute', inset: 0 }}>
         {/* Ring edges */}
@@ -159,6 +173,7 @@ export default function InterestGraph() {
         Blind-spot candidates
       </div>
     </div>
+    </ChartFigure>
   );
 }
 
