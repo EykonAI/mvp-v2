@@ -20,25 +20,25 @@ import { TAB_BASE_STYLE, activeStyle } from '@/components/navTabStyles';
 
 const I = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
 const RadarIcon = (
-  <svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.4" {...I} /><circle cx="7" cy="7" r="2.4" {...I} /><line x1="7" y1="7" x2="11.3" y2="3.4" {...I} /></svg>
+  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="5.4" {...I} /><circle cx="7" cy="7" r="2.4" {...I} /><line x1="7" y1="7" x2="11.3" y2="3.4" {...I} /></svg>
 );
 const ProfileIcon = (
-  <svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="4.6" r="2.4" {...I} /><path d="M2.6 11.8a4.4 4.4 0 0 1 8.8 0" {...I} /></svg>
+  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false"><circle cx="7" cy="4.6" r="2.4" {...I} /><path d="M2.6 11.8a4.4 4.4 0 0 1 8.8 0" {...I} /></svg>
 );
 const CreatorProIcon = (
-  <svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="4.8" {...I} /><path d="M7 4.4v5.2M4.4 7h5.2" {...I} /></svg>
+  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false"><circle cx="7" cy="7" r="4.8" {...I} /><path d="M7 4.4v5.2M4.4 7h5.2" {...I} /></svg>
 );
 const TrophyIcon = (
-  <svg width="14" height="14" viewBox="0 0 14 14"><line x1="3" y1="11.5" x2="3" y2="8" {...I} /><line x1="7" y1="11.5" x2="7" y2="3.2" {...I} /><line x1="11" y1="11.5" x2="11" y2="5.6" {...I} /></svg>
+  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false"><line x1="3" y1="11.5" x2="3" y2="8" {...I} /><line x1="7" y1="11.5" x2="7" y2="3.2" {...I} /><line x1="11" y1="11.5" x2="11" y2="5.6" {...I} /></svg>
 );
 const RoomsIcon = (
-  <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2.6 3.2h8.8a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H6.2l-2.6 2v-2H2.6a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z" {...I} /></svg>
+  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false"><path d="M2.6 3.2h8.8a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H6.2l-2.6 2v-2H2.6a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z" {...I} /></svg>
 );
 const SpacesIcon = (
-  <svg width="14" height="14" viewBox="0 0 14 14"><rect x="3" y="6.4" width="8" height="5.1" rx="1" {...I} /><path d="M4.8 6.4V5a2.2 2.2 0 0 1 4.4 0v1.4" {...I} /></svg>
+  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false"><rect x="3" y="6.4" width="8" height="5.1" rx="1" {...I} /><path d="M4.8 6.4V5a2.2 2.2 0 0 1 4.4 0v1.4" {...I} /></svg>
 );
 const MailIcon = (
-  <svg width="14" height="14" viewBox="0 0 14 14"><rect x="2" y="3.4" width="10" height="7.2" rx="1.2" {...I} /><path d="M2.4 4.2L7 8l4.6-3.8" {...I} /></svg>
+  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false"><rect x="2" y="3.4" width="10" height="7.2" rx="1.2" {...I} /><path d="M2.4 4.2L7 8l4.6-3.8" {...I} /></svg>
 );
 
 interface NavItem {

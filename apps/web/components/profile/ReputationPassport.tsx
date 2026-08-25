@@ -1,3 +1,4 @@
+import ChartFigure from '@/components/intel/shared/ChartFigure';
 import type { CSSProperties } from 'react';
 
 // The Calibration Passport — a designed reputation asset that lives on
@@ -108,7 +109,7 @@ function Sparkline({ points }: { points: number[] | null }) {
   if (!points || points.length < 2) {
     // placeholder: a flat, faint dashed baseline while calibrating
     return (
-      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ marginTop: 12, display: 'block' }}>
+      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true" style={{ marginTop: 12, display: 'block' }}>
         <line x1="0" y1={H - 6} x2={W} y2={H - 6} stroke="var(--rule-strong)" strokeWidth="1.5" strokeDasharray="3 4" />
       </svg>
     );
@@ -121,9 +122,15 @@ function Sparkline({ points }: { points: number[] | null }) {
     .map((p, i) => `${i === 0 ? 'M' : 'L'}${(i * step).toFixed(1)},${(H - 3 - ((p - min) / span) * (H - 6)).toFixed(1)}`)
     .join(' ');
   return (
-    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ marginTop: 12, display: 'block' }}>
+    <ChartFigure
+      title="Calibration skill over time"
+      desc={`${points.length} resolved-forecast points, ranging ${min.toFixed(2)} to ${max.toFixed(2)}.`}
+      table={{ columns: ['#', 'Skill'], rows: points.map((p, i) => [i + 1, p.toFixed(3)]) }}
+    >
+    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true" style={{ marginTop: 12, display: 'block' }}>
       <path d={path} fill="none" stroke="var(--teal)" strokeWidth="1.5" />
     </svg>
+    </ChartFigure>
   );
 }
 

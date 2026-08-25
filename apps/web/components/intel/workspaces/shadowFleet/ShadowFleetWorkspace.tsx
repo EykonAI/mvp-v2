@@ -1,4 +1,5 @@
 'use client';
+import ChartFigure from '@/components/intel/shared/ChartFigure';
 import { useEffect, useMemo, useState } from 'react';
 import weights from '@/lib/fixtures/shadow_fleet_weights.json';
 import { AIS_BOXES } from '@/lib/intel/aisCoverage';
@@ -565,7 +566,12 @@ function BoardMap({
 
   return (
     <div style={{ flex: 1, minHeight: 0, background: '#070C16', position: 'relative', overflow: 'hidden' }}>
-      <svg viewBox={`0 0 ${FRAME.w} ${FRAME.h}`} style={{ width: '100%', height: '100%' }} preserveAspectRatio="xMidYMid meet">
+      <ChartFigure
+        title="Shadow-fleet frame — last known fixes"
+        desc={`${onMap.length} vessel${onMap.length === 1 ? '' : 's'} and ${airOnMap.length} aircraft plotted in frame${offFrame ? `, ${offFrame} outside it` : ''}.`}
+        className="w-full h-full"
+      >
+      <svg viewBox={`0 0 ${FRAME.w} ${FRAME.h}`} aria-hidden="true" style={{ width: '100%', height: '100%' }} preserveAspectRatio="xMidYMid meet">
         <defs>
           <pattern id="sfgrid" width="60.8" height="60.9" patternUnits="userSpaceOnUse">
             <path d="M60.8 0 L0 0 0 60.9" fill="none" stroke="#0E1729" strokeWidth="1" />
@@ -691,6 +697,7 @@ function BoardMap({
           Schematic basemap · frame 20°W–110°E · to scale · ▲ AIR = observed activity, not scored
         </text>
       </svg>
+      </ChartFigure>
     </div>
   );
 }
@@ -726,7 +733,11 @@ function CadenceTimeline({
           {loading ? 'loading track…' : `${ticks.length} real fixes / 14 d — none interpolated`}
         </span>
       </div>
-      <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: 'block', maxHeight: 56 }}>
+      <ChartFigure
+        title={`${selected.name ?? selected.mmsi} — silence against its own cadence`}
+        desc={`${ticks.length} real position fixes over 14 days against a ${selected.cadence_hours.toFixed(1)} hour baseline. None interpolated.`}
+      >
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true" style={{ display: 'block', maxHeight: 56 }}>
         <line x1="0" y1="40" x2={W} y2="40" stroke="#1E2C49" />
         {ticks.map((ms, i) => (
           <rect key={i} x={tx(ms)} y="27" width="1.6" height="13" fill="#19D0B8" />
@@ -742,6 +753,7 @@ function CadenceTimeline({
         <text x="2" y="14" fontFamily="var(--f-mono)" fontSize="7.5" fill="#5A6478">−14 d</text>
         <text x={W - 2} y="14" textAnchor="end" fontFamily="var(--f-mono)" fontSize="7.5" fill="#5A6478">DATA CLOCK</text>
       </svg>
+      </ChartFigure>
     </div>
   );
 }

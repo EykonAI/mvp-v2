@@ -1,4 +1,5 @@
 'use client';
+import ChartFigure from '@/components/intel/shared/ChartFigure';
 import { useState, useEffect } from 'react';
 import ScenarioLayout from '@/components/intel/shared/ScenarioLayout';
 import IllustrativeBadge from '@/components/intel/shared/IllustrativeBadge';
@@ -301,7 +302,12 @@ function DagVisualisation({ result, seed }: { result: CascadeOutput | null; seed
 
   return (
     <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--rule-soft)' }}>
-      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
+      <ChartFigure
+        title="Cascade propagation network"
+        desc={`${result.nodes.length} nodes connected by ${result.edges.length} propagation edges.`}
+        table={{ columns: ['From', 'To'], rows: result.edges.map(e => [e.from, e.to]) }}
+      >
+      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
         {result.edges.map((e, i) => {
           const a = pos.get(e.from);
           const b = pos.get(e.to);
@@ -359,6 +365,7 @@ function DagVisualisation({ result, seed }: { result: CascadeOutput | null; seed
           );
         })}
       </svg>
+      </ChartFigure>
     </div>
   );
 }

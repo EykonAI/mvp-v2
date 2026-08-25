@@ -69,7 +69,7 @@ export default function InterestGraph() {
       }}
     >
     <div style={{ height: 340, position: 'relative', background: 'radial-gradient(circle at 50% 45%, rgba(25,208,184,0.05), transparent 55%)' }}>
-      <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} style={{ position: 'absolute', inset: 0 }}>
+      <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} style={{ position: 'absolute', inset: 0 }} aria-hidden="true">
         {/* Ring edges */}
         {pos
           .filter(n => n.ring === 1)

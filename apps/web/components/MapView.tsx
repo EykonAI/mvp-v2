@@ -85,7 +85,7 @@ const POWER_CATEGORY_COLOR: Record<PowerCategory, [number, number, number, numbe
 // and electrons (yellow). Embedded as a data URI so we don't ship a separate
 // asset. Drawn at 32×32 with a 16,16 origin so it scales cleanly.
 const NUCLEAR_ATOM_SVG = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" aria-hidden="true">
   <g transform="translate(16,16)" stroke="#19D0B8" stroke-width="2" fill="none">
     <ellipse rx="13" ry="5" transform="rotate(45)"/>
     <ellipse rx="13" ry="5" transform="rotate(-45)"/>

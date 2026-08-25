@@ -1,7 +1,7 @@
 {
   "_comment": "Ratchet baselines. These numbers may go DOWN freely; raising one is a deliberate act that must be justified in the PR that does it.",
   "inlineStyleObjects": 2315,
-  "unnamedSvgs": 24,
+  "unnamedSvgs": 0,
   "palette": {
     "teal|amber": 19.99,
     "teal|green": 5.65,

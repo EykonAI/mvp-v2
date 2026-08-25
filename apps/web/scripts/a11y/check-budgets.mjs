@@ -42,6 +42,7 @@ let inline = 0;
 const inlineFiles = new Set();
 let unnamed = 0;
 const unnamedAt = [];
+const spreadAt = [];
 
 for (const f of files) {
   const src = readFileSync(f, 'utf8');
@@ -56,6 +57,14 @@ for (const f of files) {
     // A <title> child immediately after also counts as a name.
     const after = src.slice(m.index, m.index + 400);
     const hasTitle = /<title[\s>]/.test(after);
+    // A spread ({...a11y}) can carry role/aria-hidden but cannot be resolved
+    // statically. Count it separately and print it rather than silently
+    // passing it — an unverifiable pass is not the same as a pass.
+    const spread = /\{\s*\.\.\./.test(tag);
+    if (spread && !named && !hidden && !hasTitle) {
+      spreadAt.push(`${f.replace(WEB + '/', '')}:${src.slice(0, m.index).split('\n').length}`);
+      continue;
+    }
     if (!named && !hidden && !hasTitle) {
       unnamed++;
       unnamedAt.push(`${f.replace(WEB + '/', '')}:${src.slice(0, m.index).split('\n').length}`);
@@ -75,6 +84,10 @@ if (UPDATE) {
 console.log('a11y/budgets — structural ratchets');
 console.log(`  inline style={{}}   ${String(inline).padStart(5)}  (budget ${budgets.inlineStyleObjects}) in ${inlineFiles.size} files`);
 console.log(`  unnamed <svg>       ${String(unnamed).padStart(5)}  (budget ${budgets.unnamedSvgs})`);
+if (spreadAt.length) {
+  console.log(`  aria via spread     ${String(spreadAt.length).padStart(5)}  — not statically decidable, verify by hand:`);
+  spreadAt.forEach(l => console.log(`      ${l}`));
+}
 
 const fail = [];
 if (inline > budgets.inlineStyleObjects)
