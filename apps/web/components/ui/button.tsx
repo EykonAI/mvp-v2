@@ -20,12 +20,25 @@ const buttonVariants = cva(
         ghost:
           "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
         link: "text-primary underline-offset-4 hover:underline",
+        /* eYKON house buttons — mono, uppercase, letter-spaced. These
+         * reproduce the look the settings surfaces hand-rolled as inline
+         * style objects, but as a variant they also get hover, focus-visible
+         * and disabled states, none of which an inline style can express. */
+        eykon:
+          "rounded-sm border border-eykon-teal bg-eykon-teal font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-eykon-bg-void hover:bg-eykon-teal-dim hover:border-eykon-teal-dim",
+        eykonGhost:
+          "rounded-sm border border-eykon-rule-strong bg-transparent font-mono text-[10.5px] uppercase tracking-[0.14em] text-eykon-ink-dim hover:bg-eykon-bg-raised hover:text-eykon-ink",
+        eykonDanger:
+          "rounded-sm border border-eykon-red/50 bg-transparent font-mono text-[10.5px] uppercase tracking-[0.14em] text-eykon-red hover:bg-eykon-red/10",
       },
       size: {
         default: "h-9 px-4 py-2 has-[>svg]:px-3",
         sm: "h-8 rounded-md gap-1.5 px-3 has-[>svg]:px-2.5",
         lg: "h-10 rounded-md px-6 has-[>svg]:px-4",
         icon: "size-9",
+        /* Matches the padding the inline styles used. */
+        eykon: "h-auto px-3.5 py-2",
+        eykonSm: "h-auto px-2.5 py-1",
       },
     },
     defaultVariants: {

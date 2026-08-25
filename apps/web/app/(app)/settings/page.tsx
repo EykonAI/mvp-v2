@@ -67,15 +67,7 @@ export default async function SettingsPage() {
         Your eYKON account
       </h1>
 
-      <section
-        style={{
-          background: 'var(--bg-panel)',
-          border: '1px solid var(--rule)',
-          borderRadius: 6,
-          padding: '24px 28px',
-          marginBottom: 24,
-        }}
-      >
+      <section className="mb-6 rounded-md border border-eykon-rule bg-eykon-bg-panel px-7 py-6">
         <div
           style={{
             fontFamily: 'var(--f-mono)',
