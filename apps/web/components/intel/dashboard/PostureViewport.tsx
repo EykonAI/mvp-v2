@@ -92,7 +92,7 @@ export default function PostureViewport() {
       {mode !== 'grid' ? (
         <StylizedMap theatres={theatres} mode={mode} selected={selected} onSelect={setSelected} />
       ) : (
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, padding: 14 }}>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: 14, padding: 14 }}>
           {theatres.map(t => (
             <button
               key={t.slug}
@@ -261,13 +261,13 @@ function PostureDecompose({ theatre }: { theatre: Theatre }) {
     <div
       className="grid"
       style={{
-        gridTemplateColumns: '1fr 1fr 1fr',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))',
         gap: 1,
         background: 'var(--rule-soft)',
         border: '1px solid var(--rule-soft)',
       }}
     >
-      <section style={{ background: 'var(--bg-panel)', padding: 12 }}>
+      <section style={{ background: 'var(--bg-panel)', padding: 12, minWidth: 0 }}>
         <div className="eyebrow" style={{ marginBottom: 8 }}>5-Domain Score</div>
         <div className="flex flex-col" style={{ gap: 6 }}>
           {segs.map(s => (
@@ -284,7 +284,7 @@ function PostureDecompose({ theatre }: { theatre: Theatre }) {
         </div>
       </section>
 
-      <section style={{ background: 'var(--bg-panel)', padding: 12 }}>
+      <section style={{ background: 'var(--bg-panel)', padding: 12, minWidth: 0 }}>
         <div className="eyebrow" style={{ marginBottom: 8 }}>Precursor Analogs · Top 3</div>
         <div className="flex flex-col" style={{ gap: 6 }}>
           {(theatre.precursor_match_id && theatre.precursor_similarity
@@ -305,7 +305,7 @@ function PostureDecompose({ theatre }: { theatre: Theatre }) {
         </div>
       </section>
 
-      <section style={{ background: 'var(--bg-panel)', padding: 12 }}>
+      <section style={{ background: 'var(--bg-panel)', padding: 12, minWidth: 0 }}>
         <div className="eyebrow" style={{ marginBottom: 8 }}>30-Day Trajectory</div>
         <Sparkline
           values={theatre.last_30d_composite ?? []}

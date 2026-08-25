@@ -84,13 +84,12 @@ export default function PrecursorAnalogsWorkspace() {
 
   return (
     <div
-      className="grid"
+      className="intel-3col"
       style={{
-        gridTemplateColumns: '300px 1fr 320px',
-        gap: 1,
-        background: 'var(--rule-soft)',
+        ['--intel-l' as string]: '300px',
+        ['--intel-r' as string]: '320px',
         minHeight: 620,
-      }}
+      } as React.CSSProperties}
     >
       <aside style={{ background: 'var(--bg-navy)', padding: 14 }}>
         <Head accent="var(--teal)">Event Type</Head>
@@ -142,7 +141,7 @@ export default function PrecursorAnalogsWorkspace() {
       <section style={{ background: 'var(--bg-navy)', padding: 16 }}>
         <Head accent="var(--teal)">Current theatre · {theatre?.label}</Head>
         <div style={{ background: 'var(--bg-panel)', padding: 14, border: '1px solid var(--rule-soft)', marginTop: 10 }}>
-          <Sparkline values={currentSeries} width={600} height={100} stroke="var(--teal)" fill="rgba(25, 208, 184, 0.14)" min={0} max={1} />
+          <Sparkline responsive values={currentSeries} width={600} height={100} stroke="var(--teal)" fill="rgba(25, 208, 184, 0.14)" min={0} max={1} />
           <p style={{ fontSize: 11.5, color: 'var(--ink-dim)', marginTop: 8 }}>
             30-day composite trajectory. Current value: {currentValue != null ? currentValue.toFixed(2) : '—'}.
           </p>

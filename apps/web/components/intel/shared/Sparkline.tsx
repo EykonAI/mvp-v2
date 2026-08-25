@@ -13,6 +13,13 @@ interface Props {
    * only place a trend is stated, and it becomes role="img".
    */
   label?: string;
+  /**
+   * Render fluid: the `width` prop becomes the viewBox coordinate space and
+   * the element scales to its container. Off by default so the small inline
+   * row sparklines keep their exact intrinsic size; on for the large ones,
+   * which otherwise refuse to shrink and push their column off-screen.
+   */
+  responsive?: boolean;
 }
 
 export default function Sparkline({
@@ -25,6 +32,7 @@ export default function Sparkline({
   min,
   max,
   label,
+  responsive = false,
 }: Props) {
   const a11y = label
     ? ({ role: 'img' as const, 'aria-label': label })
@@ -43,7 +51,14 @@ export default function Sparkline({
     .join(' ');
 
   return (
-    <svg width={width} height={height} {...a11y} style={{ display: 'block' }}>
+    <svg
+      {...(responsive
+        ? { width: '100%', viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: 'none' }
+        : { width, height })}
+      height={height}
+      {...a11y}
+      style={{ display: 'block', maxWidth: '100%' }}
+    >
       {fill && (
         <polygon
           fill={fill}

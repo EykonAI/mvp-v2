@@ -107,7 +107,7 @@ export default function WorkspaceNav({
 
   return (
     <nav
-      className="sticky bottom-0 z-20 flex items-center px-6 backdrop-blur"
+      className="sticky bottom-0 z-20 flex flex-wrap items-center gap-y-1 px-6 backdrop-blur"
       style={{
         background: 'rgba(10, 18, 32, 0.92)',
         borderTop: '1px solid var(--rule-soft)',
