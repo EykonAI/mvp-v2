@@ -13,7 +13,12 @@
   --rule-strong: #2B3A5C;
   --ink: #E8EDF5;
   --ink-dim: #98A3B5;
-  --ink-faint: #5A6478;
+  /* Raised from #5A6478 (2.98:1 on --bg-panel — WCAG AA fail for text).
+     #7E8A9E is the darkest value clearing 4.5:1 on every surface
+     (worst 4.63:1 on --bg-raised) while keeping ~31% luminance
+     separation from --ink-dim, so the ramp keeps its tier.
+     Consumed as `color` 281x via var() — this one line fixes all of them. */
+  --ink-faint: #7E8A9E;
   --ink-ghost: #3A4256;
   --teal: #19D0B8;
   --teal-dim: #0E9A88;
@@ -24,8 +29,6 @@
   --green: #4ABF8A;
   --violet: #8B7FD8;
   --coral: #DE7F70;
-  --wheat: #D4A24C;
-  --scenario: #DE7F70;
   --f-display: 'Jura', sans-serif;
   --f-body: 'IBM Plex Sans', sans-serif;
   --f-mono: 'IBM Plex Mono', monospace;
@@ -109,7 +112,7 @@ body.intel-view {
 .font-display   { font-family: var(--f-display); letter-spacing: 0.04em; }
 .eyebrow {
   font-family: var(--f-mono);
-  font-size: 9.5px;
+  font-size: 10.5px;
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--ink-faint);
@@ -125,7 +128,7 @@ body.intel-view {
 .panel-title .idx { color: var(--teal); margin-right: 6px; font-weight: 500; }
 .panel-meta {
   font-family: var(--f-mono);
-  font-size: 9.5px;
+  font-size: 10.5px;
   color: var(--ink-faint);
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -205,10 +208,41 @@ body.intel-view {
   min-height: 100vh;
 }
 
-/* ── Scenario accent per workspace ─────────────────────────────── */
-.view-chokepoint { --scenario: #DE7F70; }
-.view-sanctions  { --scenario: #8B7FD8; }
-.view-cascade    { --scenario: #D4A24C; }
-.view-shadow     { --scenario: #E05D50; }
-.view-minerals   { --scenario: #8B7FD8; }
-.view-commodities{ --wheat:    #D4A24C; }
+/* The per-workspace scenario-accent mechanism was removed here.
+ * It defined --scenario / --wheat overrides on .view-chokepoint,
+ * .view-sanctions, .view-cascade, .view-shadow, .view-minerals and
+ * .view-commodities. Verified dead: none of those classes is applied
+ * anywhere, statically or via template string, and neither token had
+ * a single var() consumer in CSS. Only body.intel-view and
+ * body.globe-view are live, and they are unrelated.
+ */
+
+/* ── Accessibility baseline ───────────────────────────────────────
+ * Added by the a11y token-repair pass. Two obligations the codebase
+ * could not meet from inline styles, because a pseudo-class and a
+ * media query have no inline form.
+ */
+
+/* WCAG 2.4.7 Focus Visible (AA). Before this rule the stylesheet
+ * contained zero :focus declarations, and 35 of 36 focusable
+ * elements on /intel showed no focus indicator at all. */
+:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+/* Pointer users keep a clean surface; keyboard users get the ring. */
+:focus:not(:focus-visible) { outline: none; }
+
+/* WCAG 2.3.3 Animation from Interactions. eykon-pulse runs 2s
+ * infinite on always-visible LIVE indicators — an indefinite
+ * vestibular trigger in a tool people read for hours. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .pulse-dot, .typing-dot { animation: none !important; opacity: 1 !important; }
+}
