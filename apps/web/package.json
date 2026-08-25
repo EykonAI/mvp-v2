@@ -9,7 +9,9 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "a11y": "node scripts/a11y/check-contrast.mjs && node scripts/a11y/check-palette.mjs && node scripts/a11y/check-budgets.mjs",
-    "a11y:update": "node scripts/a11y/check-palette.mjs --update && node scripts/a11y/check-budgets.mjs --update"
+    "a11y:update": "node scripts/a11y/check-palette.mjs --update && node scripts/a11y/check-budgets.mjs --update",
+    "a11y:dom": "node scripts/a11y/check-dom.mjs",
+    "a11y:dom:app": "node scripts/a11y/check-dom.mjs --app"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
@@ -66,6 +68,8 @@
     "eslint-config-next": "^14.2.15",
     "postcss": "^8.5.14",
     "tailwindcss": "^3.4.13",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "playwright": "^1.48.0",
+    "wait-on": "^8.0.1"
   }
 }

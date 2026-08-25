@@ -148,7 +148,7 @@ export function EykonSidebar() {
                   tooltip={item.label}
                 >
                   <Link href={item.href}>
-                    <item.icon />
+                    <item.icon aria-hidden="true" focusable="false" />
                     <span>{item.label}</span>
                   </Link>
                 </SidebarMenuButton>
@@ -163,9 +163,9 @@ export function EykonSidebar() {
                     isActive={intelOpen}
                     tooltip="Intelligence Center"
                   >
-                    <LayoutDashboard />
+                    <LayoutDashboard aria-hidden="true" focusable="false" />
                     <span>Intel</span>
-                    <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+                    <ChevronRight aria-hidden="true" focusable="false" className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
                   </SidebarMenuButton>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
@@ -208,7 +208,7 @@ export function EykonSidebar() {
                   tooltip={item.label}
                 >
                   <Link href={item.href}>
-                    <item.icon />
+                    <item.icon aria-hidden="true" focusable="false" />
                     <span>{item.label}</span>
                   </Link>
                 </SidebarMenuButton>
@@ -229,7 +229,7 @@ export function EykonSidebar() {
                   tooltip={item.label}
                 >
                   <Link href={item.href}>
-                    <item.icon />
+                    <item.icon aria-hidden="true" focusable="false" />
                     <span>{item.label}</span>
                   </Link>
                 </SidebarMenuButton>
@@ -250,7 +250,7 @@ export function EykonSidebar() {
                 tooltip={item.label}
               >
                 <Link href={item.href}>
-                  <item.icon />
+                  <item.icon aria-hidden="true" focusable="false" />
                   <span>{item.label}</span>
                 </Link>
               </SidebarMenuButton>
