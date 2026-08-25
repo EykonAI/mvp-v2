@@ -65,7 +65,7 @@ export default function CalibrationWorkspace() {
   if (data.error || data.tracks.length === 0) {
     return (
       <div style={{ padding: 24 }}>
-        <p className="eyebrow" style={{ color: 'var(--ink-faint)' }}>
+        <p className="eyebrow text-eykon-ink-faint" >
           Ledger unavailable — no fixture is substituted for a track record.
         </p>
       </div>
@@ -80,7 +80,7 @@ export default function CalibrationWorkspace() {
       style={{ ['--intel-l' as string]: '250px', ['--intel-r' as string]: '300px', minHeight: 620 } as React.CSSProperties}
     >
       {/* ── LEFT ── */}
-      <aside style={{ background: 'var(--bg-navy)', padding: 14 }}>
+      <aside className="bg-eykon-bg-navy p-[14px]">
         <Head>① Track</Head>
         <div className="flex flex-col" style={{ gap: 4, marginTop: 10 }}>
           {data.tracks.map(t => (
@@ -112,7 +112,7 @@ export default function CalibrationWorkspace() {
 
         <div style={{ marginTop: 16 }}>
           <Head>② Integrity</Head>
-          <div style={{ marginTop: 8 }}>
+          <div className="mt-[8px]">
             <KV
               k="commit-reveal"
               v={`${track.integrity.sealed} / ${track.integrity.issued}`}
@@ -135,7 +135,7 @@ export default function CalibrationWorkspace() {
 
         <div style={{ marginTop: 16 }}>
           <Head>③ Observable families</Head>
-          <div style={{ marginTop: 8 }}>
+          <div className="mt-[8px]">
             {data.observable_families.map(f => (
               <div
                 key={f.key}
@@ -190,7 +190,7 @@ export default function CalibrationWorkspace() {
       </section>
 
       {/* ── RIGHT ── */}
-      <aside style={{ background: 'var(--bg-navy)', padding: 14 }}>
+      <aside className="bg-eykon-bg-navy p-[14px]">
         <Head>⑥ By claim family</Head>
         <div className="flex flex-col" style={{ gap: 4, marginTop: 10 }}>
           {track.families.length === 0 && (
@@ -204,7 +204,7 @@ export default function CalibrationWorkspace() {
               style={{ border: '1px solid var(--rule-soft)', background: 'var(--bg-panel)', padding: '6px 8px', fontFamily: 'var(--f-mono)', fontSize: 10.5 }}
             >
               <div className="flex items-center" style={{ justifyContent: 'space-between', gap: 6 }}>
-                <span style={{ color: 'var(--ink-dim)' }}>{f.feature}</span>
+                <span className="text-eykon-ink-dim">{f.feature}</span>
                 <span className="num-lg" style={{ fontSize: 11, color: f.thin ? 'var(--ink-faint)' : 'var(--teal)' }}>
                   {f.brier == null ? '—' : f.brier.toFixed(3)}
                 </span>
@@ -349,7 +349,7 @@ function Tile({ label, value, sub, calibrating, accent }: {
 function KV({ k, v, warn }: { k: string; v: string; warn?: boolean }) {
   return (
     <div className="flex items-center" style={{ justifyContent: 'space-between', fontFamily: 'var(--f-mono)', fontSize: 10.5, padding: '2px 0' }}>
-      <span style={{ color: 'var(--ink-faint)' }}>{k}</span>
+      <span className="text-eykon-ink-faint">{k}</span>
       <span style={{ color: warn ? 'var(--amber)' : 'var(--ink-dim)' }}>{v}</span>
     </div>
   );
@@ -365,7 +365,7 @@ function Tag({ children }: { children: React.ReactNode }) {
 
 function Head({ children }: { children: React.ReactNode }) {
   return (
-    <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    <h3 className="panel-title flex items-center gap-[8px]" >
       <span style={{ width: 3, height: 12, background: 'var(--teal)' }} />
       {children}
     </h3>

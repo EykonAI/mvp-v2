@@ -91,7 +91,7 @@ export default function PrecursorAnalogsWorkspace() {
         minHeight: 620,
       } as React.CSSProperties}
     >
-      <aside style={{ background: 'var(--bg-navy)', padding: 14 }}>
+      <aside className="bg-eykon-bg-navy p-[14px]">
         <Head accent="var(--teal)">Event Type</Head>
         <div className="flex flex-col" style={{ gap: 4, marginTop: 10 }}>
           {EVENT_TYPES.map(t => (
@@ -199,7 +199,7 @@ export default function PrecursorAnalogsWorkspace() {
         </div>
       </section>
 
-      <aside style={{ background: 'var(--bg-navy)', padding: 14 }}>
+      <aside className="bg-eykon-bg-navy p-[14px]">
         <Head accent="var(--teal)">Notes</Head>
         <p style={{ fontSize: 11.5, color: 'var(--ink-dim)', lineHeight: 1.55, marginTop: 8 }}>
           Similarity is cosine against the library vectors.{' '}
@@ -213,7 +213,7 @@ export default function PrecursorAnalogsWorkspace() {
               : null}
         </p>
         <p style={{ fontSize: 11.5, color: 'var(--ink-dim)', lineHeight: 1.55, marginTop: 10 }}>
-          Thresholds: <span style={{ color: 'var(--red)' }}>≥ 0.85 alert</span> · <span style={{ color: 'var(--amber)' }}>≥ 0.7 watch</span>.
+          Thresholds: <span className="text-eykon-red">≥ 0.85 alert</span> · <span className="text-eykon-amber">≥ 0.7 watch</span>.
         </p>
       </aside>
     </div>

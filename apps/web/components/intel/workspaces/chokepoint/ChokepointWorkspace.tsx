@@ -200,7 +200,7 @@ function PriceEnvelope({ result }: { result: ChokepointOutput | null }) {
   const min = Math.min(...values, ...fwd3, ...fwd6);
   return (
     <div style={{ background: 'var(--bg-panel)', padding: 14, border: '1px solid var(--rule-soft)' }}>
-      <div className="flex items-baseline justify-between" style={{ marginBottom: 8 }}>
+      <div className="flex items-baseline justify-between mb-[8px]" >
         <span className="eyebrow">Brent spot · 3m · 6m forwards (USD/bbl)</span>
         <span className="num-lg" style={{ fontSize: 14, color: 'var(--coral)' }}>
           ${values.at(-1)?.toFixed(1)}

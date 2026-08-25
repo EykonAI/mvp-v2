@@ -29,7 +29,7 @@ export default function ContextualActions() {
             gap: 8,
           }}
         >
-          <span style={{ color: 'var(--teal)' }}>◆</span>
+          <span className="text-eykon-teal">◆</span>
           <span style={{ flex: 1 }}>{a.label}</span>
           <span
             style={{

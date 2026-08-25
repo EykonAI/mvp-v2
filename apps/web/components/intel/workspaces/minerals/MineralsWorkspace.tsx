@@ -133,7 +133,7 @@ export default function MineralsWorkspace() {
                   .map((m, i) => (
                     <tr key={i} style={{ borderTop: '1px solid var(--rule-soft)' }} title={m.notes ?? undefined}>
                       <td style={{ padding: '6px 4px', color: 'var(--ink)' }}>
-                        {m.name} <span style={{ color: 'var(--ink-faint)' }}>· {m.country}</span>
+                        {m.name} <span className="text-eykon-ink-faint">· {m.country}</span>
                       </td>
                       <td style={{ padding: '6px 4px', color: 'var(--ink-dim)' }}>{m.owner ?? '—'}</td>
                       <td style={{ padding: '6px 4px', color: 'var(--ink)', textAlign: 'right' }}>
@@ -188,7 +188,7 @@ export default function MineralsWorkspace() {
                     }}
                   >
                     <div className="flex items-center justify-between">
-                      <span style={{ color: 'var(--ink-dim)' }}>{r.mineral}</span>
+                      <span className="text-eykon-ink-dim">{r.mineral}</span>
                       <span
                         style={{
                           padding: '1px 6px',
@@ -242,12 +242,12 @@ export default function MineralsWorkspace() {
                   <tr key={i} style={{ borderTop: '1px solid var(--rule-soft)' }}>
                     <td style={{ padding: '6px 4px', color: 'var(--ink)' }}>
                       {s.vessel_name}
-                      {s.flag ? <span style={{ color: 'var(--ink-faint)' }}> · {s.flag}</span> : null}
+                      {s.flag ? <span className="text-eykon-ink-faint"> · {s.flag}</span> : null}
                     </td>
                     <td style={{ padding: '6px 4px', color: 'var(--ink-dim)' }}>
                       {s.origin_port ?? s.origin_country ?? '—'}
                       {s.origin_port && s.origin_country ? (
-                        <span style={{ color: 'var(--ink-faint)' }}> ({s.origin_country})</span>
+                        <span className="text-eykon-ink-faint"> ({s.origin_country})</span>
                       ) : null}
                       {' → '}
                       {s.dest_hint ?? '—'}
@@ -320,7 +320,7 @@ export default function MineralsWorkspace() {
                           {t.change_pct.toFixed(1)}%
                         </span>
                       ) : (
-                        <span style={{ color: 'var(--ink-faint)' }}>baseline pass</span>
+                        <span className="text-eykon-ink-faint">baseline pass</span>
                       )}
                     </div>
                     <div style={{ marginTop: 2, color: 'var(--ink-faint)' }}>
