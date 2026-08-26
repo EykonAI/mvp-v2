@@ -37,6 +37,12 @@ jobs:
       - name: Structural budgets (ratchet)
         working-directory: apps/web
         run: node scripts/a11y/check-budgets.mjs
+      # An unverified craft rule may never block a draft. Same job
+      # because it is the same shape: Node built-ins, no install,
+      # seconds to run.
+      - name: X codex invariants (hard gate)
+        working-directory: apps/web
+        run: node scripts/copy/check-codex.mjs
 
   # DOM-level check. Separate job because it needs a build, a server and a
   # browser — the source gates above stay fast so PR feedback stays fast.

@@ -3,7 +3,8 @@ import { runAnalyst } from '@/lib/intelligence-analyst/run';
 import { isCoveredRegion, framingFor } from '@/lib/newsjack/coverage';
 import { voiceLint, coverageLint, valueTest } from '@/lib/newsjack/lints';
 import { renderXThread, renderLinkedIn, renderSubstack, threadToBody, type Evidence } from '@/lib/newsjack/template';
-import { eventExistsForSource, insertEvent, insertDraft } from '@/lib/newsjack/store';
+import { composeXThread } from '@/lib/copy/x-composer';
+import { eventExistsForSource, insertEvent, insertDraft, recentLeads as fetchRecentLeads } from '@/lib/newsjack/store';
 import { notifyFounder } from '@/lib/newsjack/notify';
 
 // The detect → package → draft → store loop (Newsjacking SOP §5). Runs from the
@@ -53,6 +54,16 @@ export interface TickResult {
 
 export async function runDetectTick(supabase: SB): Promise<TickResult> {
   const res: TickResult = { scanned: 0, drafted: 0, blocked: 0, skipped: 0, details: [] };
+
+  // Read once per tick, not per candidate. Used only by the
+  // near-duplicate craft warning; a failure here must not stop a tick,
+  // so it degrades to an empty list.
+  let recentLeads: string[] = [];
+  try {
+    recentLeads = await fetchRecentLeads(supabase, 10);
+  } catch {
+    recentLeads = [];
+  }
 
   // Convergence-only by default: convergences are multi-domain, higher-signal,
   // and have a PUBLIC landing page (/c/[id]) that gives a cold reader real value.
@@ -110,7 +121,12 @@ export async function runDetectTick(supabase: SB): Promise<TickResult> {
       seatsRemaining: null,
     };
 
-    const x = renderXThread(evidence);
+    // THE SEAM. The X thread is written by the copywriting agent when
+    // NEWSJACK_COPYWRITER is on, and by renderXThread otherwise —
+    // composeXThread falls back to exactly that template on any
+    // failure, so this call cannot lose a draft. LinkedIn and Substack
+    // stay on their deterministic renderers for now.
+    const x = await composeXThread(evidence, recentLeads);
     const body = threadToBody(x.posts);
     const voice = voiceLint(body);
     const coverage = coverageLint(body);
@@ -147,6 +163,12 @@ export async function runDetectTick(supabase: SB): Promise<TickResult> {
       lints: { voice, coverage, value },
       value_pass: value.pass,
       status: 'draft',
+      composer: x.meta.composer,
+      composer_model: x.meta.model,
+      codex_version: x.meta.codexVersion,
+      compose_attempts: x.meta.attempts,
+      fallback_reason: x.meta.fallbackReason,
+      craft_warnings: x.meta.craftWarnings,
     });
 
     if (!blocked) {

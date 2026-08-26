@@ -66,11 +66,38 @@ function DraftCard({ d }: { d: ReviewDraft }) {
         <span style={meta}>{d.region ?? 'unknown region'}</span>
         {!d.covered && <span style={{ ...meta, color: 'var(--amber)' }}>analytical (not live-covered)</span>}
         <span style={{ ...meta, color: d.value_pass ? 'var(--teal)' : 'var(--amber)' }}>value {d.value_pass ? 'pass' : 'fail'}</span>
+        {d.channel === 'x' && (
+          <span
+            style={{ ...meta, color: d.composer === 'agent' ? 'var(--teal)' : 'var(--ink-faint)' }}
+            title={
+              d.composer === 'agent'
+                ? `written by the copywriter · ${d.composer_model ?? 'model unknown'} · codex ${d.codex_version ?? '?'}`
+                : 'written by the deterministic template'
+            }
+          >
+            {d.composer === 'agent' ? 'agent' : 'template'}
+          </span>
+        )}
         <span style={{ ...meta, marginLeft: 'auto' }}>{d.created_at.slice(0, 16).replace('T', ' ')}</span>
       </div>
 
       {d.event_status === 'blocked' && d.blocked_reason && (
         <div style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 10 }}>Blocked: {d.blocked_reason}</div>
+      )}
+
+      {/* The fallback alarm. The agent silently reverting to the template
+          on every run is indistinguishable from the agent working, unless
+          the reason is shown. Three of these in a row means it is down. */}
+      {d.fallback_reason && (
+        <div style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 10 }}>
+          Copywriter fell back to the template: {d.fallback_reason}
+        </div>
+      )}
+
+      {d.craft_warnings.length > 0 && (
+        <div style={{ fontSize: 12, color: 'var(--ink-dim)', marginBottom: 10 }}>
+          Craft notes: {d.craft_warnings.join(' · ')}
+        </div>
       )}
 
       <ol style={{ listStyle: 'decimal', paddingLeft: 20, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
