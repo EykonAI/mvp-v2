@@ -106,14 +106,44 @@ as filler, no "let me explain". The shaping is in structure and
 rhythm, never in volume.`.trim(),
 };
 
+// EVERY HARD LINT MUST BE STATED IN THE PROMPT IT JUDGES.
+//
+// This clause used to say "no rhetorical shaping" and leave it there,
+// while the output check silently rejected any thread containing a
+// QUESTION MARK. Meanwhile the codex tells the writer to "leave
+// something a knowledgeable reader can answer or contest" and carries
+// an invite-a-reply rule. So the prompt asked for a question, the
+// linter banned it without saying so, and the composer looped: write
+// question, rejected, write question, rejected, fall back to template.
+//
+// Found on 2026-08-26 by the retry instrumentation, on a GDELT
+// China/Taiwan "Fight/Assault" convergence — the first fallback the
+// copywriter ever produced, and it was deterministic rather than
+// unlucky. A gate that enforces an unstated rule does not correct the
+// model, it just exhausts the retry budget.
+//
+// The ban itself is kept: in a flat report about people being hurt, a
+// question is a rhetorical device and does not belong. What changes is
+// that the writer is now TOLD, in the same words the linter uses.
 const HARM_CLAUSE = `
 HARM OVERRIDE IS ACTIVE FOR THIS EVENT.
 The evidence involves conflict or possible casualties. Ignore the
 register above and write FLAT: plain, precise, sourced, no rhetorical
-shaping at all. Do not reach for a hook. Do not look for the wry
-detail. Ask of every sentence: would this read as flippant to someone
-directly affected by the event it describes? If the answer is anything
-other than a confident no, write it flatter.`.trim();
+shaping at all. Do not reach for a hook. Do not look for the wry detail.
+
+CONCRETELY, IN THIS REGISTER — these are enforced by a linter and a
+thread that breaks one is discarded:
+  · NO QUESTIONS. Not one question mark anywhere in the thread. The
+    usual instruction to leave something a reader can answer does NOT
+    apply here; end on the statement instead.
+  · No "imagine", "here's the thing", "turns out", "plot twist",
+    "spoiler", "wild", "buckle".
+  · No shaped opening. State what was observed, by which instrument,
+    and what it does and does not establish.
+
+Ask of every sentence: would this read as flippant to someone directly
+affected by the event it describes? If the answer is anything other
+than a confident no, write it flatter.`.trim();
 
 const VOICE_CODES = `
 THE eYKON VOICE CODES (Newsjacking SOP §4 — build requirements, not

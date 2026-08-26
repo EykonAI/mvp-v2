@@ -97,6 +97,49 @@ if (!needleBlock) {
   }
 }
 
+// ── 3 · the prompt must state what the linter enforces ─────────
+//
+// The composer looped and fell back on 2026-08-26 because the harm
+// output check rejected any question mark while the prompt never said
+// so — and the codex was simultaneously asking for a question. A gate
+// enforcing an unstated rule cannot correct the model; it just burns
+// the retry budget and degrades to the template.
+//
+// So: every construction the harm output check bans must appear in the
+// clause the writer is given.
+{
+  const LINTS = resolve(here, '../../lib/copy/x-craft-lints.ts');
+  const lintSrc = readFileSync(LINTS, 'utf8');
+  const shaped = lintSrc.match(/const shaped\s*=\s*\/([^\n]*?)\/i;/);
+  const clause = src.match(/const HARM_CLAUSE\s*=\s*`([\s\S]*?)`\.trim\(\);/);
+
+  if (!shaped) {
+    failures.push('the harm output check (const shaped = /.../) was not found in x-craft-lints.ts');
+  } else if (!clause) {
+    failures.push('HARM_CLAUSE not found in x-voice.ts');
+  } else {
+    const pattern = shaped[1];
+    const prompt = clause[1].toLowerCase();
+
+    // The question-mark ban is the one that bit. It is not a word, so
+    // it needs its own assertion.
+    if (/\[\?\]|\\\?/.test(pattern) && !prompt.includes('question')) {
+      failures.push(
+        'the harm output check bans question marks but HARM_CLAUSE never mentions questions — the writer cannot comply with a rule it is not given',
+      );
+    }
+
+    // Every literal word the check bans must appear in the clause.
+    const words = [...pattern.matchAll(/\\b([a-z' ]{3,})\\b/g)].map((m) => m[1].trim());
+    const unstated = words.filter((w) => w && !prompt.includes(w));
+    if (unstated.length) {
+      failures.push(
+        `the harm output check bans ${unstated.map((w) => `"${w}"`).join(', ')} but HARM_CLAUSE does not name them — state every hard rule in the prompt that is judged by it`,
+      );
+    }
+  }
+}
+
 if (failures.length) {
   console.error('\nHARM GATE CHECK FAILED\n');
   for (const f of failures) console.error(`  ✗ ${f}`);
