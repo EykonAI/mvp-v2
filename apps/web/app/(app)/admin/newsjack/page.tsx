@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/auth/session';
 import { isFounder } from '@/lib/admin/access';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { listDrafts, type ReviewDraft } from '@/lib/newsjack/store';
+import Link from 'next/link';
 import NewsjackActions from './Actions';
 
 export const metadata: Metadata = { title: 'Newsjack review — eYKON.ai', robots: { index: false, follow: false } };
@@ -36,6 +37,12 @@ export default async function NewsjackReviewPage() {
         <p style={{ fontSize: 13, color: 'var(--ink-dim)', marginBottom: 24, maxWidth: 620 }}>
           Each draft is auto-built from a live anomaly and has already passed the voice, coverage and value gates.
           Approve to publish (or copy and post manually). Blocked drafts show why; nothing here has gone public.
+        </p>
+        <p style={{ fontSize: 13, color: 'var(--ink-dim)', marginBottom: 24 }}>
+          <Link href="/admin/newsjack/recompose" style={{ color: 'var(--teal)' }}>
+            Dry-run recompose
+          </Link>{' '}
+          — re-write recent drafts through the copywriter and compare, without changing anything here.
         </p>
 
         {drafts.length === 0 ? (

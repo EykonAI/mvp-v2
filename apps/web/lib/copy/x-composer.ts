@@ -29,6 +29,7 @@ import {
   harmRegisterForced,
   systemPrompt,
   userPrompt,
+  type Register,
 } from '@/lib/copy/x-voice';
 
 export interface ComposeMeta {
@@ -66,9 +67,21 @@ function templateResult(ev: Evidence, reason: string | null, attempts: number): 
   };
 }
 
+export interface ComposeOptions {
+  /** Compose even when NEWSJACK_COPYWRITER is off. ONLY for the founder-gated
+   *  dry-run recompose: without it that tool is inert precisely when it is
+   *  most useful — before the flag has ever been switched on. The engine never
+   *  passes this, so the kill switch remains absolute on the publishing path. */
+  force?: boolean;
+  /** Compose at a specific register regardless of COPYWRITER_REGISTER, so all
+   *  three can be compared on the same evidence. The harm rule still wins. */
+  register?: Register;
+}
+
 export async function composeXThread(
   ev: Evidence,
   recentLeads: string[] = [],
+  opts: ComposeOptions = {},
 ): Promise<ComposeResult> {
   // The template computes the canonical ref URL (with the channel utm
   // tag). We reuse ITS url rather than recomputing, so the agent path
@@ -76,11 +89,11 @@ export async function composeXThread(
   const base = renderXThread(ev);
   const refUrl = base.refUrl;
 
-  if (!copywriterEnabled()) {
+  if (!copywriterEnabled() && !opts.force) {
     return templateResult(ev, null, 0);
   }
 
-  const register = harmRegisterForced(ev) ? 'flat' : currentRegister();
+  const register = harmRegisterForced(ev) ? 'flat' : (opts.register ?? currentRegister());
   let attempts = 0;
   let lastViolations: string[] = [];
   const messages: Anthropic.Messages.MessageParam[] = [
@@ -94,7 +107,7 @@ export async function composeXThread(
     attempts++;
     let posts: string[];
     try {
-      posts = await callWriter(messages, ev);
+      posts = await callWriter(messages, ev, opts.register);
     } catch (err: any) {
       return templateResult(ev, `model call failed: ${err?.message ?? 'unknown'}`, attempts);
     }
@@ -149,12 +162,13 @@ export async function composeXThread(
 async function callWriter(
   messages: Anthropic.Messages.MessageParam[],
   ev: Evidence,
+  register?: Register,
 ): Promise<string[]> {
   const anthropic = getAnthropic();
   const requestBody = {
     model: COPYWRITER_MODEL,
     max_tokens: MAX_TOKENS_OUT,
-    system: [{ type: 'text', text: systemPrompt(ev) }],
+    system: [{ type: 'text', text: systemPrompt(ev, register) }],
     tools: [WRITE_THREAD_TOOL],
     tool_choice: { type: 'tool', name: 'write_thread' },
     messages,

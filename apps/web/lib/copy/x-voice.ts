@@ -105,8 +105,12 @@ style preferences):
   · Real value to a non-customer, on its own, before it asks anything.
 `.trim();
 
-export function systemPrompt(ev: Evidence): string {
-  const register = harmRegisterForced(ev) ? 'flat' : currentRegister();
+// `override` lets a caller compose at a specific register without changing
+// the deployed default — used by the dry-run recompose so all three can be
+// compared side by side. The harm rule still wins over any override: it is
+// not a preference, and a caller may not opt out of it.
+export function systemPrompt(ev: Evidence, override?: Register): string {
+  const register = harmRegisterForced(ev) ? 'flat' : (override ?? currentRegister());
   return [
     'You are the eYKON.ai X copywriter. You turn a verified intelligence',
     'evidence package into a short X thread that a senior analyst would',
