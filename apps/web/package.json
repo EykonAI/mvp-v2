@@ -12,7 +12,8 @@
     "a11y:update": "node scripts/a11y/check-palette.mjs --update && node scripts/a11y/check-budgets.mjs --update",
     "a11y:dom": "node scripts/a11y/check-dom.mjs",
     "a11y:dom:app": "node scripts/a11y/check-dom.mjs --app",
-    "copy:codex": "node scripts/copy/check-codex.mjs"
+    "copy:codex": "node scripts/copy/check-codex.mjs",
+    "copy:harm": "node scripts/copy/check-harm-gate.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
