@@ -38,6 +38,21 @@ const URL_RE = /https?:\/\/\S+/gi;
 // not preceded by sentence-final punctuation.
 const TRUNCATED_RE = /[^.!?]\s*(…|\.\.\.)\s*$/;
 
+// The constructions the flat register forbids, each with a name the
+// writer can act on. Kept in step with HARM_CLAUSE in x-voice.ts —
+// scripts/copy/check-harm-gate.mjs fails CI if the prompt stops naming
+// one of them.
+const HARM_SHAPED: Array<{ re: RegExp; label: string }> = [
+  { re: /[^?]*\?/, label: 'the question' },
+  { re: /\bimagine\b[^.]*/i, label: '"imagine"' },
+  { re: /\bhere's the thing\b[^.]*/i, label: '"here\'s the thing"' },
+  { re: /\bplot twist\b[^.]*/i, label: '"plot twist"' },
+  { re: /\bturns out\b[^.]*/i, label: '"turns out"' },
+  { re: /\bspoiler\b[^.]*/i, label: '"spoiler"' },
+  { re: /\bwild\b[^.]*/i, label: '"wild"' },
+  { re: /\bbuckle\b[^.]*/i, label: '"buckle"' },
+];
+
 const hard = (id: string) =>
   CODEX_RULES.find((r) => r.id === id)?.enforcement === 'hard';
 
@@ -121,9 +136,26 @@ export function craftLint(
   // second gate, because a model told to be engaging will occasionally
   // find a way to be engaging about a casualty.
   if (harmRegisterForced(ev)) {
-    const shaped = /[?]|\bimagine\b|\bhere's the thing\b|\bplot twist\b|\bturns out\b|\bspoiler\b|\bwild\b|\bbuckle\b/i;
-    if (shaped.test(body)) {
-      violations.push('harm register is forced for this event, but the copy is rhetorically shaped — rewrite flat');
+    // A GATE MUST SAY WHAT IT CAUGHT.
+    //
+    // This used to push one generic sentence — "the copy is rhetorically
+    // shaped — rewrite flat" — and the composer feeds violations back
+    // verbatim as the retry instruction. So the writer was told it had
+    // failed and never told which construction failed it. Measured
+    // 2026-08-26: all three harm-register events in one dry run failed
+    // twice on this exact message and fell back to the template. It
+    // could not fix what it was not shown, so it guessed, twice.
+    //
+    // Same lesson as stating the rules in the prompt (#422), one level
+    // down: stating a rule is not enough if the violation that enforces
+    // it is anonymous.
+    for (const { re, label } of HARM_SHAPED) {
+      const m = body.match(re);
+      if (m) {
+        violations.push(
+          `harm register is forced for this event: remove ${label} — found "${m[0].trim()}" — and rewrite flat`,
+        );
+      }
     }
   }
 

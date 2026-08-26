@@ -110,32 +110,43 @@ if (!needleBlock) {
 {
   const LINTS = resolve(here, '../../lib/copy/x-craft-lints.ts');
   const lintSrc = readFileSync(LINTS, 'utf8');
-  const shaped = lintSrc.match(/const shaped\s*=\s*\/([^\n]*?)\/i;/);
+  // HARM_SHAPED is the list the flat register forbids, each entry a
+  // regex plus the label the writer is shown.
+  const block = lintSrc.match(/HARM_SHAPED:\s*Array<\{[^>]*\}>\s*=\s*\[([\s\S]*?)\n\];/);
   const clause = src.match(/const HARM_CLAUSE\s*=\s*`([\s\S]*?)`\.trim\(\);/);
 
-  if (!shaped) {
-    failures.push('the harm output check (const shaped = /.../) was not found in x-craft-lints.ts');
+  if (!block) {
+    failures.push('HARM_SHAPED not found in x-craft-lints.ts — the flat-register ban list must stay machine-readable so this check can compare it to the prompt');
   } else if (!clause) {
     failures.push('HARM_CLAUSE not found in x-voice.ts');
   } else {
-    const pattern = shaped[1];
+    const entries = [...block[1].matchAll(/label:\s*'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'"));
     const prompt = clause[1].toLowerCase();
 
-    // The question-mark ban is the one that bit. It is not a word, so
-    // it needs its own assertion.
-    if (/\[\?\]|\\\?/.test(pattern) && !prompt.includes('question')) {
+    if (entries.length === 0) failures.push('HARM_SHAPED has no labelled entries');
+
+    // The question ban is not a word, so it needs naming explicitly.
+    if (/\[\^\?\]\*\\\?|\[\?\]/.test(block[1]) && !prompt.includes('question')) {
       failures.push(
         'the harm output check bans question marks but HARM_CLAUSE never mentions questions — the writer cannot comply with a rule it is not given',
       );
     }
 
-    // Every literal word the check bans must appear in the clause.
-    const words = [...pattern.matchAll(/\\b([a-z' ]{3,})\\b/g)].map((m) => m[1].trim());
-    const unstated = words.filter((w) => w && !prompt.includes(w));
+    // Every quoted construction it bans must be named in the prompt.
+    const unstated = entries
+      .filter((l) => l.startsWith('"'))
+      .map((l) => l.replace(/"/g, '').toLowerCase())
+      .filter((w) => w && !prompt.includes(w));
     if (unstated.length) {
       failures.push(
         `the harm output check bans ${unstated.map((w) => `"${w}"`).join(', ')} but HARM_CLAUSE does not name them — state every hard rule in the prompt that is judged by it`,
       );
+    }
+
+    // And the violation must be actionable: it has to quote the match.
+    const harmPush = lintSrc.match(/harm register is forced for this event[^`']*/);
+    if (harmPush && !/\$\{m\[0\]/.test(lintSrc.slice(lintSrc.indexOf('harm register is forced'), lintSrc.indexOf('harm register is forced') + 400))) {
+      failures.push('the harm violation does not quote the text it matched — a writer told only that it failed will guess, retry, and fall back');
     }
   }
 }
