@@ -43,6 +43,10 @@ jobs:
       - name: X codex invariants (hard gate)
         working-directory: apps/web
         run: node scripts/copy/check-codex.mjs
+      # The harm register must never be gated on severity again.
+      - name: Harm register gate (hard gate)
+        working-directory: apps/web
+        run: node scripts/copy/check-harm-gate.mjs
 
   # DOM-level check. Separate job because it needs a build, a server and a
   # browser — the source gates above stay fast so PR feedback stays fast.
