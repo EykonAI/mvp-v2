@@ -40,6 +40,12 @@ export interface ComposeMeta {
   attempts: number;
   fallbackReason: string | null;
   craftWarnings: string[];
+  /** What the FIRST attempt failed on, even when the retry then succeeded.
+   *  Without this the reason a retry was needed is discarded the moment it
+   *  works — measured 2026-08-26: 9 of 15 live drafts needed the retry and
+   *  nothing recorded why. A retry that always succeeds still costs a model
+   *  call and it still means the prompt is systematically missing something. */
+  firstAttemptViolations: string[];
 }
 
 export interface ComposeResult {
@@ -50,7 +56,12 @@ export interface ComposeResult {
 
 const MAX_TOKENS_OUT = 1400;
 
-function templateResult(ev: Evidence, reason: string | null, attempts: number): ComposeResult {
+function templateResult(
+  ev: Evidence,
+  reason: string | null,
+  attempts: number,
+  firstViolations: string[] = [],
+): ComposeResult {
   const t = renderXThread(ev);
   return {
     posts: t.posts,
@@ -63,6 +74,7 @@ function templateResult(ev: Evidence, reason: string | null, attempts: number): 
       attempts,
       fallbackReason: reason,
       craftWarnings: [],
+      firstAttemptViolations: firstViolations,
     },
   };
 }
@@ -96,6 +108,7 @@ export async function composeXThread(
   const register = harmRegisterForced(ev) ? 'flat' : (opts.register ?? currentRegister());
   let attempts = 0;
   let lastViolations: string[] = [];
+  let firstAttemptViolations: string[] = [];
   const messages: Anthropic.Messages.MessageParam[] = [
     { role: 'user', content: userPrompt(ev, refUrl) },
   ];
@@ -109,10 +122,10 @@ export async function composeXThread(
     try {
       posts = await callWriter(messages, ev, opts.register);
     } catch (err: any) {
-      return templateResult(ev, `model call failed: ${err?.message ?? 'unknown'}`, attempts);
+      return templateResult(ev, `model call failed: ${err?.message ?? 'unknown'}`, attempts, firstAttemptViolations);
     }
     if (!posts.length) {
-      return templateResult(ev, 'model returned no posts', attempts);
+      return templateResult(ev, 'model returned no posts', attempts, firstAttemptViolations);
     }
 
     // Same honesty gates the template output passes. The agent is a
@@ -135,12 +148,16 @@ export async function composeXThread(
           attempts,
           fallbackReason: null,
           craftWarnings: craft.warnings,
+          firstAttemptViolations,
         },
       };
     }
 
     lastViolations = violations;
     if (i === 0) {
+      // Record WHY the retry was needed. This survives a successful retry;
+      // fallbackReason only ever exists when both attempts failed.
+      firstAttemptViolations = violations;
       // Feed the violations back verbatim. Telling the model what a
       // linter said is far more reliable than re-describing the rule.
       messages.push({ role: 'assistant', content: JSON.stringify({ posts }) });
@@ -156,7 +173,7 @@ export async function composeXThread(
     }
   }
 
-  return templateResult(ev, `lint failed twice: ${lastViolations.join('; ')}`, attempts);
+  return templateResult(ev, `lint failed twice: ${lastViolations.join('; ')}`, attempts, firstAttemptViolations);
 }
 
 async function callWriter(

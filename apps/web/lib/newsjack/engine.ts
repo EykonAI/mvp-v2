@@ -160,7 +160,10 @@ export async function runDetectTick(supabase: SB): Promise<TickResult> {
       body,
       posts: x.posts,
       ref_url: x.refUrl,
-      lints: { voice, coverage, value },
+      // firstAttempt rides in the existing lints JSONB rather than a new
+      // column: it IS a lint result, and a schema change is not warranted
+      // for a diagnostic field.
+      lints: { voice, coverage, value, firstAttempt: x.meta.firstAttemptViolations },
       value_pass: value.pass,
       status: 'draft',
       composer: x.meta.composer,

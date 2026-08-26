@@ -113,6 +113,7 @@ export interface ReviewDraft {
   codex_version: string | null;
   fallback_reason: string | null;
   craft_warnings: string[];
+  first_attempt_violations: string[];
 }
 
 interface DraftJoinRow {
@@ -131,6 +132,7 @@ interface DraftJoinRow {
   codex_version: string | null;
   fallback_reason: string | null;
   craft_warnings: unknown;
+  lints: unknown;
   newsjack_events:
     | { domain: string | null; region: string | null; severity: string | null; covered: boolean; status: string; blocked_reason: string | null }
     | { domain: string | null; region: string | null; severity: string | null; covered: boolean; status: string; blocked_reason: string | null }[]
@@ -141,7 +143,7 @@ export async function listDrafts(supabase: SB, limit = 50): Promise<ReviewDraft[
   const { data } = await supabase
     .from('newsjack_drafts')
     .select(
-      'id, event_id, channel, posts, ref_url, value_pass, status, created_at, revision, supersedes_draft_id, composer, composer_model, codex_version, fallback_reason, craft_warnings, newsjack_events!inner(domain, region, severity, covered, status, blocked_reason)',
+      'id, event_id, channel, posts, ref_url, value_pass, status, created_at, revision, supersedes_draft_id, composer, composer_model, codex_version, fallback_reason, craft_warnings, lints, newsjack_events!inner(domain, region, severity, covered, status, blocked_reason)',
     )
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -170,8 +172,16 @@ export async function listDrafts(supabase: SB, limit = 50): Promise<ReviewDraft[
       codex_version: r.codex_version ?? null,
       fallback_reason: r.fallback_reason ?? null,
       craft_warnings: Array.isArray(r.craft_warnings) ? (r.craft_warnings as string[]) : [],
+      first_attempt_violations: firstAttemptOf(r.lints),
     };
   });
+}
+
+// The retry diagnostic lives inside the lints blob (see engine.ts).
+function firstAttemptOf(lints: unknown): string[] {
+  if (!lints || typeof lints !== 'object') return [];
+  const fa = (lints as Record<string, unknown>).firstAttempt;
+  return Array.isArray(fa) ? fa.filter((v): v is string => typeof v === 'string') : [];
 }
 
 export interface DraftRow {

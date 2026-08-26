@@ -27,6 +27,7 @@ interface Row {
   attempts?: number;
   fallbackReason?: string | null;
   craftWarnings?: string[];
+  firstAttemptViolations?: string[];
 }
 
 interface Report {
@@ -39,6 +40,7 @@ interface Report {
   scanned: number;
   composedByAgent: number;
   fellBack: number;
+  neededRetry?: number;
   results: Row[];
   error?: string;
 }
@@ -167,7 +169,8 @@ export default function Runner() {
         <>
           <div style={{ fontSize: 13, color: 'var(--ink-dim)', marginBottom: 6 }}>
             {report.scanned} draft{report.scanned === 1 ? '' : 's'} · {report.composedByAgent} by the agent ·{' '}
-            {report.fellBack} fell back · register {report.register} · codex {report.codexVersion}
+            {report.fellBack} fell back · {report.neededRetry ?? 0} needed a retry · register{' '}
+            {report.register} · codex {report.codexVersion}
           </div>
           <div style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 20 }}>{report.note}</div>
 
@@ -196,6 +199,11 @@ export default function Runner() {
                     {r.fallbackReason && (
                       <div style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 10 }}>
                         Fell back: {r.fallbackReason}
+                      </div>
+                    )}
+                    {r.firstAttemptViolations && r.firstAttemptViolations.length > 0 && (
+                      <div style={{ fontSize: 12, color: 'var(--ink-dim)', marginBottom: 10 }}>
+                        Retried — first attempt failed: {r.firstAttemptViolations.join(' · ')}
                       </div>
                     )}
                     {r.craftWarnings && r.craftWarnings.length > 0 && (
