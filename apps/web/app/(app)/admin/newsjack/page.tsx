@@ -73,6 +73,14 @@ function DraftCard({ d }: { d: ReviewDraft }) {
         <span style={meta}>{d.region ?? 'unknown region'}</span>
         {!d.covered && <span style={{ ...meta, color: 'var(--amber)' }}>analytical (not live-covered)</span>}
         <span style={{ ...meta, color: d.value_pass ? 'var(--teal)' : 'var(--amber)' }}>value {d.value_pass ? 'pass' : 'fail'}</span>
+        {d.revision > 0 && (
+          <span
+            style={{ ...meta, color: 'var(--teal)' }}
+            title={`recomposed from draft ${d.supersedes_draft_id ?? 'unknown'} — the original is still in this list`}
+          >
+            rev {d.revision}
+          </span>
+        )}
         {d.channel === 'x' && (
           <span
             style={{ ...meta, color: d.composer === 'agent' ? 'var(--teal)' : 'var(--ink-faint)' }}

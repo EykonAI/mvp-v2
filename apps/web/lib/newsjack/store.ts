@@ -106,6 +106,8 @@ export interface ReviewDraft {
   covered: boolean;
   event_status: string;
   blocked_reason: string | null;
+  revision: number;
+  supersedes_draft_id: string | null;
   composer: string;
   composer_model: string | null;
   codex_version: string | null;
@@ -122,6 +124,8 @@ interface DraftJoinRow {
   value_pass: boolean;
   status: string;
   created_at: string;
+  revision: number | null;
+  supersedes_draft_id: string | null;
   composer: string | null;
   composer_model: string | null;
   codex_version: string | null;
@@ -137,7 +141,7 @@ export async function listDrafts(supabase: SB, limit = 50): Promise<ReviewDraft[
   const { data } = await supabase
     .from('newsjack_drafts')
     .select(
-      'id, event_id, channel, posts, ref_url, value_pass, status, created_at, composer, composer_model, codex_version, fallback_reason, craft_warnings, newsjack_events!inner(domain, region, severity, covered, status, blocked_reason)',
+      'id, event_id, channel, posts, ref_url, value_pass, status, created_at, revision, supersedes_draft_id, composer, composer_model, codex_version, fallback_reason, craft_warnings, newsjack_events!inner(domain, region, severity, covered, status, blocked_reason)',
     )
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -159,6 +163,8 @@ export async function listDrafts(supabase: SB, limit = 50): Promise<ReviewDraft[
       covered: ev?.covered ?? true,
       event_status: ev?.status ?? 'unknown',
       blocked_reason: ev?.blocked_reason ?? null,
+      revision: r.revision ?? 0,
+      supersedes_draft_id: r.supersedes_draft_id ?? null,
       composer: r.composer ?? 'template',
       composer_model: r.composer_model ?? null,
       codex_version: r.codex_version ?? null,
@@ -249,4 +255,69 @@ export async function recentLeads(supabase: SB, limit = 10): Promise<string[]> {
   return rows
     .map((r) => (Array.isArray(r.posts) ? (r.posts as string[])[0] : null))
     .filter((s): s is string => typeof s === 'string' && s.length > 0);
+}
+
+// ── Revisions (migration 115) ───────────────────────────────────
+
+export interface RevisedDraftInput {
+  supersedes_draft_id: string;
+  event_id: string;
+  channel: 'x';
+  body: string;
+  posts: string[];
+  ref_url: string | null;
+  lints: Record<string, unknown>;
+  composer: 'agent' | 'template';
+  composer_model: string | null;
+  codex_version: string | null;
+  craft_warnings: string[];
+}
+
+/**
+ * Save a recomposed thread BESIDE the original, never over it. The original
+ * row is what the engine actually produced and is the audit trail behind
+ * every composer statistic; overwriting it would stamp composer='agent' on
+ * a row the template wrote and quietly corrupt the digest.
+ *
+ * Returns the new revision number, or null if the write failed.
+ */
+export async function insertRevisedDraft(
+  supabase: SB,
+  d: RevisedDraftInput,
+): Promise<number | null> {
+  // Next revision for this (event, channel). Read-then-write races are not a
+  // concern here: the only caller is a founder-gated admin surface driven by
+  // one human clicking one button, and the UNIQUE constraint is the backstop
+  // if that assumption ever stops holding.
+  const { data: existing } = await supabase
+    .from('newsjack_drafts')
+    .select('revision')
+    .eq('event_id', d.event_id)
+    .eq('channel', d.channel)
+    .order('revision', { ascending: false })
+    .limit(1);
+  const rows = (existing as { revision: number | null }[] | null) ?? [];
+  const next = (rows[0]?.revision ?? 0) + 1;
+
+  const { error } = await supabase.from('newsjack_drafts').insert({
+    event_id: d.event_id,
+    channel: d.channel,
+    revision: next,
+    supersedes_draft_id: d.supersedes_draft_id,
+    body: d.body,
+    posts: d.posts,
+    ref_url: d.ref_url,
+    lints: d.lints,
+    // A saved revision passed every gate on the way in — the route re-runs
+    // them rather than trusting what the browser sent.
+    value_pass: true,
+    status: 'draft',
+    composer: d.composer,
+    composer_model: d.composer_model,
+    codex_version: d.codex_version,
+    compose_attempts: 0,
+    fallback_reason: null,
+    craft_warnings: d.craft_warnings,
+  });
+  return error ? null : next;
 }

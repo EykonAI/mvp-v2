@@ -58,6 +58,32 @@ export default function Runner() {
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<Report | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState<Record<string, string>>({});
+
+  async function save(r: Row) {
+    setSaved((m) => ({ ...m, [r.draftId]: 'saving…' }));
+    try {
+      const res = await fetch('/api/admin/newsjack/recompose/save', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          draftId: r.draftId,
+          posts: r.after ?? [],
+          composer: r.composer,
+          model: r.model,
+        }),
+      });
+      const j = await res.json();
+      setSaved((m) => ({
+        ...m,
+        [r.draftId]: res.ok
+          ? `saved as revision ${j.revision} — publish it on /admin/newsjack`
+          : `refused: ${j.error}${j.violations ? ' — ' + j.violations.join('; ') : ''}`,
+      }));
+    } catch (e: any) {
+      setSaved((m) => ({ ...m, [r.draftId]: `failed: ${e?.message ?? 'request error'}` }));
+    }
+  }
 
   async function run() {
     setBusy(true);
@@ -181,6 +207,54 @@ export default function Runner() {
                     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 16 }}>
                       <Column label="before — template" posts={r.before ?? []} dim />
                       <Column label={`after — ${r.composer}`} posts={r.after ?? []} />
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 12 }}>
+                      <button
+                        onClick={() => save(r)}
+                        disabled={!!saved[r.draftId]}
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: 12,
+                          borderRadius: 6,
+                          border: '1px solid var(--teal)',
+                          background: 'transparent',
+                          color: 'var(--teal)',
+                          cursor: saved[r.draftId] ? 'default' : 'pointer',
+                        }}
+                      >
+                        Save to queue
+                      </button>
+                      <button
+                        onClick={() => void navigator.clipboard?.writeText((r.after ?? []).join('\n\n'))}
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: 12,
+                          borderRadius: 6,
+                          border: '1px solid var(--rule)',
+                          background: 'transparent',
+                          color: 'var(--ink-dim)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Copy
+                      </button>
+                      {r.stale && !saved[r.draftId] && (
+                        <span style={{ ...meta, color: 'var(--amber)' }}>
+                          window closed — saving does not make it current
+                        </span>
+                      )}
+                      {saved[r.draftId] && (
+                        <span
+                          style={{
+                            ...meta,
+                            color: saved[r.draftId].startsWith('saved') ? 'var(--teal)' : 'var(--amber)',
+                            textTransform: 'none',
+                          }}
+                        >
+                          {saved[r.draftId]}
+                        </span>
+                      )}
                     </div>
                   </>
                 )}
