@@ -42,8 +42,28 @@ const TRUNCATED_RE = /[^.!?]\s*(…|\.\.\.)\s*$/;
 // writer can act on. Kept in step with HARM_CLAUSE in x-voice.ts —
 // scripts/copy/check-harm-gate.mjs fails CI if the prompt stops naming
 // one of them.
-const HARM_SHAPED: Array<{ re: RegExp; label: string }> = [
-  { re: /[^?]*\?/, label: 'the question' },
+// URLs are not prose and must be excluded before any punctuation test.
+//
+// THE BUG THIS EXISTS TO PREVENT. The question-mark ban ran against the
+// raw thread body, and every thread is REQUIRED to carry the replay URL,
+// which carries "?utm_source=x&utm_medium=social&utm_campaign=newsjack".
+// So the first — and usually only — question mark in any thread was the
+// query-string delimiter. The harm register was therefore an unwinnable
+// gate from the day it shipped: no conflict-event thread could ever
+// pass, both attempts always failed, and every one fell back to the
+// mechanical template.
+//
+// The model was never at fault. It wrote no questions. The tracking
+// parameters did. #422 told the writer "NO QUESTIONS", it complied, and
+// it still failed — because the failing character was one the writer is
+// not allowed to remove.
+//
+// Measured 2026-08-26: 3 of 3 harm-register events, both attempts each.
+const URL_IN_TEXT = /https?:\/\/\S+/gi;
+const stripUrls = (s: string): string => s.replace(URL_IN_TEXT, ' ');
+
+const HARM_SHAPED: Array<{ re: RegExp; label: string; proseOnly?: boolean }> = [
+  { re: /[^?]*\?/, label: 'the question', proseOnly: true },
   { re: /\bimagine\b[^.]*/i, label: '"imagine"' },
   { re: /\bhere's the thing\b[^.]*/i, label: '"here\'s the thing"' },
   { re: /\bplot twist\b[^.]*/i, label: '"plot twist"' },
@@ -149,8 +169,10 @@ export function craftLint(
     // Same lesson as stating the rules in the prompt (#422), one level
     // down: stating a rule is not enough if the violation that enforces
     // it is anonymous.
-    for (const { re, label } of HARM_SHAPED) {
-      const m = body.match(re);
+    for (const { re, label, proseOnly } of HARM_SHAPED) {
+      // Punctuation tests run on prose only; word tests can run on the
+      // whole body, since a banned word inside a URL is not a thing.
+      const m = (proseOnly ? stripUrls(body) : body).match(re);
       if (m) {
         violations.push(
           `harm register is forced for this event: remove ${label} — found "${m[0].trim()}" — and rewrite flat`,

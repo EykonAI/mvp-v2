@@ -151,6 +151,33 @@ if (!needleBlock) {
   }
 }
 
+// ── 4 · the punctuation test must ignore URLs ──────────────────
+//
+// Every thread is REQUIRED to carry the replay URL, and that URL
+// carries "?utm_source=...". If the question-mark ban runs on the raw
+// body, the query-string delimiter IS the question mark it finds, and
+// no conflict-event thread can ever pass. That shipped, and it made the
+// harm register unwinnable: 3 of 3 events, both attempts, every time.
+//
+// This asserts the ban is marked proseOnly and that a strip helper
+// exists, so the bug cannot return by someone "simplifying" the check.
+{
+  const LINTS2 = resolve(here, '../../lib/copy/x-craft-lints.ts');
+  const src2 = readFileSync(LINTS2, 'utf8');
+
+  const questionEntry = src2.match(/\{[^}]*label:\s*'the question'[^}]*\}/);
+  if (!questionEntry) {
+    failures.push("the harm ban list no longer has a 'the question' entry");
+  } else if (!/proseOnly:\s*true/.test(questionEntry[0])) {
+    failures.push(
+      "the question-mark ban is not marked proseOnly — it will match the '?' in the mandatory ?utm_source= tracking URL, which every thread must carry, making the harm register impossible to pass",
+    );
+  }
+  if (!/stripUrls|https\?:\\\/\\\//.test(src2)) {
+    failures.push('no URL-stripping helper found in x-craft-lints.ts');
+  }
+}
+
 if (failures.length) {
   console.error('\nHARM GATE CHECK FAILED\n');
   for (const f of failures) console.error(`  ✗ ${f}`);
