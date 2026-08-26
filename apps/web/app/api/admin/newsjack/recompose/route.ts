@@ -167,6 +167,7 @@ export async function POST(req: NextRequest) {
       attempts: after.meta.attempts,
       fallbackReason: after.meta.fallbackReason,
       craftWarnings: after.meta.craftWarnings,
+      firstAttemptViolations: after.meta.firstAttemptViolations,
     });
   }
 
@@ -177,6 +178,7 @@ export async function POST(req: NextRequest) {
     scanned: rows.length,
     composedByAgent,
     fellBack,
+    neededRetry: results.filter((r: any) => (r.attempts ?? 0) > 1).length,
     results,
   });
 }

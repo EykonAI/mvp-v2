@@ -109,6 +109,12 @@ function DraftCard({ d }: { d: ReviewDraft }) {
         </div>
       )}
 
+      {d.first_attempt_violations.length > 0 && (
+        <div style={{ fontSize: 12, color: 'var(--ink-dim)', marginBottom: 10 }}>
+          Retried — first attempt failed: {d.first_attempt_violations.join(' · ')}
+        </div>
+      )}
+
       {d.craft_warnings.length > 0 && (
         <div style={{ fontSize: 12, color: 'var(--ink-dim)', marginBottom: 10 }}>
           Craft notes: {d.craft_warnings.join(' · ')}

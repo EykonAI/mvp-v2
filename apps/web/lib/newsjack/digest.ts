@@ -14,6 +14,7 @@ export interface Digest {
   topBlockReasons: Array<{ reason: string; n: number }>;
   attribution: { touches: number; signups: number };
   composer: { agent: number; template: number; fallbacks: number };
+  retries: { needed: number; topFirstAttemptViolations: Array<{ reason: string; n: number }> };
   text: string;
 }
 
@@ -65,15 +66,45 @@ export async function buildDigest(supabase: SB, windowDays = 7): Promise<Digest>
   // gets a line in the digest rather than living only in the queue.
   const { data: compData } = await supabase
     .from('newsjack_drafts')
-    .select('composer, fallback_reason')
+    .select('composer, fallback_reason, compose_attempts, lints')
     .eq('channel', 'x')
     .gte('created_at', sinceIso)
     .limit(2000);
-  const comps = (compData as Array<{ composer: string | null; fallback_reason: string | null }> | null) ?? [];
+  const comps =
+    (compData as Array<{
+      composer: string | null;
+      fallback_reason: string | null;
+      compose_attempts: number | null;
+      lints: Record<string, unknown> | null;
+    }> | null) ?? [];
   const composer = {
     agent: comps.filter((c) => c.composer === 'agent').length,
     template: comps.filter((c) => c.composer !== 'agent').length,
     fallbacks: comps.filter((c) => c.fallback_reason).length,
+  };
+
+  // WHY the retries were needed, tallied. A retry that always succeeds still
+  // costs a model call and still says the prompt is missing something
+  // systematically — but only if the reason survives the retry. It is stored
+  // on lints.firstAttempt precisely so this tally is possible.
+  const retryTally = new Map<string, number>();
+  for (const c of comps) {
+    const fa = c.lints && typeof c.lints === 'object' ? (c.lints as any).firstAttempt : null;
+    if (!Array.isArray(fa)) continue;
+    for (const v of fa) {
+      if (typeof v !== 'string') continue;
+      // Strip the row-specific numbers so "post 2 is 281 chars" and
+      // "post 4 is 274 chars" tally as one recurring cause, not two.
+      const key = v.replace(/\b\d+\b/g, 'N').slice(0, 90);
+      retryTally.set(key, (retryTally.get(key) ?? 0) + 1);
+    }
+  }
+  const retries = {
+    needed: comps.filter((c) => (c.compose_attempts ?? 0) > 1).length,
+    topFirstAttemptViolations: Array.from(retryTally.entries())
+      .map(([reason, n]) => ({ reason, n }))
+      .sort((a, b) => b.n - a.n)
+      .slice(0, 3),
   };
 
   const lines = [
@@ -83,13 +114,17 @@ export async function buildDigest(supabase: SB, windowDays = 7): Promise<Digest>
     `X copy: ${composer.agent} by the copywriter, ${composer.template} by the template` +
       (composer.fallbacks ? ` (${composer.fallbacks} fell back — check /admin/newsjack)` : ''),
   ];
+  if (retries.needed) {
+    lines.push(`retries: ${retries.needed} of ${composer.agent} agent drafts needed a second attempt`);
+    for (const r of retries.topFirstAttemptViolations) lines.push(`  ${r.n}x ${r.reason}`);
+  }
   if (topBlockReasons.length) {
     lines.push('top block reasons:');
     for (const r of topBlockReasons) lines.push(`  ${r.n}x ${r.reason}`);
   }
   const text = lines.join('\n');
 
-  return { windowDays, counts, topBlockReasons, attribution, composer, text };
+  return { windowDays, counts, topBlockReasons, attribution, composer, retries, text };
 }
 
 export async function deliverDigest(text: string): Promise<boolean> {
