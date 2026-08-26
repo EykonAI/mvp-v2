@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
   const { data, error } = await supabase
     .from('newsjack_drafts')
     .select(
-      'id, posts, ref_url, created_at, newsjack_events!inner(id, created_at, domain, region, severity, covered, status, evidence)',
+      'id, posts, ref_url, created_at, composer, composer_model, newsjack_events!inner(id, created_at, domain, region, severity, covered, status, evidence)',
     )
     .eq('channel', 'x')
     .gte('created_at', sinceIso)
@@ -100,7 +100,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ...echo, error: error.message }, { status: 500 });
   }
 
-  type Row = { id: string; posts: unknown; ref_url: string | null; created_at: string; newsjack_events: EventRow | EventRow[] | null };
+  type Row = {
+    id: string; posts: unknown; ref_url: string | null; created_at: string;
+    composer: string | null; composer_model: string | null;
+    newsjack_events: EventRow | EventRow[] | null;
+  };
   const rows = ((data as Row[] | null) ?? [])
     .map((r) => ({ ...r, ev: Array.isArray(r.newsjack_events) ? r.newsjack_events[0] : r.newsjack_events }))
     .filter((r) => r.ev && r.ev.status === 'drafted')
@@ -160,6 +164,11 @@ export async function POST(req: NextRequest) {
       stale: ageHours > STALE_AFTER_HOURS,
       publishable: ageHours <= STALE_AFTER_HOURS ? 'maybe — check the facts still hold' : 'no — the newsjack window closed',
       before,
+      // Which writer produced the ORIGINAL. Once the copywriter is live,
+      // most "before" columns are themselves agent-written, so labelling
+      // them "template" is simply false.
+      beforeComposer: r.composer ?? 'template',
+      beforeModel: r.composer_model ?? null,
       after: after.posts,
       composer: after.meta.composer,
       model: after.meta.model,

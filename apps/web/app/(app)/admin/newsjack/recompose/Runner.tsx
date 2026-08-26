@@ -20,6 +20,8 @@ interface Row {
   stale?: boolean;
   publishable?: string;
   before?: string[];
+  beforeComposer?: string;
+  beforeModel?: string | null;
   after?: string[];
   composer?: string;
   model?: string | null;
@@ -212,8 +214,15 @@ export default function Runner() {
                       </div>
                     )}
 
+                    {r.beforeComposer === 'agent' && (
+                      <div style={{ fontSize: 12, color: 'var(--ink-dim)', marginBottom: 10 }}>
+                        Both sides are agent-written — this row was drafted after the copywriter went
+                        live, so it is a re-roll, not a template comparison.
+                      </div>
+                    )}
+
                     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 16 }}>
-                      <Column label="before — template" posts={r.before ?? []} dim />
+                      <Column label={`before — ${r.beforeComposer ?? 'template'}`} posts={r.before ?? []} dim />
                       <Column label={`after — ${r.composer}`} posts={r.after ?? []} />
                     </div>
 
