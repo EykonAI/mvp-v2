@@ -27,6 +27,15 @@ export interface NewsjackDraftInput {
   lints: Record<string, unknown>;
   value_pass: boolean;
   status: 'draft' | 'approved' | 'rejected' | 'published';
+  // Which writer produced this draft (migration 114). Stamped so a
+  // silent permanent fallback to the template is visible in the queue
+  // and in the weekly digest, rather than looking like success.
+  composer?: 'agent' | 'template';
+  composer_model?: string | null;
+  codex_version?: string | null;
+  compose_attempts?: number;
+  fallback_reason?: string | null;
+  craft_warnings?: string[];
 }
 
 export async function eventExistsForSource(supabase: SB, source: string, sourceRef: string): Promise<boolean> {
@@ -70,6 +79,12 @@ export async function insertDraft(supabase: SB, d: NewsjackDraftInput): Promise<
     lints: d.lints,
     value_pass: d.value_pass,
     status: d.status,
+    composer: d.composer ?? 'template',
+    composer_model: d.composer_model ?? null,
+    codex_version: d.codex_version ?? null,
+    compose_attempts: d.compose_attempts ?? 0,
+    fallback_reason: d.fallback_reason ?? null,
+    craft_warnings: d.craft_warnings ?? [],
   });
   return !error;
 }
@@ -91,6 +106,11 @@ export interface ReviewDraft {
   covered: boolean;
   event_status: string;
   blocked_reason: string | null;
+  composer: string;
+  composer_model: string | null;
+  codex_version: string | null;
+  fallback_reason: string | null;
+  craft_warnings: string[];
 }
 
 interface DraftJoinRow {
@@ -102,6 +122,11 @@ interface DraftJoinRow {
   value_pass: boolean;
   status: string;
   created_at: string;
+  composer: string | null;
+  composer_model: string | null;
+  codex_version: string | null;
+  fallback_reason: string | null;
+  craft_warnings: unknown;
   newsjack_events:
     | { domain: string | null; region: string | null; severity: string | null; covered: boolean; status: string; blocked_reason: string | null }
     | { domain: string | null; region: string | null; severity: string | null; covered: boolean; status: string; blocked_reason: string | null }[]
@@ -112,7 +137,7 @@ export async function listDrafts(supabase: SB, limit = 50): Promise<ReviewDraft[
   const { data } = await supabase
     .from('newsjack_drafts')
     .select(
-      'id, event_id, channel, posts, ref_url, value_pass, status, created_at, newsjack_events!inner(domain, region, severity, covered, status, blocked_reason)',
+      'id, event_id, channel, posts, ref_url, value_pass, status, created_at, composer, composer_model, codex_version, fallback_reason, craft_warnings, newsjack_events!inner(domain, region, severity, covered, status, blocked_reason)',
     )
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -134,6 +159,11 @@ export async function listDrafts(supabase: SB, limit = 50): Promise<ReviewDraft[
       covered: ev?.covered ?? true,
       event_status: ev?.status ?? 'unknown',
       blocked_reason: ev?.blocked_reason ?? null,
+      composer: r.composer ?? 'template',
+      composer_model: r.composer_model ?? null,
+      codex_version: r.codex_version ?? null,
+      fallback_reason: r.fallback_reason ?? null,
+      craft_warnings: Array.isArray(r.craft_warnings) ? (r.craft_warnings as string[]) : [],
     };
   });
 }
@@ -203,4 +233,20 @@ export async function markPublished(supabase: SB, draftId: string, url: string |
   if (error) return false;
   await setEventStatus(supabase, draft.event_id, 'published');
   return true;
+}
+
+// The last N X leads we drafted, newest first. Feeds the near-duplicate
+// craft check: at 4–8 posts a quarter, two threads opening the same way
+// is a visible tic, and nothing else in the pipeline would catch it.
+export async function recentLeads(supabase: SB, limit = 10): Promise<string[]> {
+  const { data } = await supabase
+    .from('newsjack_drafts')
+    .select('posts')
+    .eq('channel', 'x')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  const rows = (data as { posts: unknown }[] | null) ?? [];
+  return rows
+    .map((r) => (Array.isArray(r.posts) ? (r.posts as string[])[0] : null))
+    .filter((s): s is string => typeof s === 'string' && s.length > 0);
 }

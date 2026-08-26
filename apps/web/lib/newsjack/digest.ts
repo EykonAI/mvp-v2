@@ -13,6 +13,7 @@ export interface Digest {
   counts: Record<string, number>;
   topBlockReasons: Array<{ reason: string; n: number }>;
   attribution: { touches: number; signups: number };
+  composer: { agent: number; template: number; fallbacks: number };
   text: string;
 }
 
@@ -58,10 +59,29 @@ export async function buildDigest(supabase: SB, windowDays = 7): Promise<Digest>
 
   const attribution = { touches: touches ?? 0, signups };
 
+  // Which writer produced this week's X drafts, and how often the
+  // copywriter fell back. A silent permanent fallback is the failure
+  // mode the whole composer design is built to make visible, so it
+  // gets a line in the digest rather than living only in the queue.
+  const { data: compData } = await supabase
+    .from('newsjack_drafts')
+    .select('composer, fallback_reason')
+    .eq('channel', 'x')
+    .gte('created_at', sinceIso)
+    .limit(2000);
+  const comps = (compData as Array<{ composer: string | null; fallback_reason: string | null }> | null) ?? [];
+  const composer = {
+    agent: comps.filter((c) => c.composer === 'agent').length,
+    template: comps.filter((c) => c.composer !== 'agent').length,
+    fallbacks: comps.filter((c) => c.fallback_reason).length,
+  };
+
   const lines = [
     `Newsjack digest — last ${windowDays} days`,
     `detected ${counts.detected} · drafted ${counts.drafted} · blocked ${counts.blocked} · approved ${counts.approved} · published ${counts.published} · rejected ${counts.rejected}`,
     `attribution: ${attribution.touches} tagged visits, ${attribution.signups} signups`,
+    `X copy: ${composer.agent} by the copywriter, ${composer.template} by the template` +
+      (composer.fallbacks ? ` (${composer.fallbacks} fell back — check /admin/newsjack)` : ''),
   ];
   if (topBlockReasons.length) {
     lines.push('top block reasons:');
@@ -69,7 +89,7 @@ export async function buildDigest(supabase: SB, windowDays = 7): Promise<Digest>
   }
   const text = lines.join('\n');
 
-  return { windowDays, counts, topBlockReasons, attribution, text };
+  return { windowDays, counts, topBlockReasons, attribution, composer, text };
 }
 
 export async function deliverDigest(text: string): Promise<boolean> {

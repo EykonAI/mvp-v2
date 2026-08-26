@@ -85,6 +85,26 @@ export const EDITORIAL_MODEL =
 export const ANOMALY_REPORT_MODEL =
   process.env.ANOMALY_REPORT_MODEL || 'claude-haiku-4-5';
 
+// The X copywriter (lib/copy/x-composer.ts): composes the newsjack X
+// thread from an already-grounded evidence package.
+//
+// WHY SONNET AND NOT HAIKU, i.e. the opposite call to the one three
+// lines above. That decision was about a repetitive job at volume:
+// ~5.7 anomaly reports an HOUR, where the model writes a short
+// summary from evidence the tools already fetched, and the choice was
+// worth ~$115/month.
+//
+// This is the opposite shape. The SOP targets 4–8 newsjack events per
+// 90 DAYS, so this fires roughly once a fortnight plus the occasional
+// retry — cents per quarter at any tier. And the output is the entire
+// public voice of the platform on the one channel where it does
+// organic acquisition. Economising here saves nothing measurable and
+// risks the only copy a cold reader ever sees.
+//
+// Env override: COPYWRITER_MODEL.
+export const COPYWRITER_MODEL =
+  process.env.COPYWRITER_MODEL || 'claude-sonnet-5';
+
 // Models a session row may carry. Anything else is rejected on write.
 export function allowedSessionModels(): string[] {
   return [DEFAULT_ANALYST_MODEL, DEEP_ANALYSIS_MODEL];
