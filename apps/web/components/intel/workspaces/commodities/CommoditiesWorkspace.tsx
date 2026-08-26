@@ -1,4 +1,5 @@
 'use client';
+import { Button } from '@/components/ui/button';
 import { useEffect, useState } from 'react';
 import { usePersona } from '@/components/intel/shell/PersonaContext';
 import Sparkline from '@/components/intel/shared/Sparkline';
@@ -299,7 +300,7 @@ export default function CommoditiesWorkspace() {
                   </div>
                 ))}
               </div>
-              <div className="eyebrow" style={{ marginTop: 8 }}>
+              <div className="eyebrow mt-[8px]" >
                 {markets.export_shares.source} · {markets.export_shares.period}
                 {markets.export_shares.layer !== 'comtrade' && (
                   // The reader must always know whether this is a live
@@ -345,7 +346,7 @@ export default function CommoditiesWorkspace() {
                 stroke="var(--amber)"
                 fill="rgba(212, 162, 76, 0.14)"
               />
-              <div className="flex items-baseline justify-between" style={{ marginTop: 8 }}>
+              <div className="flex items-baseline justify-between mt-[8px]" >
                 <span className="eyebrow">
                   Spot · {markets.prices.series.length} obs ·{' '}
                   {markets.prices.source === 'eia_spot' ? 'EIA daily' : 'IMF PCPS monthly'}
@@ -398,7 +399,7 @@ export default function CommoditiesWorkspace() {
               )}
             </>
           ) : (
-            <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
+            <p className="text-[12px] leading-[1.5] text-eykon-ink-dim">
               {marketsLoading
                 ? 'Loading price series…'
                 : 'No sourced price series yet — awaiting the commodity_prices ingest for this instrument.'}
@@ -409,7 +410,7 @@ export default function CommoditiesWorkspace() {
         <Panel title="03 · Chokepoint Transits · 24h">
           {!liveError && live?.chokepoints?.length ? (
             <>
-              <div className="eyebrow" style={{ marginBottom: 8 }}>
+              <div className="eyebrow mb-[8px]" >
                 {live.chokepoints[0].latest_period}
               </div>
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontFamily: 'var(--f-mono)', fontSize: 11 }}>
@@ -419,7 +420,7 @@ export default function CommoditiesWorkspace() {
                     className="flex items-center justify-between"
                     style={{ gap: 8, padding: '4px 0', borderBottom: '1px solid var(--rule-soft)' }}
                   >
-                    <span style={{ color: 'var(--ink-dim)' }}>{cp.label}</span>
+                    <span className="text-eykon-ink-dim">{cp.label}</span>
                     {cp.no_data ? (
                       // Uncovered corridor: the feed has not delivered a
                       // look for days_since days. NO DATA is the honest
@@ -466,7 +467,7 @@ export default function CommoditiesWorkspace() {
               )}
             </>
           ) : (
-            <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
+            <p className="text-[12px] leading-[1.5] text-eykon-ink-dim">
               {!liveError && live === null ? 'Loading live transit feed…' : 'Live transit feed unavailable'}
             </p>
           )}
@@ -519,7 +520,7 @@ export default function CommoditiesWorkspace() {
               </p>
             </>
           ) : (
-            <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
+            <p className="text-[12px] leading-[1.5] text-eykon-ink-dim">
               {marketsLoading ? 'Computing risk bands…' : 'Risk bands unavailable — OFAC and conflict feeds could not be read.'}
             </p>
           )}
@@ -549,7 +550,7 @@ export default function CommoditiesWorkspace() {
                   Maritime degraded — {markets.ribbon.maritime_degraded_reason}
                 </p>
               )}
-              <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
+              <p className="text-[12px] leading-[1.5] text-eykon-ink-dim">
                 HEURISTIC · live anomaly densities · 72h — severity- and recency-weighted Maritime + Energy
                 anomaly flags ({markets.ribbon.inputs.flags_72h} in window), decayed over the next three days.
               </p>
@@ -575,7 +576,7 @@ export default function CommoditiesWorkspace() {
               </div>
             </>
           ) : (
-            <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
+            <p className="text-[12px] leading-[1.5] text-eykon-ink-dim">
               {marketsLoading ? 'Loading anomaly densities…' : 'Anomaly density feed unavailable — no ribbon rendered.'}
             </p>
           )}
@@ -586,7 +587,7 @@ export default function CommoditiesWorkspace() {
             {!liveError && live?.eia ? (
               <>
                 <Sparkline values={live.eia.series} width={420} height={120} stroke="var(--amber)" fill="rgba(212, 162, 76, 0.14)" />
-                <div className="flex items-baseline justify-between" style={{ marginTop: 8 }}>
+                <div className="flex items-baseline justify-between mt-[8px]" >
                   <span className="eyebrow">Week of {live.eia.latest.period}</span>
                   <span className="flex items-baseline" style={{ gap: 8 }}>
                     {live.eia.weekly_delta_pct != null && (
@@ -601,7 +602,7 @@ export default function CommoditiesWorkspace() {
                 </div>
               </>
             ) : (
-              <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
+              <p className="text-[12px] leading-[1.5] text-eykon-ink-dim">
                 {!liveError && live === null ? 'Loading EIA inventory feed…' : 'EIA inventory feed unavailable'}
               </p>
             )}
@@ -624,11 +625,11 @@ export default function CommoditiesWorkspace() {
           }
         >
           {!shipments ? (
-            <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>Loading shipments…</p>
+            <p className="text-[12px] leading-[1.5] text-eykon-ink-dim">Loading shipments…</p>
           ) : !shipments.supported ? (
-            <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>{shipments.reason}</p>
+            <p className="text-[12px] leading-[1.5] text-eykon-ink-dim">{shipments.reason}</p>
           ) : shipments.rows.length === 0 ? (
-            <p style={{ fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.5 }}>
+            <p className="text-[12px] leading-[1.5] text-eykon-ink-dim">
               No inferred shipments in the current window
               {shipments.feed_stale_days ? ` — AIS feed stale ${shipments.feed_stale_days}d, derivation frozen at the last covered day.` : '.'}
             </p>
@@ -717,20 +718,20 @@ export default function CommoditiesWorkspace() {
         style={{ gap: 8, padding: 10, background: 'var(--bg-panel)', border: '1px solid var(--rule-soft)' }}
       >
         <a href={`/api/intel/commodities/export?commodity=${selected}&format=pdf`} style={{ textDecoration: 'none' }}>
-          <button style={footerBtn}>◆ Export PDF</button>
+          <Button variant="eykonToolbar" size="eykonToolbar">◆ Export PDF</Button>
         </a>
         <a href={`/api/intel/commodities/export?commodity=${selected}&format=json`} style={{ textDecoration: 'none' }}>
-          <button style={footerBtn}>Export JSON</button>
+          <Button variant="eykonToolbar" size="eykonToolbar">Export JSON</Button>
         </a>
         <span className="eyebrow" style={{ fontSize: 8 }}>live payload snapshot</span>
-        <button style={footerBtn} onClick={draftMemo} disabled={memoState === 'drafting'}>
+        <Button variant="eykonToolbar" size="eykonToolbar" onClick={draftMemo} disabled={memoState === 'drafting'}>
           {memoState === 'drafting'
             ? 'Drafting…'
             : `Draft ${persona === 'day-trader' ? 'trade memo' : persona === 'journalist' ? 'lead brief' : 'commodities memo'}`}
-        </button>
+        </Button>
         <span className="eyebrow" style={{ fontSize: 8 }}>analyst engine · Pro</span>
         <a href={`/api/intel/commodities/compliance?commodity=${selected}`} style={{ textDecoration: 'none' }}>
-          <button style={footerBtn}>Compliance review</button>
+          <Button variant="eykonToolbar" size="eykonToolbar">Compliance review</Button>
         </a>
         <span className="eyebrow" style={{ fontSize: 8 }}>deterministic OFAC snapshot · no LLM</span>
       </div>
@@ -746,8 +747,8 @@ export default function CommoditiesWorkspace() {
           <div className="flex items-center justify-between" style={{ marginBottom: 8, gap: 8 }}>
             <span className="eyebrow">{memo.label}</span>
             <span className="flex" style={{ gap: 6 }}>
-              <button style={footerBtn} onClick={() => navigator.clipboard?.writeText(memo.text)}>Copy</button>
-              <button style={footerBtn} onClick={() => setMemo(null)}>Dismiss</button>
+              <Button variant="eykonToolbar" size="eykonToolbar" onClick={() => navigator.clipboard?.writeText(memo.text)}>Copy</Button>
+              <Button variant="eykonToolbar" size="eykonToolbar" onClick={() => setMemo(null)}>Dismiss</Button>
             </span>
           </div>
           <div style={{ fontSize: 12.5, color: 'var(--ink)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{memo.text}</div>

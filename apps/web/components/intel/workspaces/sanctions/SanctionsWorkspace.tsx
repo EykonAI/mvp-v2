@@ -242,7 +242,7 @@ export default function SanctionsWorkspace() {
             <div className="flex flex-col" style={{ gap: 4, fontFamily: 'var(--f-mono)', fontSize: 11 }}>
               {result.top_affected.map((r, i) => (
                 <div key={i} className="flex items-baseline justify-between" style={{ padding: '4px 0', borderBottom: '1px solid var(--rule-soft)' }}>
-                  <span style={{ color: 'var(--ink-dim)' }}>{r.label}</span>
+                  <span className="text-eykon-ink-dim">{r.label}</span>
                   <span style={{ color: 'var(--violet)' }}>{r.weighted_hop_distance.toFixed(2)}</span>
                 </div>
               ))}
@@ -376,7 +376,7 @@ function NetworkGraph({ result }: { result: SanctionsOutput | null }) {
 
 function PanelHead({ children, accent = 'var(--teal)' }: { children: React.ReactNode; accent?: string }) {
   return (
-    <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    <h3 className="panel-title flex items-center gap-[8px]" >
       <span style={{ width: 3, height: 12, background: accent }} />
       {children}
     </h3>

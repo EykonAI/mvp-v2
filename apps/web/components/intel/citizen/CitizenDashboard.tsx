@@ -56,7 +56,7 @@ export default function CitizenDashboard() {
 
       {/* Live preview section */}
       <section>
-        <h2 className="panel-title" style={{ marginBottom: 12 }}>
+        <h2 className="panel-title mb-[12px]" >
           <span className="idx">01</span>Live for Observer
         </h2>
         <Link
@@ -118,7 +118,7 @@ export default function CitizenDashboard() {
 
       {/* Inert tiles section */}
       <section>
-        <h2 className="panel-title" style={{ marginBottom: 12 }}>
+        <h2 className="panel-title mb-[12px]" >
           <span className="idx">02</span>Unlocked with Pro
         </h2>
         <p style={{ fontSize: 12, color: 'var(--ink-faint)', marginBottom: 14, maxWidth: 720 }}>

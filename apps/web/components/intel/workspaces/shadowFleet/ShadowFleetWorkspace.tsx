@@ -364,13 +364,13 @@ function BoardStrip({
       <span style={{ marginLeft: 'auto', fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--ink-dim)', whiteSpace: 'nowrap' }}>
         {summary && summary.open != null && (
           <>
-            <span style={{ color: 'var(--red)' }}>{summary.open} open</span>
+            <span className="text-eykon-red">{summary.open} open</span>
             {' · 24h: '}{summary.reappeared_24h ?? 0} back / {summary.still_dark_24h ?? 0} not re-observed / {summary.void_24h ?? 0} void
             {' · '}
           </>
         )}
         DATA CLOCK{' '}
-        <span style={{ color: 'var(--teal)' }}>
+        <span className="text-eykon-teal">
           {dataClock ? `${dataClock.slice(0, 16).replace('T', ' ')}Z` : '—'}
         </span>
         {feedLag != null && ` · lag ${feedLag}m`}
@@ -474,7 +474,7 @@ function EventRow({ ev, active, onClick }: { ev: DarkEvent; active: boolean; onC
           <span style={{ color: 'var(--red)', fontWeight: 500 }}> · OFAC DESIGNATED (IMO)</span>
         )}
         {ev.indicators?.ofac_name_match === 1 && (
-          <span style={{ color: 'var(--amber)' }}> · OFAC NAME (weak match)</span>
+          <span className="text-eykon-amber"> · OFAC NAME (weak match)</span>
         )}
       </div>
     </button>
@@ -800,8 +800,8 @@ function EventDossier({ ev, dataClock }: { ev: DarkEvent; dataClock: string | nu
 
       {ev.status !== 'open' && (
         <div style={{ padding: '9px 13px', borderBottom: '1px solid var(--rule-soft)', fontFamily: 'var(--f-mono)', fontSize: 9.5, lineHeight: 1.6, color: 'var(--ink-dim)' }}>
-          {ev.resolution === 'reappeared' && <>Resolved <b style={{ color: 'var(--teal)' }}>REAPPEARED</b> — a newer fix was observed; the gap closed at {ev.final_gap_hours?.toFixed(1)} h.</>}
-          {ev.resolution === 'still_dark' && <>Resolved <b style={{ color: 'var(--amber)' }}>NOT RE-OBSERVED</b> — no fix reached our coverage within 72 h. A statement about the instrument's view, never proof the transponder was off.</>}
+          {ev.resolution === 'reappeared' && <>Resolved <b className="text-eykon-teal">REAPPEARED</b> — a newer fix was observed; the gap closed at {ev.final_gap_hours?.toFixed(1)} h.</>}
+          {ev.resolution === 'still_dark' && <>Resolved <b className="text-eykon-amber">NOT RE-OBSERVED</b> — no fix reached our coverage within 72 h. A statement about the instrument's view, never proof the transponder was off.</>}
           {ev.status === 'void' && <>VOID — <b>{ev.void_reason}</b>. The box measuring this silence went dead; the claim resolves neither way. Absence of an observation is not a result.</>}
         </div>
       )}
@@ -909,7 +909,7 @@ function Fact({ k, v, accent = false }: { k: string; v: string; accent?: boolean
 
 function PanelHead({ children }: { children: React.ReactNode }) {
   return (
-    <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    <h3 className="panel-title flex items-center gap-[8px]" >
       <span style={{ width: 3, height: 12, background: 'var(--red)' }} />
       {children}
     </h3>
@@ -985,8 +985,8 @@ function IndicatorMath({ indicators, composite }: { indicators: Record<string, n
       {terms.map(t => (
         <div key={t.key} style={{ padding: '4px 0', borderBottom: '1px solid var(--rule-soft)' }}>
           <div className="flex items-center justify-between">
-            <span style={{ color: 'var(--ink-dim)' }}>{prettyKey(t.key)}</span>
-            <span style={{ color: 'var(--red)' }}>{t.contribution >= 0 ? '+' : ''}{t.contribution.toFixed(3)}</span>
+            <span className="text-eykon-ink-dim">{prettyKey(t.key)}</span>
+            <span className="text-eykon-red">{t.contribution >= 0 ? '+' : ''}{t.contribution.toFixed(3)}</span>
           </div>
           <div style={{ color: 'var(--ink-faint)', fontSize: 9.5, marginTop: 1 }}>
             {t.value.toFixed(2)} × {t.weight}
@@ -994,11 +994,11 @@ function IndicatorMath({ indicators, composite }: { indicators: Record<string, n
         </div>
       ))}
       <div className="flex items-center justify-between" style={{ padding: '4px 0', borderBottom: '1px solid var(--rule-soft)' }}>
-        <span style={{ color: 'var(--ink-dim)' }}>intercept</span>
-        <span style={{ color: 'var(--ink-dim)' }}>{weights.intercept.toFixed(3)}</span>
+        <span className="text-eykon-ink-dim">intercept</span>
+        <span className="text-eykon-ink-dim">{weights.intercept.toFixed(3)}</span>
       </div>
       <div className="flex items-center justify-between" style={{ padding: '6px 0 2px' }}>
-        <span style={{ color: 'var(--ink-dim)' }}>z = {z.toFixed(3)}</span>
+        <span className="text-eykon-ink-dim">z = {z.toFixed(3)}</span>
         <span style={{ color: 'var(--red)', fontSize: 12 }}>{(composite * 100).toFixed(0)}</span>
       </div>
       {typeof indicators?.silence_hours === 'number' && typeof indicators?.cadence_hours === 'number' && (

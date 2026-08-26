@@ -83,7 +83,7 @@ export default function PostureViewport() {
             </button>
           ))}
         </div>
-        <span className="eyebrow" style={{ color: 'var(--ink-faint)' }}>
+        <span className="eyebrow text-eykon-ink-faint" >
           {theatres.length} theatres pinned
         </span>
       </div>
@@ -268,7 +268,7 @@ function PostureDecompose({ theatre }: { theatre: Theatre }) {
       }}
     >
       <section style={{ background: 'var(--bg-panel)', padding: 12, minWidth: 0 }}>
-        <div className="eyebrow" style={{ marginBottom: 8 }}>5-Domain Score</div>
+        <div className="eyebrow mb-[8px]" >5-Domain Score</div>
         <div className="flex flex-col" style={{ gap: 6 }}>
           {segs.map(s => (
             <div key={s.key} className="flex items-center" style={{ gap: 10 }}>
@@ -285,7 +285,7 @@ function PostureDecompose({ theatre }: { theatre: Theatre }) {
       </section>
 
       <section style={{ background: 'var(--bg-panel)', padding: 12, minWidth: 0 }}>
-        <div className="eyebrow" style={{ marginBottom: 8 }}>Precursor Analogs · Top 3</div>
+        <div className="eyebrow mb-[8px]" >Precursor Analogs · Top 3</div>
         <div className="flex flex-col" style={{ gap: 6 }}>
           {(theatre.precursor_match_id && theatre.precursor_similarity
             ? [{ id: theatre.precursor_match_id, sim: theatre.precursor_similarity }]
@@ -306,7 +306,7 @@ function PostureDecompose({ theatre }: { theatre: Theatre }) {
       </section>
 
       <section style={{ background: 'var(--bg-panel)', padding: 12, minWidth: 0 }}>
-        <div className="eyebrow" style={{ marginBottom: 8 }}>30-Day Trajectory</div>
+        <div className="eyebrow mb-[8px]" >30-Day Trajectory</div>
         <Sparkline
           values={theatre.last_30d_composite ?? []}
           width={260}
@@ -316,7 +316,7 @@ function PostureDecompose({ theatre }: { theatre: Theatre }) {
           min={0}
           max={1}
         />
-        <div className="flex items-baseline justify-between" style={{ marginTop: 8 }}>
+        <div className="flex items-baseline justify-between mt-[8px]" >
           <span className="eyebrow">Composite</span>
           <span className="num-lg" style={{ fontSize: 18, color: 'var(--ink)' }}>
             {theatre.composite.toFixed(2)}

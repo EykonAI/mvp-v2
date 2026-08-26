@@ -189,7 +189,7 @@ export default function RegimeShiftsWorkspace() {
         minHeight: 620,
       }}
     >
-      <aside style={{ background: 'var(--bg-navy)', padding: 14 }}>
+      <aside className="bg-eykon-bg-navy p-[14px]">
         <Head accent="var(--amber)">Pinned Theatres</Head>
         {data.degraded && (
           <p className="eyebrow" style={{ marginTop: 8, color: 'var(--ink-faint)' }}>
@@ -308,7 +308,7 @@ export default function RegimeShiftsWorkspace() {
         )}
       </section>
 
-      <aside style={{ background: 'var(--bg-navy)', padding: 14 }}>
+      <aside className="bg-eykon-bg-navy p-[14px]">
         <Head accent="var(--amber)">Per-Signal Shift</Head>
         <div className="flex flex-col" style={{ gap: 4, marginTop: 10 }}>
           {active?.signals.map(s => (
@@ -601,9 +601,9 @@ function PersistenceStrip({ signals }: { signals: Signal[] }) {
                 })}
               </span>
               {s.ingest_sensitive ? (
-                <span style={{ color: 'var(--ink-faint)' }}>never attributes</span>
+                <span className="text-eykon-ink-faint">never attributes</span>
               ) : held >= 2 ? (
-                <span style={{ color: 'var(--amber)' }}>held {held} nights</span>
+                <span className="text-eykon-amber">held {held} nights</span>
               ) : null}
             </div>
           );
@@ -874,7 +874,7 @@ function Timeline({ signal }: { signal: Signal | undefined }) {
 
 function Head({ children, accent = 'var(--teal)' }: { children: React.ReactNode; accent?: string }) {
   return (
-    <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    <h3 className="panel-title flex items-center gap-[8px]" >
       <span style={{ width: 3, height: 12, background: accent }} />
       {children}
     </h3>

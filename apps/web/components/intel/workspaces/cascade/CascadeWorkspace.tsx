@@ -244,8 +244,8 @@ export default function CascadeWorkspace() {
             <div className="flex flex-col" style={{ gap: 4, fontFamily: 'var(--f-mono)', fontSize: 11 }}>
               {result.substitution_cost.map((s, i) => (
                 <div key={i} className="flex items-baseline justify-between" style={{ padding: '4px 0', borderBottom: '1px solid var(--rule-soft)' }}>
-                  <span style={{ color: 'var(--ink-dim)' }}>{s.from} → {s.to}</span>
-                  <span style={{ color: 'var(--amber)' }}>+${s.cost_usd_bbl.toFixed(2)}/bbl</span>
+                  <span className="text-eykon-ink-dim">{s.from} → {s.to}</span>
+                  <span className="text-eykon-amber">+${s.cost_usd_bbl.toFixed(2)}/bbl</span>
                 </div>
               ))}
             </div>
@@ -372,7 +372,7 @@ function DagVisualisation({ result, seed }: { result: CascadeOutput | null; seed
 
 function PanelHead({ children, accent = 'var(--teal)' }: { children: React.ReactNode; accent?: string }) {
   return (
-    <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    <h3 className="panel-title flex items-center gap-[8px]" >
       <span style={{ width: 3, height: 12, background: accent }} />
       {children}
     </h3>

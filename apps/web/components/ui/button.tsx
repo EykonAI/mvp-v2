@@ -28,6 +28,11 @@ const buttonVariants = cva(
           "rounded-sm border border-eykon-teal bg-eykon-teal font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-eykon-bg-void hover:bg-eykon-teal-dim hover:border-eykon-teal-dim",
         eykonGhost:
           "rounded-sm border border-eykon-rule-strong bg-transparent font-mono text-[10.5px] uppercase tracking-[0.14em] text-eykon-ink-dim hover:bg-eykon-bg-raised hover:text-eykon-ink",
+        /* Workspace toolbar/footer button — the raised-surface variant the
+         * INTEL workspaces hand-rolled. Same look, but with hover and
+         * focus-visible, which the inline version could not have. */
+        eykonToolbar:
+          "rounded-sm border border-eykon-rule bg-eykon-bg-raised font-mono text-[10.5px] uppercase tracking-[0.12em] text-eykon-ink hover:bg-eykon-bg-hover hover:border-eykon-rule-strong",
         eykonDanger:
           "rounded-sm border border-eykon-red/50 bg-transparent font-mono text-[10.5px] uppercase tracking-[0.14em] text-eykon-red hover:bg-eykon-red/10",
       },
@@ -39,6 +44,7 @@ const buttonVariants = cva(
         /* Matches the padding the inline styles used. */
         eykon: "h-auto px-3.5 py-2",
         eykonSm: "h-auto px-2.5 py-1",
+        eykonToolbar: "h-auto px-2.5 py-1.5",
       },
     },
     defaultVariants: {
