@@ -96,7 +96,7 @@ export const CODEX_RULES: CodexRule[] = [
   },
   {
     id: 'invite-a-reply',
-    rule: 'Replies are the heaviest positive ranking signal, above reposts, bookmarks and likes. End on something a knowledgeable reader can answer, disagree with, or add to — never on applause-bait or a rhetorical question.',
+    rule: 'Replies are the heaviest positive ranking signal, above reposts, bookmarks and likes. End on something a knowledgeable reader can answer, disagree with, or add to — never on applause-bait or a rhetorical question. EXCEPTION: when the harm register is active this rule is suspended entirely — no questions at all, end on the statement.',
     verified: false,
     verifiedOn: '2026-08-26',
     source: 'Secondary: consistent across 2026 write-ups of the ranking model.',
