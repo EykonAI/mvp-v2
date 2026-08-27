@@ -2,7 +2,9 @@ import { createServerSupabase } from '@/lib/supabase-server';
 import { runAnalyst } from '@/lib/intelligence-analyst/run';
 import { isCoveredRegion, framingFor } from '@/lib/newsjack/coverage';
 import { voiceLint, coverageLint, valueTest } from '@/lib/newsjack/lints';
-import { renderXThread, renderLinkedIn, renderSubstack, threadToBody, type Evidence } from '@/lib/newsjack/template';
+import { threadToBody, type Evidence } from '@/lib/newsjack/template';
+import { CHANNEL_WRITERS } from '@/lib/copy/register';
+import { composeForChannel } from '@/lib/copy/shared/compose';
 import { composeXThread } from '@/lib/copy/x-composer';
 import { eventExistsForSource, insertEvent, insertDraft, recentLeads as fetchRecentLeads } from '@/lib/newsjack/store';
 import { notifyFounder } from '@/lib/newsjack/notify';
@@ -174,29 +176,37 @@ export async function runDetectTick(supabase: SB): Promise<TickResult> {
       craft_warnings: x.meta.craftWarnings,
     });
 
+    // Non-X channels, through the registry (multi-channel foundation).
+    // LinkedIn and Substack ride the exact renderers that always wrote
+    // them, so their rows are unchanged; reddit / discord / tiktok are
+    // template-written until their agents ship and their flags turn on.
+    // Only when the event passed — no variants of a blocked event, which
+    // is the behaviour this block has always had.
     if (!blocked) {
-      const li = renderLinkedIn(evidence);
-      await insertDraft(supabase, {
-        event_id: eventId,
-        channel: 'linkedin',
-        body: li.body,
-        posts: [li.body],
-        ref_url: li.refUrl,
-        lints: { voice: voiceLint(li.body), coverage: coverageLint(li.body) },
-        value_pass: voiceLint(li.body).ok && coverageLint(li.body).ok,
-        status: 'draft',
-      });
-      const sub = renderSubstack(evidence);
-      await insertDraft(supabase, {
-        event_id: eventId,
-        channel: 'substack',
-        body: sub.body,
-        posts: [sub.body],
-        ref_url: sub.refUrl,
-        lints: { voice: voiceLint(sub.body), coverage: coverageLint(sub.body) },
-        value_pass: voiceLint(sub.body).ok && coverageLint(sub.body).ok,
-        status: 'draft',
-      });
+      for (const w of CHANNEL_WRITERS) {
+        if (w.channel === 'x') continue;
+        const r = await composeForChannel(w, evidence, recentLeads);
+        const v = voiceLint(r.artifact.body);
+        const c = coverageLint(r.artifact.body);
+        await insertDraft(supabase, {
+          event_id: eventId,
+          channel: w.channel,
+          body: r.artifact.body,
+          posts: r.artifact.posts,
+          ref_url: r.artifact.refUrl,
+          lints: r.meta.firstAttemptViolations.length
+            ? { voice: v, coverage: c, firstAttempt: r.meta.firstAttemptViolations }
+            : { voice: v, coverage: c },
+          value_pass: v.ok && c.ok,
+          status: 'draft',
+          composer: r.meta.composer,
+          composer_model: r.meta.model,
+          codex_version: r.meta.codexVersion,
+          compose_attempts: r.meta.attempts,
+          fallback_reason: r.meta.fallbackReason,
+          craft_warnings: r.meta.craftWarnings,
+        });
+      }
     }
 
     if (blocked) {

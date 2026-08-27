@@ -42,6 +42,7 @@ const KNOWN_CHANNELS: Record<string, { source: string; medium: string | null }> 
   telegram: { source: 'telegram', medium: 'social' },
   substack: { source: 'substack', medium: 'email' },
   youtube: { source: 'youtube', medium: 'social' },
+  tiktok: { source: 'tiktok', medium: 'social' },
   newsjack: { source: 'newsjack', medium: 'referral' },
   proactive: { source: 'proactive', medium: 'referral' },
   fp: { source: 'founding_partner', medium: 'referral' },

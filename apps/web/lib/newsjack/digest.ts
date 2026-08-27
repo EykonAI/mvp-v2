@@ -13,7 +13,7 @@ export interface Digest {
   counts: Record<string, number>;
   topBlockReasons: Array<{ reason: string; n: number }>;
   attribution: { touches: number; signups: number };
-  composer: { agent: number; template: number; fallbacks: number };
+  composer: Record<string, { agent: number; template: number; fallbacks: number }>;
   retries: { needed: number; topFirstAttemptViolations: Array<{ reason: string; n: number }> };
   text: string;
 }
@@ -64,24 +64,31 @@ export async function buildDigest(supabase: SB, windowDays = 7): Promise<Digest>
   // copywriter fell back. A silent permanent fallback is the failure
   // mode the whole composer design is built to make visible, so it
   // gets a line in the digest rather than living only in the queue.
+  // ALL composed channels, broken out per channel — a silent permanent
+  // fallback on one channel is invisible inside an aggregate, and the
+  // per-channel line each week is what makes it readable (mig 116
+  // un-partitioned the composer index for exactly this read).
   const { data: compData } = await supabase
     .from('newsjack_drafts')
-    .select('composer, fallback_reason, compose_attempts, lints')
-    .eq('channel', 'x')
+    .select('channel, composer, fallback_reason, compose_attempts, lints')
     .gte('created_at', sinceIso)
     .limit(2000);
   const comps =
     (compData as Array<{
+      channel: string;
       composer: string | null;
       fallback_reason: string | null;
       compose_attempts: number | null;
       lints: Record<string, unknown> | null;
     }> | null) ?? [];
-  const composer = {
-    agent: comps.filter((c) => c.composer === 'agent').length,
-    template: comps.filter((c) => c.composer !== 'agent').length,
-    fallbacks: comps.filter((c) => c.fallback_reason).length,
-  };
+  const composer: Record<string, { agent: number; template: number; fallbacks: number }> = {};
+  for (const c of comps) {
+    const ch = c.channel || 'unknown';
+    composer[ch] ??= { agent: 0, template: 0, fallbacks: 0 };
+    if (c.composer === 'agent') composer[ch].agent++;
+    else composer[ch].template++;
+    if (c.fallback_reason) composer[ch].fallbacks++;
+  }
 
   // WHY the retries were needed, tallied. A retry that always succeeds still
   // costs a model call and still says the prompt is missing something
@@ -111,11 +118,12 @@ export async function buildDigest(supabase: SB, windowDays = 7): Promise<Digest>
     `Newsjack digest — last ${windowDays} days`,
     `detected ${counts.detected} · drafted ${counts.drafted} · blocked ${counts.blocked} · approved ${counts.approved} · published ${counts.published} · rejected ${counts.rejected}`,
     `attribution: ${attribution.touches} tagged visits, ${attribution.signups} signups`,
-    `X copy: ${composer.agent} by the copywriter, ${composer.template} by the template` +
-      (composer.fallbacks ? ` (${composer.fallbacks} fell back — check /admin/newsjack)` : ''),
+    ...Object.entries(composer).map(([ch, n]) =>
+      `${ch} copy: ${n.agent} by the copywriter, ${n.template} by the template` +
+      (n.fallbacks ? ` (${n.fallbacks} fell back — check /admin/newsjack)` : '')),
   ];
   if (retries.needed) {
-    lines.push(`retries: ${retries.needed} of ${composer.agent} agent drafts needed a second attempt`);
+    lines.push(`retries: ${retries.needed} agent drafts needed a second attempt`);
     for (const r of retries.topFirstAttemptViolations) lines.push(`  ${r.n}x ${r.reason}`);
   }
   if (topBlockReasons.length) {

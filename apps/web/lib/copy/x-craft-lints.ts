@@ -15,7 +15,8 @@
 // hard-gated here while being marked unverified there.
 
 import { CODEX_RULES } from '@/lib/copy/x-codex';
-import { harmRegisterForced, LEAD_MAX_CHARS } from '@/lib/copy/x-voice';
+import { LEAD_MAX_CHARS } from '@/lib/copy/x-voice';
+import { HARM_SHAPED, harmRegisterForced, stripUrls } from '@/lib/copy/shared/harm';
 import type { Evidence } from '@/lib/newsjack/template';
 
 export interface CraftResult {
@@ -40,40 +41,10 @@ const URL_RE = /https?:\/\/\S+/gi;
 // not preceded by sentence-final punctuation.
 const TRUNCATED_RE = /[^.!?]\s*(…|\.\.\.)\s*$/;
 
-// The constructions the flat register forbids, each with a name the
-// writer can act on. Kept in step with HARM_CLAUSE in x-voice.ts —
-// scripts/copy/check-harm-gate.mjs fails CI if the prompt stops naming
-// one of them.
-// URLs are not prose and must be excluded before any punctuation test.
-//
-// THE BUG THIS EXISTS TO PREVENT. The question-mark ban ran against the
-// raw thread body, and every thread is REQUIRED to carry the replay URL,
-// which carries "?utm_source=x&utm_medium=social&utm_campaign=newsjack".
-// So the first — and usually only — question mark in any thread was the
-// query-string delimiter. The harm register was therefore an unwinnable
-// gate from the day it shipped: no conflict-event thread could ever
-// pass, both attempts always failed, and every one fell back to the
-// mechanical template.
-//
-// The model was never at fault. It wrote no questions. The tracking
-// parameters did. #422 told the writer "NO QUESTIONS", it complied, and
-// it still failed — because the failing character was one the writer is
-// not allowed to remove.
-//
-// Measured 2026-08-26: 3 of 3 harm-register events, both attempts each.
-const URL_IN_TEXT = /https?:\/\/\S+/gi;
-const stripUrls = (s: string): string => s.replace(URL_IN_TEXT, ' ');
-
-const HARM_SHAPED: Array<{ re: RegExp; label: string; proseOnly?: boolean }> = [
-  { re: /[^?]*\?/, label: 'the question', proseOnly: true },
-  { re: /\bimagine\b[^.]*/i, label: '"imagine"' },
-  { re: /\bhere's the thing\b[^.]*/i, label: '"here\'s the thing"' },
-  { re: /\bplot twist\b[^.]*/i, label: '"plot twist"' },
-  { re: /\bturns out\b[^.]*/i, label: '"turns out"' },
-  { re: /\bspoiler\b[^.]*/i, label: '"spoiler"' },
-  { re: /\bwild\b[^.]*/i, label: '"wild"' },
-  { re: /\bbuckle\b[^.]*/i, label: '"buckle"' },
-];
+// The flat-register ban list and the URL-stripper live in
+// lib/copy/shared/harm.ts — one copy, every channel, gated by
+// scripts/copy/check-harm-gate.mjs. The history (the unwinnable
+// question-mark gate, #425) is recorded there.
 
 const hard = (id: string) =>
   CODEX_RULES.find((r) => r.id === id)?.enforcement === 'hard';

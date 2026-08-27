@@ -1,4 +1,5 @@
 import { createServerSupabase } from '@/lib/supabase-server';
+import type { NewsjackChannel } from '@/lib/copy/shared/types';
 
 // DB layer for the Newsjacking Engine. All access is via the service-role
 // client (the newsjack_* tables are RLS-on with no permissive policy).
@@ -20,7 +21,7 @@ export interface NewsjackEventInput {
 
 export interface NewsjackDraftInput {
   event_id: string;
-  channel: 'x' | 'linkedin' | 'substack';
+  channel: NewsjackChannel;
   body: string;
   posts: string[];
   ref_url: string | null;
