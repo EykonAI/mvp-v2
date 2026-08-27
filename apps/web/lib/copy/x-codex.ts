@@ -24,7 +24,7 @@
 // REFRESH: quarterly, and after any visible X ranking change.
 // Owner: the x-copywriter subagent. Next due 2026-11-26.
 
-export const CODEX_VERSION = '2026-08-26.1';
+export const CODEX_VERSION = '2026-08-27.1';
 
 export interface CodexRule {
   id: string;
@@ -79,12 +79,20 @@ export const CODEX_RULES: CodexRule[] = [
     enforcement: 'warn',
   },
   {
-    id: 'lead-length',
-    rule: 'Keep the lead under about 150 characters. The high-engagement band is reported at 71–100; 270 is a ceiling, never a target.',
+    id: 'lead-ceiling',
+    rule: 'The lead is 150 characters. Not "about 150" — 150 is the budget, and the schema enforces it at generation time rather than correcting it afterwards.',
+    verified: true,
+    verifiedOn: '2026-08-27',
+    source: 'A house decision, like thread-shape-bounds — verified as OUR rule, not an external claim. Chosen because it is tight enough to force one idea per lead and loose enough to name a facility and a number.',
+    enforcement: 'warn',
+  },
+  {
+    id: 'lead-optimum',
+    rule: 'Within that budget, shorter reads better: the reported high-engagement band is 71–100 characters. Treat 150 as the wall, not the aim.',
     verified: false,
     verifiedOn: '2026-08-26',
-    source: 'Secondary: 2026 engagement analyses. Unverified against our own posts — we have 16 and no read-back.',
-    enforcement: 'warn',
+    source: 'Secondary: 2026 engagement analyses. Never checked against our own posts — we have 16 published and no read-back.',
+    enforcement: 'guidance',
   },
   {
     id: 'name-a-source',
@@ -138,8 +146,22 @@ evidence, not merely true as a sentence.
   · Open on what was observed and where, in words a human uses.
     Named facilities. A country. A sea. Never a coordinate pair.
   · One specific number beats every adjective available to you.
-  · Under ~150 characters. Shorter is usually better.
+  · 150 characters. That is a hard budget, not a target to approach.
+    Aim lower. The lead is one idea, not a summary of the thread.
   · No link, no hashtag, no emoji, no exclamation mark.
+
+  WHAT FITS. These are real leads, under budget, each carrying a place,
+  a number and an honest read:
+    "Four Korean power stations and a run of Chinese coal plants all got
+     brighter on the same night. Black Marble saw it. FIRMS saw nothing."   (138)
+    "50 FIRMS hot pixels over four Chinese provinces this week. No
+     refinery, no power plant, no single flare source."                     (109)
+    "Three power plants, three cloudless nights, one monotonic collapse
+     in emitted light. No news input."                                      (99)
+
+  If the lead will not fit, the lead is trying to do the body's job.
+  Move the qualifier, the second instrument, or the caveat into post 2.
+  That is almost always the fix — not compression.
 
 THE BODY
   · One to two sentences per post. Line breaks, not walls.

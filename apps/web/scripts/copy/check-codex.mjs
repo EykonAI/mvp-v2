@@ -75,6 +75,36 @@ if (!block) {
   }
 }
 
+// ── the lead budget must live in the tool schema ───────────────
+//
+// It used to live only in prose while the schema said every post could
+// be 265 characters. The model optimised to the number that was
+// actually expressed: across three dry runs, every single lead came in
+// over budget — 13 of 13, none under. An instruction that is not
+// binding loses to one that is.
+//
+// This asserts the lead is its own schema field carrying maxLength, and
+// that the lint reads the same constant rather than a second copy.
+{
+  const VOICE = resolve(here, '../../lib/copy/x-voice.ts');
+  const LINTS = resolve(here, '../../lib/copy/x-craft-lints.ts');
+  const voice = readFileSync(VOICE, 'utf8');
+  const lints = readFileSync(LINTS, 'utf8');
+
+  if (!/export const LEAD_MAX_CHARS\s*=\s*\d+/.test(voice)) {
+    failures.push('LEAD_MAX_CHARS is not exported from x-voice.ts');
+  }
+  const leadField = voice.match(/lead:\s*\{[\s\S]*?\}/);
+  if (!leadField) {
+    failures.push('write_thread has no dedicated `lead` field — the lead budget is only advisory unless the schema carries it');
+  } else if (!/maxLength:\s*LEAD_MAX_CHARS/.test(leadField[0])) {
+    failures.push('the write_thread `lead` field does not set maxLength: LEAD_MAX_CHARS — the model only sees the budget it is actually given');
+  }
+  if (!/LEAD_MAX_CHARS/.test(lints)) {
+    failures.push('x-craft-lints.ts does not read LEAD_MAX_CHARS — a budget stated twice drifts');
+  }
+}
+
 // ── report ─────────────────────────────────────────────────────
 if (failures.length) {
   console.error('\nCODEX CHECK FAILED\n');
