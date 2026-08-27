@@ -116,6 +116,24 @@ export function redditCraftLint(
     violations.push(`the replay URL was altered — found "${urls[0]}", expected "${refUrl}" — attribution would be lost`);
   }
 
+  // ── no gated links ─────────────────────────────────────────────
+  // r/OSINT's formal rules ban content behind a paywall OR a
+  // REGISTRATION WALL (rules read 2026-08-27). Our /c/ replay pages are
+  // public by design; /app, /intel, /analyst and /admin sit behind the
+  // login wall, and the engine's anomaly fallback URL points at /app —
+  // so a draft can legitimately arrive carrying one. Always hard: a
+  // registration-walled link is a removal on sight in exactly the
+  // communities this channel targets.
+  for (const u of urls) {
+    const path = u.replace(/^https?:\/\/[^/]+/i, '');
+    const gated = path.match(/^\/(app|intel|analyst|admin)(?=[/?#]|$)/i);
+    if (gated) {
+      violations.push(
+        `the link points at a login-walled surface — found "${u}" — r/OSINT bans registration-walled content; only public /c/ replay pages may be linked`,
+      );
+    }
+  }
+
   // ── disclosure survives, above the link ────────────────────────
   const disc = selfText.match(DISCLOSURE_RE);
   if (!disc) {
