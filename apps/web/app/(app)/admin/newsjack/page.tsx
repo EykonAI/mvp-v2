@@ -6,9 +6,29 @@ import { createServerSupabase } from '@/lib/supabase-server';
 import { listDrafts, type ReviewDraft } from '@/lib/newsjack/store';
 import Link from 'next/link';
 import NewsjackActions from './Actions';
+import Filters from './Filters';
+import { parseFacets, filterDrafts, buildGroups, activeCount } from '@/lib/newsjack/review-filters';
 
 export const metadata: Metadata = { title: 'Newsjack review — eYKON.ai', robots: { index: false, follow: false } };
 export const dynamic = 'force-dynamic';
+
+// The queue reads a WINDOW, not the table. Facet counts are computed over
+// exactly this many rows and the bar says so, because a count whose
+// population is unstated is the same defect as a metric with no window.
+// Raise it when six channels per event make 400 rows cover too few days.
+const SCAN = 400;
+// Rendering is capped separately: 400 cards is a slow page and nobody
+// reviews 400 drafts in one sitting. The bar reports both numbers.
+const SHOW = 60;
+
+const emptyBox: React.CSSProperties = {
+  padding: 28,
+  textAlign: 'center',
+  border: '1px dashed var(--rule)',
+  borderRadius: 8,
+  color: 'var(--ink-faint)',
+  fontSize: 13,
+};
 
 const STATUS_COLOR: Record<string, string> = {
   draft: 'var(--teal)',
@@ -18,14 +38,26 @@ const STATUS_COLOR: Record<string, string> = {
   rejected: 'var(--ink-faint)',
 };
 
-export default async function NewsjackReviewPage() {
+export default async function NewsjackReviewPage({
+  searchParams,
+}: {
+  searchParams?: { [key: string]: string | string[] | undefined };
+}) {
   const user = await getCurrentUser();
   if (!user) redirect('/auth/signin?next=/admin/newsjack');
   if (!isFounder(user)) redirect('/app');
 
   const supabase = createServerSupabase();
-  const drafts = await listDrafts(supabase, 50);
-  const pending = drafts.filter((d) => d.event_status === 'drafted' && d.status === 'draft');
+  const all = await listDrafts(supabase, SCAN);
+  const facets = parseFacets(searchParams);
+  const groups = buildGroups(all, facets);
+  const matched = filterDrafts(all, facets);
+  const drafts = matched.slice(0, SHOW);
+  // The headline stays the count of everything pending, on every channel,
+  // regardless of the filter. It is the number the founder came here for,
+  // and making it move with the chips would turn a workload into a
+  // reflection of whatever was clicked last.
+  const pending = all.filter((d) => d.event_status === 'drafted' && d.status === 'draft');
 
   return (
     <>
@@ -45,9 +77,28 @@ export default async function NewsjackReviewPage() {
           — re-write recent drafts through the copywriter and compare, without changing anything here.
         </p>
 
-        {drafts.length === 0 ? (
-          <div style={{ padding: 28, textAlign: 'center', border: '1px dashed var(--rule)', borderRadius: 8, color: 'var(--ink-faint)', fontSize: 13 }}>
+        {all.length > 0 && (
+          <Filters
+            groups={groups}
+            facets={facets}
+            showing={drafts.length}
+            matched={matched.length}
+            scanned={all.length}
+            scanCapped={all.length === SCAN}
+          />
+        )}
+
+        {all.length === 0 ? (
+          <div style={emptyBox}>
             No drafts yet. The newsjack-detect cron writes here when a fresh, high-severity anomaly fires.
+          </div>
+        ) : drafts.length === 0 ? (
+          <div style={emptyBox}>
+            No draft matches this filter.{' '}
+            <Link href="/admin/newsjack" style={{ color: 'var(--teal)' }}>
+              Clear {activeCount(facets)} filter{activeCount(facets) === 1 ? '' : 's'}
+            </Link>{' '}
+            to see all {all.length}.
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -81,7 +132,7 @@ function DraftCard({ d }: { d: ReviewDraft }) {
             rev {d.revision}
           </span>
         )}
-        {d.channel === 'x' && (
+        {d.composer && (
           <span
             style={{ ...meta, color: d.composer === 'agent' ? 'var(--teal)' : 'var(--ink-faint)' }}
             title={
