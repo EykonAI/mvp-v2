@@ -192,12 +192,17 @@ export interface SubredditEntry {
 export const SUBREDDIT_ALLOWLIST: SubredditEntry[] = [
   {
     slug: 'OSINT',
-    status: 'proposed',
-    rulesReadOn: null,
-    selfPromoPolicy: null,
-    aiContentPolicy: null,
+    status: 'approved', // founder verdict 2026-08-27
+    rulesReadOn: '2026-08-27',
+    selfPromoPolicy:
+      'No explicit self-promotion rule; governed by site-wide reddiquette (the 90/10 norm). Submit text asks for exactly our artifact: "Submissions should include analysis not just data."',
+    aiContentPolicy: 'None stated anywhere in the rules, sidebar or submit text.',
+    // Tagging is expected ("Tag your submissions properly") but no single
+    // flair is mandated by the removal rules — so no flair is pinned here
+    // and the flair gate stays dormant; pick one at post time.
     flairRequired: null,
-    notes: 'Method-first culture fits the body-carries-the-method rule. Founder must read: self-promo policy, AI policy, flair.',
+    notes:
+      'ACCOUNT GATE, stated by the community and stricter than the sidebar: posts require an account >= 6 months old with >= 20 post karma (sidebar still says 3 months; the formal rule is newer and governs). Also binding: no paywalled or REGISTRATION-WALLED links — only public /c/ replay pages may ever be linked, never /app, /intel or /analyst (enforced by the no-gated-links lint); no editorialized titles; no low-effort or duplicate posts; tactics-not-investigations and a hard doxing line — write about events, facilities, vessels and companies, never about identifying people.',
   },
   {
     slug: 'geopolitics',
