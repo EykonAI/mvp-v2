@@ -23,7 +23,7 @@
 //
 // Run: node scripts/copy/check-harm-gate.mjs   (npm run copy:harm)
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
@@ -32,13 +32,29 @@ const here = dirname(fileURLToPath(import.meta.url));
 // foundation: needles, forced-register rule, ban list and URL-stripper
 // are ONE copy for every channel. Checks 1, 2 and 4 read the shared
 // module; check 3 (the prompt names what the linter enforces) runs per
-// channel, against every voice file that exists — a stub without a
-// voice file is skipped, an agent channel without a HARM_CLAUSE fails.
+// channel via the CHANNELS loop below — a stub without a voice file is
+// skipped, an agent channel without a HARM_CLAUSE fails. Until
+// 2026-08-27 this comment promised the loop while the code read only
+// x-voice.ts; the code now does what the comment says.
 const HARM = resolve(here, '../../lib/copy/shared/harm.ts');
-const VOICE = resolve(here, '../../lib/copy/x-voice.ts');
 const src = readFileSync(HARM, 'utf8');
-const xVoiceSrc = readFileSync(VOICE, 'utf8');
 const failures = [];
+
+// Every writer with a voice file is checked; a template-only stub that
+// has no voice.ts is skipped. This is the list the header promises —
+// it was x-only until 2026-08-27, which two of the three channel build
+// agents flagged independently on the day they shipped.
+const CHANNELS = [
+  { name: 'x', voice: resolve(here, '../../lib/copy/x-voice.ts'), lints: resolve(here, '../../lib/copy/x-craft-lints.ts') },
+];
+{
+  const dir = resolve(here, '../../lib/copy/channels');
+  for (const ch of readdirSync(dir)) {
+    const voice = resolve(dir, ch, 'voice.ts');
+    const lints = resolve(dir, ch, 'craft-lints.ts');
+    if (existsSync(voice)) CHANNELS.push({ name: ch, voice, lints: existsSync(lints) ? lints : null });
+  }
+}
 
 // ── 1 · structural ─────────────────────────────────────────────
 const fn = src.match(/export function harmRegisterForced[\s\S]*?\n}/);
@@ -115,51 +131,50 @@ if (!needleBlock) {
 //
 // So: every construction the harm output check bans must appear in the
 // clause the writer is given.
-{
-  const LINTS = resolve(here, '../../lib/copy/x-craft-lints.ts');
-  const lintSrc = readFileSync(LINTS, 'utf8');
-  const shapedSrc = src; // HARM_SHAPED lives in shared/harm.ts now
-  // HARM_SHAPED is the list the flat register forbids, each entry a
-  // regex plus the label the writer is shown.
+for (const ch of CHANNELS) {
+  const voiceSrc = readFileSync(ch.voice, 'utf8');
+  const lintSrc = ch.lints ? readFileSync(ch.lints, 'utf8') : '';
+  const shapedSrc = src; // HARM_SHAPED lives in shared/harm.ts
   const block = shapedSrc.match(/HARM_SHAPED:\s*Array<\{[^>]*\}>\s*=\s*\[([\s\S]*?)\n\];/);
-  const clause = xVoiceSrc.match(/const HARM_CLAUSE\s*=\s*`([\s\S]*?)`\.trim\(\);/);
+  const clause = voiceSrc.match(/const HARM_CLAUSE\s*=\s*`([\s\S]*?)`\.trim\(\);/);
 
   if (!block) {
     failures.push('HARM_SHAPED not found in lib/copy/shared/harm.ts — the flat-register ban list must stay machine-readable so this check can compare it to the prompt');
-  } else if (!clause) {
-    failures.push('HARM_CLAUSE not found in x-voice.ts');
-  } else {
-    const entries = [...block[1].matchAll(/label:\s*'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'"));
-    const prompt = clause[1].toLowerCase();
+    break;
+  }
+  if (!clause) {
+    failures.push(`[${ch.name}] no HARM_CLAUSE in ${ch.voice.split('/').slice(-2).join('/')} — a writer channel must hand its model the same rules the output lint enforces`);
+    continue;
+  }
+  const entries = [...block[1].matchAll(/label:\s*'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'"));
+  const prompt = clause[1].toLowerCase();
 
-    if (entries.length === 0) failures.push('HARM_SHAPED has no labelled entries');
+  if (entries.length === 0) failures.push('HARM_SHAPED has no labelled entries');
 
-    // The question ban is not a word, so it needs naming explicitly.
-    if (/\[\^\?\]\*\\\?|\[\?\]/.test(block[1]) && !prompt.includes('question')) {
-      failures.push(
-        'the harm output check bans question marks but HARM_CLAUSE never mentions questions — the writer cannot comply with a rule it is not given',
-      );
-    }
+  // The question ban is not a word, so it needs naming explicitly.
+  if (/\[\^\?\]\*\\\?|\[\?\]/.test(block[1]) && !prompt.includes('question')) {
+    failures.push(
+      `[${ch.name}] the harm output check bans question marks but HARM_CLAUSE never mentions questions — the writer cannot comply with a rule it is not given`,
+    );
+  }
 
-    // Every quoted construction it bans must be named in the prompt.
-    const unstated = entries
-      .filter((l) => l.startsWith('"'))
-      .map((l) => l.replace(/"/g, '').toLowerCase())
-      .filter((w) => w && !prompt.includes(w));
-    if (unstated.length) {
-      failures.push(
-        `the harm output check bans ${unstated.map((w) => `"${w}"`).join(', ')} but HARM_CLAUSE does not name them — state every hard rule in the prompt that is judged by it`,
-      );
-    }
+  // Every quoted construction it bans must be named in the prompt.
+  const unstated = entries
+    .filter((l) => l.startsWith('"'))
+    .map((l) => l.replace(/"/g, '').toLowerCase())
+    .filter((w) => w && !prompt.includes(w));
+  if (unstated.length) {
+    failures.push(
+      `[${ch.name}] the harm output check bans ${unstated.map((w) => `"${w}"`).join(', ')} but HARM_CLAUSE does not name them — state every hard rule in the prompt that is judged by it`,
+    );
+  }
 
-    // And the violation must be actionable: it has to quote the match.
-    const harmPush = lintSrc.match(/harm register is forced for this event[^`']*/);
-    if (harmPush && !/\$\{m\[0\]/.test(lintSrc.slice(lintSrc.indexOf('harm register is forced'), lintSrc.indexOf('harm register is forced') + 400))) {
-      failures.push('the harm violation does not quote the text it matched — a writer told only that it failed will guess, retry, and fall back');
-    }
+  // And the violation must be actionable: it has to quote the match.
+  const idx = lintSrc.indexOf('harm register is forced');
+  if (idx >= 0 && !/\$\{m\[0\]/.test(lintSrc.slice(idx, idx + 400))) {
+    failures.push(`[${ch.name}] the harm violation does not quote the text it matched — a writer told only that it failed will guess, retry, and fall back`);
   }
 }
-
 // ── 4 · the punctuation test must ignore URLs ──────────────────
 //
 // Every thread is REQUIRED to carry the replay URL, and that URL
