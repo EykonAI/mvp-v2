@@ -139,6 +139,27 @@ interface DraftJoinRow {
     | null;
 }
 
+// The review queue reads a WINDOW of the most recent drafts, so every
+// count derived from that window is bounded by it. The headline is the
+// one number that must not be: it is the workload, it gets quoted, and
+// on 2026-08-27 the windowed version read 311 while the true figure was
+// 433 — understating the backlog by 122 with nothing on the page saying
+// so. A count whose population is unstated is the same defect as a
+// metric with no window.
+//
+// Returns null on error rather than 0. A fabricated zero would read as
+// "nothing to review", which is the worst possible way to be wrong here;
+// the caller renders an em dash instead. Same rule as the honesty board.
+export async function countPendingDrafts(supabase: SB): Promise<number | null> {
+  const { count, error } = await supabase
+    .from('newsjack_drafts')
+    .select('id, newsjack_events!inner(status)', { count: 'exact', head: true })
+    .eq('status', 'draft')
+    .eq('newsjack_events.status', 'drafted');
+  if (error) return null;
+  return count ?? 0;
+}
+
 export async function listDrafts(supabase: SB, limit = 50): Promise<ReviewDraft[]> {
   const { data } = await supabase
     .from('newsjack_drafts')

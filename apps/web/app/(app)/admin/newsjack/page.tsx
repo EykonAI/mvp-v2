@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth/session';
 import { isFounder } from '@/lib/admin/access';
 import { createServerSupabase } from '@/lib/supabase-server';
-import { listDrafts, type ReviewDraft } from '@/lib/newsjack/store';
+import { listDrafts, countPendingDrafts, type ReviewDraft } from '@/lib/newsjack/store';
 import Link from 'next/link';
 import NewsjackActions from './Actions';
 import Filters from './Filters';
@@ -20,6 +20,13 @@ const SCAN = 400;
 // Rendering is capped separately: 400 cards is a slow page and nobody
 // reviews 400 drafts in one sitting. The bar reports both numbers.
 const SHOW = 60;
+
+const windowNote: React.CSSProperties = {
+  fontSize: 12,
+  color: 'var(--amber)',
+  marginBottom: 14,
+  maxWidth: 620,
+};
 
 const emptyBox: React.CSSProperties = {
   padding: 28,
@@ -48,7 +55,10 @@ export default async function NewsjackReviewPage({
   if (!isFounder(user)) redirect('/app');
 
   const supabase = createServerSupabase();
-  const all = await listDrafts(supabase, SCAN);
+  const [all, pendingTotal] = await Promise.all([
+    listDrafts(supabase, SCAN),
+    countPendingDrafts(supabase),
+  ]);
   const facets = parseFacets(searchParams);
   const groups = buildGroups(all, facets);
   const matched = filterDrafts(all, facets);
@@ -57,15 +67,25 @@ export default async function NewsjackReviewPage({
   // regardless of the filter. It is the number the founder came here for,
   // and making it move with the chips would turn a workload into a
   // reflection of whatever was clicked last.
-  const pending = all.filter((d) => d.event_status === 'drafted' && d.status === 'draft');
+  // Pending WITHIN the scanned window — used only to tell the founder how
+  // much of the backlog this page is actually showing.
+  const pendingInWindow = all.filter((d) => d.event_status === 'drafted' && d.status === 'draft').length;
+  const hidden = pendingTotal === null ? 0 : Math.max(0, pendingTotal - pendingInWindow);
 
   return (
     <>
       <section style={{ maxWidth: 820, margin: '0 auto', padding: '40px 24px 80px', color: 'var(--ink)' }}>
         <div className="eyebrow" style={{ color: 'var(--teal)' }}>·· Admin · Newsjack review ··</div>
         <h1 style={{ fontFamily: 'var(--f-display)', fontSize: 28, marginTop: 8, marginBottom: 6 }}>
-          Drafts ({pending.length} pending)
+          Drafts ({pendingTotal ?? '—'} pending)
         </h1>
+        {hidden > 0 && (
+          <p style={windowNote}>
+            This page reads the {SCAN} most recent drafts, which covers {pendingInWindow} of them —
+            {' '}{hidden} older pending draft{hidden === 1 ? '' : 's'} {hidden === 1 ? 'is' : 'are'} outside the window
+            and {hidden === 1 ? 'is' : 'are'} not counted in the chips below.
+          </p>
+        )}
         <p style={{ fontSize: 13, color: 'var(--ink-dim)', marginBottom: 24, maxWidth: 620 }}>
           Each draft is auto-built from a live anomaly and has already passed the voice, coverage and value gates.
           Approve to publish (or copy and post manually). Blocked drafts show why; nothing here has gone public.
