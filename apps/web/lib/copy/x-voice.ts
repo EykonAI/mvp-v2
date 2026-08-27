@@ -179,6 +179,11 @@ export function systemPrompt(ev: Evidence, override?: Register): string {
     REGISTER_GUIDANCE[register],
     ...(harmRegisterForced(ev) ? ['', HARM_CLAUSE] : []),
     '',
+    `THE LEAD HAS A HARD BUDGET OF ${LEAD_MAX_CHARS} CHARACTERS. The write_thread`,
+    'tool takes it as its own field for that reason. Count the characters.',
+    'Aim well under it — the lead is one idea, and if it will not fit, the',
+    "lead is doing the body's job. Move something into post 2.",
+    '',
     `CODEX VERSION ${CODEX_VERSION}. The hard rules below are enforced by a`,
     'linter after you write. A thread that breaks one is discarded:',
     ...CODEX_RULES.filter((r) => r.enforcement === 'hard').map((r) => `  · ${r.rule}`),
@@ -227,21 +232,47 @@ export function userPrompt(ev: Evidence, refUrl: string): string {
 
 // Forced-tool schema. The engine must never regex a model's prose —
 // same pattern as the NOTIF AI evaluator.
+// THE LEAD IS ITS OWN FIELD, WITH ITS OWN BUDGET.
+//
+// It used to be posts[0] of a string[] whose items were all maxLength
+// 265. So the only length the model could actually see expressed was
+// 265, and the 150 ceiling lived in prose. It optimised to the number
+// in the schema, exactly as you would expect: measured across three dry
+// runs, EVERY lead came in over — 153, 158, 162, 164, 166, 172, 174,
+// 178, 184, 188, 190, 191, 194. Not one under. That is not the model
+// ignoring an instruction, that is an instruction that was never
+// binding competing with one that was.
+//
+// Splitting the field puts the budget where it binds. The lint stays a
+// WARNING rather than becoming a gate: a style rule that forces a retry
+// costs a model call every time it fires, and tonight's lesson is that
+// over-eager gates are expensive. Constrain at generation, measure
+// after, block only for honesty.
+export const LEAD_MAX_CHARS = 150;
+
 export const WRITE_THREAD_TOOL = {
   name: 'write_thread',
-  description: 'Return the finished X thread as an ordered array of posts.',
+  description:
+    'Return the finished X thread: the lead, then the remaining posts in order.',
   input_schema: {
     type: 'object' as const,
     properties: {
-      posts: {
+      lead: {
+        type: 'string' as const,
+        maxLength: LEAD_MAX_CHARS,
+        description:
+          `Post 1. HARD BUDGET ${LEAD_MAX_CHARS} CHARACTERS — count them. One idea, not a summary. ` +
+          'Carries no URL. If it will not fit, move the qualifier or the second instrument into the next post rather than compressing this one.',
+      },
+      rest: {
         type: 'array' as const,
-        minItems: 3,
-        maxItems: 6,
+        minItems: 2,
+        maxItems: 5,
         items: { type: 'string' as const, maxLength: 265 },
         description:
-          'The thread, in order. Post 1 is the lead and carries no URL. The last post carries the live-view URL exactly once.',
+          'Posts 2 onward, in order. The FINAL entry carries the live-view URL exactly once; no other post may contain a URL.',
       },
     },
-    required: ['posts'],
+    required: ['lead', 'rest'],
   },
 };

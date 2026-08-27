@@ -218,9 +218,19 @@ async function callWriter(
   );
   if (!toolUse || toolUse.name !== 'write_thread') return [];
 
-  const input = toolUse.input as { posts?: unknown };
-  if (!Array.isArray(input.posts)) return [];
-  return input.posts
+  // The tool takes the lead as its own field so its character budget is
+  // expressed where it binds. `posts` is still accepted so a model that
+  // answers in the old shape degrades to a normal lint failure and a
+  // retry, rather than an empty thread and a silent fallback.
+  const input = toolUse.input as { lead?: unknown; rest?: unknown; posts?: unknown };
+  const raw: unknown[] =
+    typeof input.lead === 'string' && Array.isArray(input.rest)
+      ? [input.lead, ...input.rest]
+      : Array.isArray(input.posts)
+        ? input.posts
+        : [];
+
+  return raw
     .filter((p): p is string => typeof p === 'string')
     .map((p) => p.trim())
     .filter(Boolean);

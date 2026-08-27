@@ -15,7 +15,7 @@
 // hard-gated here while being marked unverified there.
 
 import { CODEX_RULES } from '@/lib/copy/x-codex';
-import { harmRegisterForced } from '@/lib/copy/x-voice';
+import { harmRegisterForced, LEAD_MAX_CHARS } from '@/lib/copy/x-voice';
 import type { Evidence } from '@/lib/newsjack/template';
 
 export interface CraftResult {
@@ -25,7 +25,9 @@ export interface CraftResult {
 }
 
 const MAX_POST = 270;
-const LEAD_SOFT_MAX = 150;
+// One definition, shared with the tool schema — a budget stated in two
+// places drifts, and the drift is invisible until someone measures.
+const LEAD_SOFT_MAX = LEAD_MAX_CHARS;
 
 // A bare coordinate pair: "(35.0, 125.0)" or "35.0, 125.0" or
 // "35.0N 125.0E". The first form is what our own template emits.
@@ -111,7 +113,7 @@ export function craftLint(
     push('no-coordinate-lead', 'lead opens on a bare coordinate pair — name the place or the facilities');
   }
   if (lead.length > LEAD_SOFT_MAX) {
-    push('lead-length', `lead is ${lead.length} chars; aim under ${LEAD_SOFT_MAX}`);
+    push('lead-ceiling', `lead is ${lead.length} chars; budget is ${LEAD_SOFT_MAX}`);
   }
 
   // ── link position ──────────────────────────────────────────────
