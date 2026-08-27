@@ -25,6 +25,9 @@ export const CHANNELS = [
   'youtube', // video                       (social)
   'discord', // community                   (community)
   'telegram', // community                  (social)
+  'tiktok', // short-form video              (social) — added in the multi-channel
+  // copywriter foundation. withChannel() returns a URL UNCHANGED for an unknown
+  // channel, so a missing tag here is an untagged link forever, silently.
   'repcard', // embeddable Creator Pro reputation card (utm_content=<handle>)
   'space_embed', // in-Space artifact-card CTA (monetisation §4.2)
   'direct', // fallback: no tag

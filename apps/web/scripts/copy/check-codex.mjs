@@ -23,24 +23,39 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const CODEX = resolve(here, '../../lib/copy/x-codex.ts');
-
-const src = readFileSync(CODEX, 'utf8');
+// Every codex in the repo, present or future: the X one plus each
+// channel's. A stub channel without a codex is legitimate (PR-2 ships
+// it); a codex that exists is held to the same invariant everywhere.
+import { readdirSync, existsSync } from 'node:fs';
+const CODICES = [resolve(here, '../../lib/copy/x-codex.ts')];
+const CH_DIR = resolve(here, '../../lib/copy/channels');
+if (existsSync(CH_DIR)) {
+  for (const d of readdirSync(CH_DIR)) {
+    const c = resolve(CH_DIR, d, 'codex.ts');
+    if (existsSync(c)) CODICES.push(c);
+  }
+}
 const failures = [];
 const notes = [];
+const okVersions = [];
+for (const CODEX of CODICES) {
+const src = readFileSync(CODEX, 'utf8');
+const who = CODEX.replace(/^.*lib\/copy\//, '');
 
 // ── version present and plausibly dated ────────────────────────
 const version = src.match(/CODEX_VERSION\s*=\s*'([^']+)'/)?.[1];
 if (!version) {
-  failures.push('CODEX_VERSION is missing — a voice file with no version is a stale build you cannot see');
+  failures.push(`${who}: CODEX_VERSION is missing — a voice file with no version is a stale build you cannot see`);
 } else if (!/^\d{4}-\d{2}-\d{2}\.\d+$/.test(version)) {
-  failures.push(`CODEX_VERSION "${version}" is not in YYYY-MM-DD.N form`);
+  failures.push(`${who}: CODEX_VERSION "${version}" is not in YYYY-MM-DD.N form`);
+} else {
+  okVersions.push(`${who} ${version}`);
 }
 
 // ── parse the rule register ────────────────────────────────────
 const block = src.match(/CODEX_RULES:\s*CodexRule\[\]\s*=\s*\[([\s\S]*?)\n\];/);
 if (!block) {
-  failures.push('CODEX_RULES array not found or not in the expected shape');
+  failures.push(`${who}: CODEX_RULES array not found or not in the expected shape`);
 } else {
   const entries = block[1].split(/\n\s*\{\s*\n/).slice(1);
   if (entries.length === 0) failures.push('CODEX_RULES is empty');
@@ -85,7 +100,9 @@ if (!block) {
 //
 // This asserts the lead is its own schema field carrying maxLength, and
 // that the lint reads the same constant rather than a second copy.
-{
+// X-specific: each channel's own binding-budget check ships with its
+// codex in PR-2.
+if (CODEX.endsWith('x-codex.ts')) {
   const VOICE = resolve(here, '../../lib/copy/x-voice.ts');
   const LINTS = resolve(here, '../../lib/copy/x-craft-lints.ts');
   const voice = readFileSync(VOICE, 'utf8');
@@ -106,6 +123,7 @@ if (!block) {
 }
 
 // ── report ─────────────────────────────────────────────────────
+}
 if (failures.length) {
   console.error('\nCODEX CHECK FAILED\n');
   for (const f of failures) console.error(`  ✗ ${f}`);
@@ -113,7 +131,7 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(`codex ${version} — ok`);
+console.log(`codex — ok · ${okVersions.join(' · ')}`);
 if (notes.length) {
   console.log(`  ${notes.length} unverified rule(s), warn-only as required:`);
   for (const n of notes) console.log(`    · ${n}`);

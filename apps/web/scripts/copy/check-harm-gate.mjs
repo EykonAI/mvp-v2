@@ -28,14 +28,22 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
+// The harm register moved to shared/harm.ts in the multi-channel
+// foundation: needles, forced-register rule, ban list and URL-stripper
+// are ONE copy for every channel. Checks 1, 2 and 4 read the shared
+// module; check 3 (the prompt names what the linter enforces) runs per
+// channel, against every voice file that exists — a stub without a
+// voice file is skipped, an agent channel without a HARM_CLAUSE fails.
+const HARM = resolve(here, '../../lib/copy/shared/harm.ts');
 const VOICE = resolve(here, '../../lib/copy/x-voice.ts');
-const src = readFileSync(VOICE, 'utf8');
+const src = readFileSync(HARM, 'utf8');
+const xVoiceSrc = readFileSync(VOICE, 'utf8');
 const failures = [];
 
 // ── 1 · structural ─────────────────────────────────────────────
 const fn = src.match(/export function harmRegisterForced[\s\S]*?\n}/);
 if (!fn) {
-  failures.push('harmRegisterForced not found in lib/copy/x-voice.ts');
+  failures.push('harmRegisterForced not found in lib/copy/shared/harm.ts');
 } else {
   const body = fn[0];
   // Comments legitimately discuss severity; code must not branch on it.
@@ -110,13 +118,14 @@ if (!needleBlock) {
 {
   const LINTS = resolve(here, '../../lib/copy/x-craft-lints.ts');
   const lintSrc = readFileSync(LINTS, 'utf8');
+  const shapedSrc = src; // HARM_SHAPED lives in shared/harm.ts now
   // HARM_SHAPED is the list the flat register forbids, each entry a
   // regex plus the label the writer is shown.
-  const block = lintSrc.match(/HARM_SHAPED:\s*Array<\{[^>]*\}>\s*=\s*\[([\s\S]*?)\n\];/);
-  const clause = src.match(/const HARM_CLAUSE\s*=\s*`([\s\S]*?)`\.trim\(\);/);
+  const block = shapedSrc.match(/HARM_SHAPED:\s*Array<\{[^>]*\}>\s*=\s*\[([\s\S]*?)\n\];/);
+  const clause = xVoiceSrc.match(/const HARM_CLAUSE\s*=\s*`([\s\S]*?)`\.trim\(\);/);
 
   if (!block) {
-    failures.push('HARM_SHAPED not found in x-craft-lints.ts — the flat-register ban list must stay machine-readable so this check can compare it to the prompt');
+    failures.push('HARM_SHAPED not found in lib/copy/shared/harm.ts — the flat-register ban list must stay machine-readable so this check can compare it to the prompt');
   } else if (!clause) {
     failures.push('HARM_CLAUSE not found in x-voice.ts');
   } else {
@@ -162,8 +171,7 @@ if (!needleBlock) {
 // This asserts the ban is marked proseOnly and that a strip helper
 // exists, so the bug cannot return by someone "simplifying" the check.
 {
-  const LINTS2 = resolve(here, '../../lib/copy/x-craft-lints.ts');
-  const src2 = readFileSync(LINTS2, 'utf8');
+  const src2 = src; // ban list + stripUrls live in shared/harm.ts
 
   const questionEntry = src2.match(/\{[^}]*label:\s*'the question'[^}]*\}/);
   if (!questionEntry) {
@@ -173,8 +181,8 @@ if (!needleBlock) {
       "the question-mark ban is not marked proseOnly — it will match the '?' in the mandatory ?utm_source= tracking URL, which every thread must carry, making the harm register impossible to pass",
     );
   }
-  if (!/stripUrls|https\?:\\\/\\\//.test(src2)) {
-    failures.push('no URL-stripping helper found in x-craft-lints.ts');
+  if (!/stripUrls/.test(src2)) {
+    failures.push('no URL-stripping helper found in shared/harm.ts');
   }
 }
 

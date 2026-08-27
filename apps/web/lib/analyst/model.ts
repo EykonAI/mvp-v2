@@ -105,6 +105,18 @@ export const ANOMALY_REPORT_MODEL =
 export const COPYWRITER_MODEL =
   process.env.COPYWRITER_MODEL || 'claude-sonnet-5';
 
+// The three channel copywriters (lib/copy/channels/*). Same default and
+// same reasoning as COPYWRITER_MODEL above: the volume is a handful of
+// compositions a quarter, the output is public voice, and economising
+// saves nothing measurable. Separate knobs so one channel can be
+// cheapened later on evidence, not on a guess.
+export const REDDIT_COPYWRITER_MODEL =
+  process.env.REDDIT_COPYWRITER_MODEL || 'claude-sonnet-5';
+export const DISCORD_COPYWRITER_MODEL =
+  process.env.DISCORD_COPYWRITER_MODEL || 'claude-sonnet-5';
+export const TIKTOK_COPYWRITER_MODEL =
+  process.env.TIKTOK_COPYWRITER_MODEL || 'claude-sonnet-5';
+
 // Models a session row may carry. Anything else is rejected on write.
 export function allowedSessionModels(): string[] {
   return [DEFAULT_ANALYST_MODEL, DEEP_ANALYSIS_MODEL];

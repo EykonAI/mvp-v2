@@ -9,6 +9,7 @@
 // the harm rule overrides it unconditionally.
 
 import { X_CODEX, CODEX_RULES, CODEX_VERSION } from '@/lib/copy/x-codex';
+import { harmRegisterForced } from '@/lib/copy/shared/harm';
 import type { Evidence } from '@/lib/newsjack/template';
 
 export { CODEX_VERSION };
@@ -27,54 +28,12 @@ export function copywriterEnabled(): boolean {
 
 // ─── The harm rule ───────────────────────────────────────────────
 //
-// This platform writes about strikes, outages and sanctions. Real
-// people are inside a material share of these events. Playfulness is
-// SUPPRESSED — not softened — when the evidence involves violence.
-//
-// Enforced here on the prompt AND re-checked on the output in
-// x-craft-lints.ts. Two gates, because a model that is told to be
-// engaging will occasionally find a way to be engaging about a
-// casualty, and one gate is not enough for that failure mode.
+// MOVED to lib/copy/shared/harm.ts in the multi-channel foundation —
+// one needle list, one forced-register rule, every channel. Re-exported
+// here so existing imports (x-composer, x-craft-lints, tests) keep
+// working; check-harm-gate.mjs now reads the shared module.
 
-export const HARM_NEEDLES = [
-  'strike', 'struck', 'missile', 'shelling', 'shelled', 'casualt',
-  'killed', 'fatalit', 'wounded', 'civilian', 'bomb', 'airstrike',
-  'attack', 'assault', 'fighting', 'siege', 'massacre', 'refugee',
-  'displaced', 'militant', 'insurgen', 'hostage', 'war ', 'warfare',
-];
-
-// Prefix-anchored so 'casualt' catches casualty/casualties and 'attack'
-// catches attacked/attacks, while a needle cannot match mid-word.
-const HARM_RE = new RegExp(`\\b(?:${HARM_NEEDLES.map((n) => n.trim()).join('|')})`, 'i');
-
-export function harmRegisterForced(ev: Evidence): boolean {
-  if ((ev.domain ?? '').toLowerCase() === 'conflict') return true;
-
-  // THE LANGUAGE CHECK RUNS ON EVERY EVENT, AT EVERY SEVERITY.
-  //
-  // It used to run only when severity was 'high'. That was a defect, found
-  // by the dry-run recompose on 2026-08-26: a convergence whose analyst line
-  // read "GDELT confirms an active US-Iran-Israel conflict spike
-  // (fighting/assault events across Tehran, the Ahvaz area, and Iraq)"
-  // carried domain 'Convergence' and severity 'medium', so the gate never
-  // engaged and a shooting war got the 'dry' register. The copy that came
-  // out happened to be sober. It got lucky, and this gate exists precisely
-  // so that it does not have to be.
-  //
-  // Measured at the time: 31 drafted events carried casualty language while
-  // the gate would not have fired.
-  //
-  // Severity is a statement about SIGNAL STRENGTH — how far the sensor moved
-  // — not about whether people are being hurt. It was never the right key.
-  //
-  // FALSE POSITIVES ARE CHEAP AND DELIBERATE. 'strike' also means strike
-  // price and labour strike; 'attack' also means attack surface. The cost of
-  // a false positive is one duller post. The cost of a false negative is
-  // being flippant about people being killed, in public, from an account
-  // whose entire pitch is judgement. Those are not comparable, so this
-  // matches broadly on purpose. Do not narrow it to reduce noise.
-  return HARM_RE.test(`${ev.headline} ${ev.analystLine}`);
-}
+export { HARM_NEEDLES, harmRegisterForced } from '@/lib/copy/shared/harm';
 
 const REGISTER_GUIDANCE: Record<Register, string> = {
   flat: `

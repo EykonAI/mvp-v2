@@ -40,6 +40,9 @@ Human-in-the-loop: nothing publishes without a founder approval in `/admin/newsj
 | `X_API_KEY` / `X_API_SECRET` / `X_ACCESS_TOKEN` / `X_ACCESS_SECRET` | native X API v2 posting (OAuth 1.0a, app→own account) | optional (else webhook/manual) |
 | `NEWSJACK_PUBLISH_WEBHOOK` | automation URL that posts the thread to X (fallback if no X keys) | optional |
 | `NEWSJACK_DIGEST_WEBHOOK` | where the weekly digest goes (falls back to alert webhook) | optional |
+| `NEWSJACK_COPYWRITER_REDDIT` / `_DISCORD` / `_TIKTOK` | per-channel writer switches (multi-channel foundation). OFF = that channel's deterministic template drafts; the channel itself is removed only by deleting its registry entry | optional (default off) |
+| `COPYWRITER_REGISTER_REDDIT` / `_DISCORD` / `_TIKTOK` | per-channel register override (flat/dry/open). Defaults, per the PR-0 founder decision 2026-08-27: reddit dry · discord dry · tiktok flat | optional |
+| `REDDIT_COPYWRITER_MODEL` / `DISCORD_` / `TIKTOK_` | per-channel model knobs, default claude-sonnet-5 (lib/analyst/model.ts) | optional |
 | `NEWSJACK_ANOMALY_SOURCE` | opt in single anomalies as a source (`on`); OFF by default because anomalies have no public landing page | optional |
 | `FOUNDER_EMAILS` | existing founder allowlist for `/admin/newsjack` | yes (already set) |
 
