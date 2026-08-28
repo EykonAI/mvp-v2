@@ -1,8 +1,13 @@
 import { createServerSupabase } from '@/lib/supabase-server';
 import { runAnalyst } from '@/lib/intelligence-analyst/run';
-import { withChannel } from '@/lib/attribution/channels';
+import { framingFor } from '@/lib/newsjack/coverage';
 import { voiceLint, coverageLint } from '@/lib/newsjack/lints';
-import { insertEvent, insertDraft } from '@/lib/newsjack/store';
+import type { Evidence } from '@/lib/newsjack/template';
+import { threadToBody } from '@/lib/newsjack/template';
+import { CHANNEL_WRITERS } from '@/lib/copy/register';
+import { composeForChannel } from '@/lib/copy/shared/compose';
+import { composeXThread } from '@/lib/copy/x-composer';
+import { insertEvent, insertDraft, recentLeads as fetchRecentLeads } from '@/lib/newsjack/store';
 import { notifyFounder } from '@/lib/newsjack/notify';
 import { selectAngle, markAngleUsed, buildAnglePrompt, splitAnswer, endingIsBait } from '@/lib/content/library';
 
@@ -13,7 +18,6 @@ import { selectAngle, markAngleUsed, buildAnglePrompt, splitAnswer, endingIsBait
 
 type SB = ReturnType<typeof createServerSupabase>;
 const PUBLIC_BASE = (process.env.NEXT_PUBLIC_SITE_URL || 'https://eykon.ai').replace(/\/+$/, '');
-const MAX_POST = 270;
 
 export interface ProactiveResult {
   outcome: 'drafted' | 'blocked' | 'skipped_no_data' | 'no_eligible_angle' | 'analyst_error' | 'insert_failed';
@@ -76,10 +80,37 @@ export async function runProactiveTick(supabase: SB): Promise<ProactiveResult> {
   });
   if (!eventId) return { outcome: 'insert_failed', angle: angle.title };
 
-  const qUrl = withChannel(`${PUBLIC_BASE}/q/${eventId}`, 'x', { campaign: 'newsjack', medium: 'social' });
-  const posts = renderThread(body, hook, sources, qUrl);
-  const threadBody = posts.join('\n\n—\n\n');
+  // ── PR-5: the proactive layer drafts through the SAME registry as
+  // newsjack. The evidence package carries the answer as the analyst
+  // line and the raw /q URL as the replay target; each writer's own
+  // template applies its channel utm tag (the engine never pre-tags).
+  // The framing verdict is computed from the angle title, not assumed:
+  // an angle ABOUT Hormuz must be framed analytically here exactly as a
+  // detected event there would be.
+  const evidence: Evidence = {
+    domain: angle.format,
+    region: angle.title,
+    severity: null,
+    headline: hook || angle.title,
+    analystLine: body,
+    sources,
+    replayUrl: `${PUBLIC_BASE}/q/${eventId}`,
+    framing: framingFor(angle.title),
+    seatsRemaining: null,
+  };
 
+  let recentLeads: string[] = [];
+  try {
+    recentLeads = await fetchRecentLeads(supabase, 10);
+  } catch {
+    recentLeads = [];
+  }
+
+  // X decides `blocked`, exactly as in the newsjack engine — one
+  // channel's craft must not suppress the event, and the proactive
+  // anti-bait check stays: it is this layer's own honesty rule.
+  const x = await composeXThread(evidence, recentLeads);
+  const threadBody = threadToBody(x.posts);
   const voice = voiceLint(threadBody);
   const coverage = coverageLint(threadBody);
   const bait = endingIsBait(hook);
@@ -93,14 +124,44 @@ export async function runProactiveTick(supabase: SB): Promise<ProactiveResult> {
     event_id: eventId,
     channel: 'x',
     body: threadBody,
-    posts,
-    ref_url: qUrl,
-    lints: { voice, coverage, bait },
+    posts: x.posts,
+    ref_url: x.refUrl,
+    lints: { voice, coverage, bait, firstAttempt: x.meta.firstAttemptViolations },
     value_pass: !blocked,
     status: 'draft',
+    composer: x.meta.composer,
+    composer_model: x.meta.model,
+    codex_version: x.meta.codexVersion,
+    compose_attempts: x.meta.attempts,
+    fallback_reason: x.meta.fallbackReason,
+    craft_warnings: x.meta.craftWarnings,
   });
 
   if (blocked) return { outcome: 'blocked', angle: angle.title, format: angle.format, note: reasons.join('; ') };
+
+  for (const w of CHANNEL_WRITERS) {
+    if (w.channel === 'x') continue;
+    const r = await composeForChannel(w, evidence, recentLeads);
+    const v = voiceLint(r.artifact.body);
+    const c = coverageLint(r.artifact.body);
+    await insertDraft(supabase, {
+      event_id: eventId,
+      channel: w.channel,
+      body: r.artifact.body,
+      posts: r.artifact.posts,
+      ref_url: r.artifact.refUrl,
+      lints: { voice: v, coverage: c, firstAttempt: r.meta.firstAttemptViolations },
+      value_pass: v.ok && c.ok,
+      status: 'draft',
+      composer: r.meta.composer,
+      composer_model: r.meta.model,
+      codex_version: r.meta.codexVersion,
+      compose_attempts: r.meta.attempts,
+      fallback_reason: r.meta.fallbackReason,
+      craft_warnings: r.meta.craftWarnings,
+    });
+  }
+  const posts = x.posts;
 
   await notifyFounder({
     domain: `proactive/${angle.format}`,
@@ -114,24 +175,10 @@ export async function runProactiveTick(supabase: SB): Promise<ProactiveResult> {
 
 // ── helpers ─────────────────────────────────────────────────────
 
-function clip(s: string, n = MAX_POST): string {
-  const t = s.replace(/\s+/g, ' ').trim();
-  return t.length <= n ? t : `${t.slice(0, n - 1).trimEnd()}…`;
-}
-
-// Lead with the sourced answer (punchy), then sources, then the engagement hook,
-// then the public /q link. The full question+answer lives on the /q page.
-// The URL sits on its OWN post and is never clip()ed: combining it with a long
-// hook and clipping to MAX_POST truncated the UUID, and /q/[id] 404s on a
-// non-36-char id ("that coordinate doesn't resolve").
-function renderThread(body: string, hook: string, sources: string[], qUrl: string): string[] {
-  const posts: string[] = [clip(body)];
-  if (sources.length) posts.push(clip(`Sources: ${sources.slice(0, 3).join(' · ')}`));
-  if (hook) posts.push(clip(hook));
-  posts.push(`Full read: ${qUrl}`);
-  return posts;
-}
-
+// The bespoke X renderer that lived here was retired in PR-5: the
+// registry's writers (agent-first, template-always) draft every channel
+// now, and the X template already keeps the URL post un-clipped — the
+// UUID-truncation lesson that renderer carried is enforced there.
 function extractSources(text: string): string[] {
   const feeds = ['GDELT', 'AIS', 'ADS-B', 'ADSB', 'EIA', 'ACLED', 'OFAC', 'ENTSO-E', 'GEM', 'Polymarket'];
   const found = new Set<string>();
