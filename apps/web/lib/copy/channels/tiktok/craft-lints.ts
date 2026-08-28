@@ -251,7 +251,7 @@ export function tiktokCraftLint(
     push('lockup-and-end-card', `the lower third omits the eYKON wordmark — got "${lower.trim() || '(empty)'}"`);
   }
   if (!INSTRUMENT_RE.test(lower)) {
-    push('lockup-and-end-card', `the lower third omits the feed name — got "${lower.trim() || '(empty)'}"`);
+    push('lockup-and-end-card', `the lower third omits the instrument name — got "${lower.trim() || '(empty)'}" — name the instrument the evidence cites (FIRMS, GDELT, Black Marble, VIIRS, AIS, ADS-B, EIA, OFAC), copied verbatim; an invented feed title like "Convergence Watch Feed" is fabricated provenance and does not count`);
   }
   if (!/\bUTC\b/.test(lower)) {
     push('lockup-and-end-card', `the lower third omits the observation timestamp UTC — got "${lower.trim() || '(empty)'}"`);
