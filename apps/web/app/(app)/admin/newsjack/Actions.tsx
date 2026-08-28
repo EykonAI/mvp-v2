@@ -5,7 +5,15 @@ import { useState } from 'react';
 // Founder review actions for one newsjack draft. Posts to
 // /api/admin/newsjack/[id]; refreshes the row's visible state on success.
 
-export default function NewsjackActions({ draftId, posts, channel }: { draftId: string; posts: string[]; channel: string }) {
+// `publishTarget` is decided by the SERVER page (only it can see whether a
+// publish path is configured for this channel) and names the destination.
+// null = approve only marks the row; the founder posts by hand.
+//
+// The label must say what the click does: with the Discord webhook set,
+// "Approve" IS a publish, and a button that publishes without saying so is
+// the composer-badge gate all over again — state changing behind a label
+// that stopped being true.
+export default function NewsjackActions({ draftId, posts, channel, publishTarget }: { draftId: string; posts: string[]; channel: string; publishTarget: string | null }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -57,7 +65,7 @@ export default function NewsjackActions({ draftId, posts, channel }: { draftId: 
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
       <button style={{ ...btn, borderColor: 'var(--teal)', color: 'var(--teal)' }} disabled={busy || !!done} onClick={() => act('approve')}>
-        {channel === 'x' ? 'Approve + publish' : 'Approve'}
+        {publishTarget ? `Approve + publish to ${publishTarget}` : 'Approve'}
       </button>
       <button style={{ ...btn, borderColor: 'var(--amber)', color: 'var(--amber)' }} disabled={busy || !!done} onClick={() => act('reject')}>
         Reject
