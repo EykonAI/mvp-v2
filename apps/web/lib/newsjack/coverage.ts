@@ -19,7 +19,10 @@ export const UNCOVERED_REGIONS: { label: string; needles: string[] }[] = [
 ];
 
 // Live-coverage phrasing that, next to an uncovered region, is an overclaim.
-const LIVE_CLAIM_NEEDLES = [
+// EXPORTED so the writer prompts can render this exact list — every hard rule
+// must be stated in the prompt that is judged by it, in the linter's words,
+// and a copied list would drift.
+export const LIVE_CLAIM_NEEDLES = [
   'live on', 'watch it live', 'on the globe', 'real-time', 'realtime',
   'live feed', 'tracking live', 'live ais', 'live vessel', 'live now',
 ];
@@ -35,12 +38,22 @@ export function isCoveredRegion(label: string | null | undefined): boolean {
 // Returns the offending region labels (empty = clean). Naming an uncovered
 // region analytically (no live claim) is allowed.
 export function scanOverclaim(text: string): string[] {
+  return scanOverclaimDetail(text).map((h) => h.label);
+}
+
+// Same scan, but says WHICH live-claim phrase co-occurred — so the
+// violation can quote the construction instead of only naming the
+// region. Overnight 2026-08-28, four agent drafts burned both attempts
+// on "coverage overclaim: … frame analytically" without ever being told
+// which phrase had tripped it; a violation that names no construction
+// cannot be complied with.
+export function scanOverclaimDetail(text: string): { label: string; needle: string }[] {
   const t = text.toLowerCase();
-  const claimsLive = LIVE_CLAIM_NEEDLES.some((n) => t.includes(n));
-  if (!claimsLive) return [];
-  const hits: string[] = [];
+  const needle = LIVE_CLAIM_NEEDLES.find((n) => t.includes(n));
+  if (!needle) return [];
+  const hits: { label: string; needle: string }[] = [];
   for (const r of UNCOVERED_REGIONS) {
-    if (r.needles.some((n) => t.includes(n))) hits.push(r.label);
+    if (r.needles.some((n) => t.includes(n))) hits.push({ label: r.label, needle });
   }
   return hits;
 }

@@ -1,4 +1,4 @@
-import { scanOverclaim } from '@/lib/newsjack/coverage';
+import { scanOverclaimDetail } from '@/lib/newsjack/coverage';
 
 // The eYKON codes, enforced as gates (Newsjacking SOP §4, §8). A draft that
 // fails any lint is stored as 'blocked', never published. These are mechanical
@@ -73,11 +73,14 @@ export function voiceLint(text: string): LintResult {
 }
 
 export function coverageLint(text: string): LintResult {
-  const hits = scanOverclaim(text);
+  const hits = scanOverclaimDetail(text);
   return {
     ok: hits.length === 0,
+    // Quote the construction, not just the region: the violation is fed
+    // back verbatim as the retry instruction, and a writer told only
+    // "frame analytically" cannot find the phrase that tripped it.
     violations: hits.map(
-      (r) => `coverage overclaim: ${r} is not live on the current tier — frame analytically`,
+      (r) => `coverage overclaim: ${r.label} is named alongside the live-coverage phrase "${r.needle}" — remove that phrasing (the region may be named analytically)`,
     ),
   };
 }

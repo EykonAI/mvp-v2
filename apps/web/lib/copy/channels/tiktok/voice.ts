@@ -16,6 +16,7 @@
 // one copy; the tool schema and craft-lints.ts both read them.
 
 import { TIKTOK_CODEX, CODEX_RULES, CODEX_VERSION } from './codex';
+import { LIVE_CLAIM_NEEDLES } from '@/lib/newsjack/coverage';
 import { harmRegisterForced } from '@/lib/copy/shared/harm';
 import type { Evidence } from '@/lib/newsjack/template';
 import type { Register, WriterTool } from '@/lib/copy/shared/types';
@@ -149,7 +150,12 @@ export function userPrompt(ev: Evidence, refUrl: string): string {
   const framingRule =
     ev.framing === 'live'
       ? 'This region IS live-covered on the current tier. You may say the observation is live on eYKON.'
-      : 'This region is NOT live-covered on the current tier. You MUST frame it analytically. You may NOT imply we are watching it live, in any wording.';
+      : [
+          'This region is NOT live-covered on the current tier. You MUST frame it analytically.',
+          'You may name the region; what you may not do is pair it with live-coverage phrasing.',
+          `These exact phrases are checked by a linter and NONE may appear anywhere in your output: ${LIVE_CLAIM_NEEDLES.map((n) => `"${n}"`).join(', ')}.`,
+          'Say what the instruments recorded and when; do not say we are watching it now.',
+        ].join(' ');
 
   return [
     'Write the TikTok script package for this event.',
@@ -256,7 +262,7 @@ export const WRITE_TIKTOK_TOOL: WriterTool = {
       lockupLowerThird: {
         type: 'string' as const,
         description:
-          'The lower third, on screen THROUGHOUT: eYKON wordmark · feed name · observation timestamp UTC · provenance state.',
+          'The lower third, on screen THROUGHOUT: eYKON wordmark · the INSTRUMENT name copied verbatim from the evidence sources (GDELT, FIRMS, Black Marble, VIIRS, AIS, ADS-B, EIA, OFAC…) · observation timestamp UTC · provenance state. Overnight 2026-08-28 every draft failed here by INVENTING a feed name — "Convergence Watch Feed", "Gulf Energy & Maritime Feed". Those are fabricated provenance and a linter refuses them: use the instrument the evidence actually names.',
       },
       lockupEndCard: {
         type: 'string' as const,
