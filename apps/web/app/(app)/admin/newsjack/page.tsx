@@ -4,6 +4,8 @@ import { getCurrentUser } from '@/lib/auth/session';
 import { isFounder } from '@/lib/admin/access';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { listDrafts, countPendingDrafts, type ReviewDraft } from '@/lib/newsjack/store';
+import { discordConfigured } from '@/lib/newsjack/discord-publish';
+import { xConfigured } from '@/lib/newsjack/xclient';
 import Link from 'next/link';
 import NewsjackActions from './Actions';
 import Filters from './Filters';
@@ -36,6 +38,17 @@ const emptyBox: React.CSSProperties = {
   color: 'var(--ink-faint)',
   fontSize: 13,
 };
+
+// What clicking Approve will actually do for this channel, decided where
+// the env is visible. 'X' / 'Discord' = auto-publishes there; null = the
+// founder copies and posts by hand. X also has webhook/manual fallbacks,
+// but the INTENT of approve on X has always been publish — Discord's
+// intent depends entirely on whether the webhook is set.
+function publishTargetFor(channel: string): string | null {
+  if (channel === 'x') return xConfigured() || process.env.NEWSJACK_PUBLISH_WEBHOOK ? 'X' : null;
+  if (channel === 'discord') return discordConfigured() ? 'Discord' : null;
+  return null;
+}
 
 const STATUS_COLOR: Record<string, string> = {
   draft: 'var(--teal)',
@@ -203,7 +216,7 @@ function DraftCard({ d }: { d: ReviewDraft }) {
       )}
 
       {isPending ? (
-        <NewsjackActions draftId={d.draft_id} posts={d.posts} channel={d.channel} />
+        <NewsjackActions draftId={d.draft_id} posts={d.posts} channel={d.channel} publishTarget={publishTargetFor(d.channel)} />
       ) : (
         <div style={{ ...meta, marginTop: 10 }}>{d.status}</div>
       )}
