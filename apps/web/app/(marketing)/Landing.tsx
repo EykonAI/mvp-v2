@@ -11,6 +11,7 @@ import { AdvancedScenariosBrief } from '@/components/landing/AdvancedScenariosBr
 import { CalibrationAnchor } from '@/components/landing/CalibrationAnchor';
 import { CommShowcase } from '@/components/landing/CommShowcase';
 import { BriefsShowcase } from '@/components/landing/BriefsShowcase';
+import { PLATFORM_STATS as PS, stat } from '@/lib/marketing/platform-stats';
 
 // Billing cycle state — drives prices and CTAs across the pricing grid.
 type Cycle = 'monthly' | 'annual' | 'annual-crypto';
@@ -341,17 +342,17 @@ export function Landing() {
           <Pillar
             label="P-01 · GLOBE"
             title="The state of the world, on one screen — free for everyone."
-            body="Aircraft (ADS-B), conflict events (GDELT 2.0), thermal anomalies (NASA FIRMS), night-time radiance (NASA Black Marble), chokepoint vessel coverage (AIS) and weather, over the infrastructure that makes them interpretable: ~127,000 power-plant units, ~700 refineries, ~304,000 mineral deposits, ~3,800 seaports, ~7,500 airports, gas and oil pipelines, LNG terminals. Every layer carries its source and refresh timestamp inline. Live feeds are free on every tier — including free."
+            body={`Aircraft (ADS-B), conflict events (GDELT 2.0), thermal anomalies (NASA FIRMS), night-time radiance (NASA Black Marble), chokepoint vessel coverage (AIS) and weather, over the infrastructure that makes them interpretable: ${stat(PS.powerPlantUnits)} power-plant units across ${stat(PS.powerPlants)} plants, ${stat(PS.refineries)} refineries, ${stat(PS.mineralDeposits)} mineral deposits, ${stat(PS.seaports)} seaports, ${stat(PS.airfields)} airports and airfields (closed fields excluded), gas and oil pipelines, LNG terminals. Every layer carries its source and refresh timestamp inline. Live feeds are free on every tier — including free.`}
           />
           <Pillar
             label="P-02 · AI ANALYST"
             title="Ask in plain English. It queries the database."
-            body="A Claude analyst with a catalog of 24 first-class tools wired directly into the live feeds and the platform's proprietary signal tables — no SQL, no guessing from documentation. Persona-aware: pick one of seven roles and the framing, tool selection and output density adapt. When the data can't support an answer, it says so."
+            body={`A Claude analyst with a catalog of ${PS.analystTools} first-class tools wired directly into the live feeds and the platform's proprietary signal tables — no SQL, no guessing from documentation. Persona-aware: pick one of seven roles and the framing, tool selection and output density adapt. When the data can't support an answer, it says so.`}
           />
           <Pillar
             label="P-03 · INTEL"
             title="Nine workspaces where signals become decisions."
-            body="Calibration Ledger, Shadow Fleet, Regime Shifts, Chokepoint Simulator, Sanctions Wargame, Cascade Propagation, Precursor Analogs, Commodities, Critical Minerals — compound signals computed on eYKON infrastructure, with posture scores for five named theatres refreshed every 30 minutes."
+            body={`Calibration Ledger, Shadow Fleet, Regime Shifts, Chokepoint Simulator, Sanctions Wargame, Cascade Propagation, Precursor Analogs, Commodities, Critical Minerals — compound signals computed on eYKON infrastructure, with posture scores for ${PS.postureTheatres} named theatres refreshed every 30 minutes.`}
           />
           <Pillar
             label="P-04 · NOTIF"
@@ -379,7 +380,7 @@ export function Landing() {
           </div>
           <div className="stat sep">·</div>
           <div className="stat">
-            <span className="val">23</span> live analyst tools
+            <span className="val">{PS.analystTools}</span> live analyst tools
           </div>
           <div className="stat sep">·</div>
           <div className="stat">
