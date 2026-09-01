@@ -1,3 +1,4 @@
+import { PLATFORM_STATS as PS } from '@/lib/marketing/platform-stats';
 // Section §4 of the landing page (per the Engineering Execution Prompt).
 // Heading + verbatim PARAGRAPH 1 + a small symbolic flow showing the
 // tool-call → cited synthesis pattern. Sits between the existing
@@ -52,7 +53,7 @@ export function AnalystWithTools() {
         }}
       >
         Most &lsquo;AI + data&rsquo; products are chat panels with no access to the underlying
-        database. Our Chat is a Claude analyst with a catalog of 24 first-class Tools
+        database. Our Chat is a Claude analyst with a catalog of {PS.analystTools} first-class Tools
         wired directly into the platform&rsquo;s proprietary derived datasets — convergence
         events, posture scores, precursor analogs, calibration metrics. When you ask a question,
         the analyst doesn&rsquo;t write SQL or guess from documentation. It calls the right tool,
@@ -71,7 +72,7 @@ export function AnalystWithTools() {
       >
         <FlowChip label="Question" tone="ink" />
         <FlowArrow />
-        <FlowChip label="Tool call · 1 of 23" tone="cyan" mono />
+        <FlowChip label={`Tool call · 1 of ${PS.analystTools}`} tone="cyan" mono />
         <FlowArrow />
         <FlowChip label="Structured answer" tone="ink" />
         <FlowArrow />
