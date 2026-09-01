@@ -12,6 +12,8 @@ import { CalibrationAnchor } from '@/components/landing/CalibrationAnchor';
 import { CommShowcase } from '@/components/landing/CommShowcase';
 import { BriefsShowcase } from '@/components/landing/BriefsShowcase';
 import { PLATFORM_STATS as PS, stat } from '@/lib/marketing/platform-stats';
+import { UseCases } from '@/components/landing/UseCases';
+import { NextStep } from '@/components/landing/NextStep';
 
 // Billing cycle state — drives prices and CTAs across the pricing grid.
 type Cycle = 'monthly' | 'annual' | 'annual-crypto';
@@ -388,6 +390,18 @@ export function Landing() {
           </div>
         </div>
       </section>
+
+      {/* ─── USE CASES (LP v2, PR-B) ─────────────────────────────── */}
+      {/* Capabilities first, then what they are for. Sits between the    */}
+      {/* pillars and the analyst section on purpose.                     */}
+      <UseCases />
+
+      {/* ─── NEXT STEP — hand off to /start ──────────────────────── */}
+      {/* Intent peaks here: three worked examples tied to named beats,   */}
+      {/* so the next thought is "what would it show for mine". spotsLeft */}
+      {/* is passed down rather than refetched — one seat number, one      */}
+      {/* answer. cohortSize stays null until the figure clears its floor. */}
+      <NextStep spotsLeft={spotsLeft} cohortSize={null} />
 
       {/* ─── AI Analyst differentiation (PARAGRAPH 1, prompt §6.1) ─ */}
       <AnalystWithTools />
