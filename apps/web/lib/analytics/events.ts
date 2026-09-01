@@ -62,6 +62,8 @@ export type CampaignProps = {
 
 // Minimum property shape for each event. Extra fields are fine — PostHog
 // widens schemas on demand — but this set is what dashboards rely on.
+export type VideoSurface = 'landing' | 'start';
+
 export type EventProps =
   | { event: 'page_viewed'; path: string }
   | { event: 'signup_started'; plan?: string | null }
@@ -94,8 +96,12 @@ export type EventProps =
   | { event: 'cta_clicked'; source: 'newsjack' | 'proactive' | 'closing'; content_id: string | null; target: string }
   | ({ event: 'closing_page_viewed' } & CampaignProps)
   | { event: 'proof_scrolled'; depth: number }
-  | { event: 'video_played' }
-  | { event: 'video_progress'; pct: 25 | 50 | 75 | 100 }
+  // `surface` distinguishes the landing-page slot from the /start slot.
+  // Optional so existing /start calls stay valid: events with no surface
+  // are /start's, which is how they can be told apart in PostHog until
+  // that page is updated to send it explicitly.
+  | { event: 'video_played'; surface?: VideoSurface }
+  | { event: 'video_progress'; pct: 25 | 50 | 75 | 100; surface?: VideoSurface }
   | { event: 'lead_form_started' }
   | { event: 'lead_captured'; persona: string; theatres: string[]; utm_source: string | null; has_tools: boolean; lead_hash?: string; identity_source?: 'browser' | 'email_hash' }
   | { event: 'offer_viewed'; spots_left: number | null }
