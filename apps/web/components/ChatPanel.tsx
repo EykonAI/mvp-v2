@@ -22,6 +22,7 @@ import {
   writeActivePersona,
 } from '@/lib/intelligence-analyst/persona-visibility';
 import { captureBrowser } from '@/lib/analytics/client';
+import { Markdown } from '@/lib/analyst/markdown';
 import { ShareButton } from '@/components/share/ShareButton';
 
 interface Message {
@@ -602,7 +603,7 @@ export default function ChatPanel() {
                   <span>Snapshot</span>
                 </div>
               )}
-              <div className="chat-content whitespace-pre-wrap">{msg.content}</div>
+              <div className="chat-content"><Markdown text={msg.content} /></div>
               {msg.tool_calls != null && msg.tool_calls > 0 && !msg.snapshot && (
                 <div
                   className="mt-1.5 flex items-center gap-1"

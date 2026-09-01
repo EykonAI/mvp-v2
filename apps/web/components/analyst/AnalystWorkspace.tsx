@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { PERSONAS, DEFAULT_PERSONA, type PersonaId } from '@/lib/intelligence-analyst/personas';
+import { Markdown } from '@/lib/analyst/markdown';
 
 interface SessionSummary {
   id: string;
@@ -727,8 +728,8 @@ export default function AnalystWorkspace({ tier }: { tier: string }) {
                 <div style={{ maxWidth: '88%', padding: '10px 14px', fontSize: 13.5, lineHeight: 1.6, borderRadius: 3,
                   background: m.role === 'user' ? 'rgba(25, 208, 184, 0.14)' : m.role === 'system' ? 'rgba(224, 118, 92, 0.12)' : 'var(--bg-raised)',
                   border: m.role === 'user' ? '1px solid var(--teal-dim)' : m.role === 'system' ? '1px solid rgba(224, 118, 92, 0.45)' : '1px solid var(--rule)' }}>
-                  <div className="chat-content whitespace-pre-wrap">
-                    {m.content}
+                  <div className="chat-content">
+                    <Markdown text={m.content} />
                     {m.streaming && <span style={{ color: 'var(--teal)' }}>▍</span>}
                   </div>
                   {m.tool_calls != null && m.tool_calls > 0 && (
@@ -828,8 +829,8 @@ function InsightsRoom({
                   <button onClick={() => onDelete(ins.id)} title="Remove insight" style={{ ...MONO, fontSize: 10, background: 'none', border: 'none', color: 'var(--ink-faint)', cursor: 'pointer', padding: 0 }}>×</button>
                 </span>
               </div>
-              <div className="chat-content whitespace-pre-wrap" style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--ink-dim)', marginTop: 6, maxHeight: 220, overflow: 'hidden' }}>
-                {ins.body}
+              <div className="chat-content" style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--ink-dim)', marginTop: 6, maxHeight: 220, overflow: 'hidden' }}>
+                <Markdown text={ins.body} />
               </div>
             </div>
           ))}
