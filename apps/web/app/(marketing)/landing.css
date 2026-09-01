@@ -1743,3 +1743,48 @@
   .eykon-landing .nextstep-metrics { flex-direction: column; width: 100%; }
   .eykon-landing .nextstep-in h2 { font-size: 25px; }
 }
+
+/* ═══ FOUNDER VIDEO (LP v2, PR-C) ═══
+   Directly below the hero: the hero says what this is, the pillars say what
+   is in it, and the question between them is who is behind this.          */
+
+.eykon-landing .fv-section { padding-top: 46px; padding-bottom: 46px; }
+.eykon-landing .fv-grid {
+  max-width: 1080px; margin: 0 auto; padding: 0 32px;
+  display: grid; grid-template-columns: 1.25fr 1fr; gap: 34px; align-items: center;
+}
+.eykon-landing .fv-media { min-width: 0; }
+.eykon-landing .fv-frame {
+  position: relative; aspect-ratio: 16 / 9;
+  border: 1px solid var(--border-hi); border-radius: 4px;
+  background:
+    radial-gradient(120% 90% at 50% 118%, var(--teal-glow), transparent 62%),
+    var(--bg-panel);
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.eykon-landing .fv-frame.has-video { padding: 0; border-color: var(--cyan); background: var(--bg-void); }
+.eykon-landing .fv-frame video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.eykon-landing .fv-play {
+  width: 58px; height: 58px; border-radius: 50%;
+  border: 1px solid var(--cyan); background: rgba(5, 8, 15, 0.72);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--cyan); font-size: 17px; padding-left: 3px;
+}
+.eykon-landing .fv-runtime {
+  position: absolute; right: 11px; bottom: 10px;
+  font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.08em;
+  color: var(--text-secondary); background: rgba(5, 8, 15, 0.8);
+  border: 1px solid var(--border); padding: 2px 7px; border-radius: 2px;
+}
+.eykon-landing .fv-copy { display: flex; flex-direction: column; gap: 11px; min-width: 0; }
+.eykon-landing .fv-h2 {
+  font-family: var(--f-display); font-size: 26px; font-weight: 600;
+  line-height: 1.2; letter-spacing: -0.01em; color: var(--text-primary); margin: 0;
+}
+.eykon-landing .fv-body { margin: 0; font-size: 13.5px; line-height: 1.62; color: var(--text-secondary); }
+.eykon-landing .fv-fine { margin: 0; font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.05em; color: var(--text-tertiary); }
+
+@media (max-width: 900px) {
+  .eykon-landing .fv-grid { grid-template-columns: 1fr; gap: 22px; }
+  .eykon-landing .fv-h2 { font-size: 23px; }
+}

@@ -14,6 +14,7 @@ import { BriefsShowcase } from '@/components/landing/BriefsShowcase';
 import { PLATFORM_STATS as PS, stat } from '@/lib/marketing/platform-stats';
 import { UseCases } from '@/components/landing/UseCases';
 import { NextStep } from '@/components/landing/NextStep';
+import { FounderVideo } from '@/components/landing/FounderVideo';
 
 // Billing cycle state — drives prices and CTAs across the pricing grid.
 type Cycle = 'monthly' | 'annual' | 'annual-crypto';
@@ -328,6 +329,12 @@ export function Landing() {
           no countdown, no card required.
         </p>
       </section>
+
+      {/* ─── FOUNDER VIDEO (LP v2, PR-C) ─────────────────────────── */}
+      {/* Between the hero and the pillars: what this is, then who is    */}
+      {/* behind it, then what is in it. Renders a styled fallback while */}
+      {/* the recording is absent — never a broken player.               */}
+      <FounderVideo />
 
       {/* ─── PLATFORM ────────────────────────────────────────────── */}
       <section className="section" id="platform">
