@@ -1788,3 +1788,77 @@
   .eykon-landing .fv-grid { grid-template-columns: 1fr; gap: 22px; }
   .eykon-landing .fv-h2 { font-size: 23px; }
 }
+
+/* ═══ SHOWCASE ROTATOR (LP v2, PR-D) ═══
+   Screenshot and copy share one fixed slot. Used by the platform pillars
+   and the Intelligence Center worksheets.                              */
+
+.eykon-landing .sr { max-width: 1180px; margin: 0 auto; padding: 0 32px; }
+.eykon-landing .sr-stage { position: relative; min-height: 430px; }
+.eykon-landing .sr-slide {
+  position: absolute; inset: 0;
+  display: grid; grid-template-columns: 1.22fr 1fr; gap: 34px; align-items: center;
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity 0.45s ease;
+}
+.eykon-landing .sr-slide.on {
+  position: relative; opacity: 1; visibility: visible; pointer-events: auto;
+}
+.eykon-landing .sr-media { min-width: 0; }
+.eykon-landing .sr-shot {
+  display: block; width: 100%; height: auto;
+  border: 1px solid var(--border-hi); border-radius: 4px; background: var(--bg-panel-mute);
+}
+.eykon-landing .sr-shot-empty {
+  aspect-ratio: 1100 / 687;
+  display: flex; align-items: center; justify-content: center;
+  border-style: dashed; color: var(--text-tertiary);
+  font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.14em;
+}
+.eykon-landing .sr-copy { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.eykon-landing .sr-code {
+  font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--cyan);
+}
+.eykon-landing .sr-flag {
+  align-self: flex-start;
+  font-family: var(--f-mono); font-size: 9px; letter-spacing: 0.13em; text-transform: uppercase;
+  color: var(--amber); border: 1px solid var(--amber); padding: 2px 7px; border-radius: 2px;
+}
+.eykon-landing .sr-title {
+  font-family: var(--f-display); font-size: 22px; font-weight: 600;
+  line-height: 1.25; color: var(--text-primary); margin: 0;
+}
+.eykon-landing .sr-body { margin: 0; font-size: 13.5px; line-height: 1.62; color: var(--text-secondary); }
+
+.eykon-landing .sr-bar {
+  display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 22px;
+}
+.eykon-landing .sr-arw {
+  font-family: var(--f-mono); font-size: 14px; line-height: 1;
+  padding: 6px 12px; border-radius: 2px;
+  border: 1px solid var(--border-hi); background: transparent; color: var(--text-secondary);
+  cursor: pointer;
+}
+.eykon-landing .sr-arw:hover { color: var(--cyan); border-color: var(--cyan); }
+.eykon-landing .sr-dots { display: flex; align-items: center; gap: 7px; }
+.eykon-landing .sr-dots button {
+  width: 8px; height: 8px; padding: 0; border: 0; border-radius: 50%;
+  background: var(--ink-ghost); cursor: pointer;
+}
+.eykon-landing .sr-dots button.on { background: var(--cyan); width: 20px; border-radius: 4px; }
+.eykon-landing .sr-count {
+  font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.1em;
+  color: var(--text-tertiary); min-width: 5ch; text-align: center;
+}
+
+/* Static fallback: SSR, no-JS, reduced motion, narrow viewport. Every slide
+   renders stacked, so nothing is reachable only by waiting for a rotation. */
+.eykon-landing .sr-static .sr-stage { min-height: 0; display: flex; flex-direction: column; gap: 40px; }
+.eykon-landing .sr-static .sr-slide { position: relative; opacity: 1; visibility: visible; pointer-events: auto; }
+
+@media (max-width: 900px) {
+  .eykon-landing .sr-stage { min-height: 0; }
+  .eykon-landing .sr-slide { grid-template-columns: 1fr; gap: 18px; }
+  .eykon-landing .sr-title { font-size: 20px; }
+}

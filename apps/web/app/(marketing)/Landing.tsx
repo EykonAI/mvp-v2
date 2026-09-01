@@ -5,7 +5,6 @@ import './landing.css';
 import { captureBrowser } from '@/lib/analytics/client';
 import { rememberFirstTouch } from '@/lib/analytics/first-touch';
 import { AnalystWithTools } from '@/components/landing/AnalystWithTools';
-import { HeroWorkspaceShowcase } from '@/components/landing/HeroWorkspaceShowcase';
 import { NotificationCenterTease } from '@/components/landing/NotificationCenterTease';
 import { AdvancedScenariosBrief } from '@/components/landing/AdvancedScenariosBrief';
 import { CalibrationAnchor } from '@/components/landing/CalibrationAnchor';
@@ -15,6 +14,8 @@ import { PLATFORM_STATS as PS, stat } from '@/lib/marketing/platform-stats';
 import { UseCases } from '@/components/landing/UseCases';
 import { NextStep } from '@/components/landing/NextStep';
 import { FounderVideo } from '@/components/landing/FounderVideo';
+import { ShowcaseRotator } from '@/components/landing/ShowcaseRotator';
+import { PILLAR_SLIDES, WORKSHEET_SLIDES } from '@/lib/marketing/showcase-slides';
 
 // Billing cycle state — drives prices and CTAs across the pricing grid.
 type Cycle = 'monthly' | 'annual' | 'annual-crypto';
@@ -347,38 +348,15 @@ export function Landing() {
             Six pillars. One platform. The map is free — the intelligence is the product.
           </p>
         </div>
-        <div className="pillars">
-          <Pillar
-            label="P-01 · GLOBE"
-            title="The state of the world, on one screen — free for everyone."
-            body={`Aircraft (ADS-B), conflict events (GDELT 2.0), thermal anomalies (NASA FIRMS), night-time radiance (NASA Black Marble), chokepoint vessel coverage (AIS) and weather, over the infrastructure that makes them interpretable: ${stat(PS.powerPlantUnits)} power-plant units across ${stat(PS.powerPlants)} plants, ${stat(PS.refineries)} refineries, ${stat(PS.mineralDeposits)} mineral deposits, ${stat(PS.seaports)} seaports, ${stat(PS.airfields)} airports and airfields (closed fields excluded), gas and oil pipelines, LNG terminals. Every layer carries its source and refresh timestamp inline. Live feeds are free on every tier — including free.`}
-          />
-          <Pillar
-            label="P-02 · AI ANALYST"
-            title="Ask in plain English. It queries the database."
-            body={`A Claude analyst with a catalog of ${PS.analystTools} first-class tools wired directly into the live feeds and the platform's proprietary signal tables — no SQL, no guessing from documentation. Persona-aware: pick one of seven roles and the framing, tool selection and output density adapt. When the data can't support an answer, it says so.`}
-          />
-          <Pillar
-            label="P-03 · INTEL"
-            title="Nine workspaces where signals become decisions."
-            body={`Calibration Ledger, Shadow Fleet, Regime Shifts, Chokepoint Simulator, Sanctions Wargame, Cascade Propagation, Precursor Analogs, Commodities, Critical Minerals — compound signals computed on eYKON infrastructure, with posture scores for ${PS.postureTheatres} named theatres refreshed every 30 minutes.`}
-          />
-          <Pillar
-            label="P-04 · NOTIF"
-            title="Alerts that watch four different ways."
-            body="Single-event, multi-event, outcome-driven AI (&quot;anything that could move WTI by ≥$2/bbl in 24 hours&quot;), and cross-data convergence rules — evaluated on 15-minute and hourly cadences, delivered by email, SMS and WhatsApp, with a persona-tuned starter library so a working pipeline takes three clicks."
-          />
-          <Pillar
-            label="P-05 · COMM"
-            title="The network where being right is measurable."
-            body="Sealed, commit-reveal predictions scored against live outcomes; a leaderboard ranked by Brier-skill, not follower count; rooms, DMs, and an in-room analyst; paid Spaces in non-custodial USDC where calibrated analysts monetise their track record. Reputation earned by being right — wrong calls left standing."
-          />
-          <Pillar
-            label="P-06 · BRIEFS"
-            title="What eYKON publishes back."
-            body="A daily brief composed each morning from the live feeds, persona digests for seven roles, the convergence wire — and eYKON's own forecasts, hashed at issue and scored in public when they resolve. Reporting you can audit, not just read."
-          />
-        </div>
+        {/* Screenshot and copy share one slot and rotate together —      */}
+        {/* the section previously rendered as a static text grid, which  */}
+        {/* is why the page shipped with no product imagery at all.       */}
+        <ShowcaseRotator
+          slides={PILLAR_SLIDES}
+          idPrefix="pillar"
+          label="The platform, pillar by pillar"
+          intervalMs={7000}
+        />
         <div className="stat-strip">
           <div className="stat">
             <span className="val">6</span> pillars
@@ -390,6 +368,10 @@ export function Landing() {
           <div className="stat sep">·</div>
           <div className="stat">
             <span className="val">{PS.analystTools}</span> live analyst tools
+          </div>
+          <div className="stat sep">·</div>
+          <div className="stat">
+            <span className="val">{stat(PS.refineries)}</span> refineries watched
           </div>
           <div className="stat sep">·</div>
           <div className="stat">
@@ -413,8 +395,29 @@ export function Landing() {
       {/* ─── AI Analyst differentiation (PARAGRAPH 1, prompt §6.1) ─ */}
       <AnalystWithTools />
 
-      {/* ─── Hero workspace showcase ─────────────────────────────── */}
-      <HeroWorkspaceShowcase />
+      {/* ─── INTELLIGENCE CENTER — worksheet rotator (PR-D) ───────── */}
+      {/* Replaces the three-card HeroWorkspaceShowcase. The tiering    */}
+      {/* decision that narrowed the marketing surface to three is      */}
+      {/* honoured in the ORDER — Calibration, Shadow Fleet, Regime     */}
+      {/* Shifts lead, Calibration first because it underwrites the     */}
+      {/* other two — but the surface now shows eight. Critical         */}
+      {/* Minerals is deliberately absent while it is fixture-backed.   */}
+      <section className="section" id="worksheets">
+        <div className="section-head">
+          <span className="eyebrow">·· Intelligence Center ··</span>
+          <h2>Eight worksheets, one dataset.</h2>
+          <p>
+            Each workspace is a different lens on the same live feeds. Calibration comes
+            first because it underwrites the trustworthiness of the rest.
+          </p>
+        </div>
+        <ShowcaseRotator
+          slides={WORKSHEET_SLIDES}
+          idPrefix="worksheet"
+          label="The Intelligence Center, worksheet by worksheet"
+          intervalMs={8000}
+        />
+      </section>
 
       {/* ─── Notification Center tease ───────────────────────────── */}
       <NotificationCenterTease />
@@ -1131,16 +1134,6 @@ export function Landing() {
 // ───────────────────────────────────────────────────────────────
 // Sub-components
 // ───────────────────────────────────────────────────────────────
-
-function Pillar({ label, title, body }: { label: string; title: string; body: string }) {
-  return (
-    <div className="pillar">
-      <div className="pillar-label">{label}</div>
-      <div className="pillar-title">{title}</div>
-      <p className="pillar-body">{body}</p>
-    </div>
-  );
-}
 
 function Cluster({
   title,
