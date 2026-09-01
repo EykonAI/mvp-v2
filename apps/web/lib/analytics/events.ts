@@ -19,6 +19,10 @@ export const EVENT = {
   UPGRADE_CLICKED: 'upgrade_clicked',
   CANCEL_CLICKED: 'cancel_clicked',
   REFERRAL_CLICKED: 'referral_clicked',
+  // Outbound: eykon.ai/discord and eykon.ai/x. A click on a raw
+  // discord.gg or x.com link is invisible to us; routed through our own
+  // domain it is countable. See lib/social/links.ts.
+  SOCIAL_LINK_CLICKED: 'social_link_clicked',
   WAITLIST_JOINED: 'waitlist_joined',
   PERSONA_CHANGED: 'persona_changed',
   ADVANCED_PERSONAS_TOGGLED: 'advanced_personas_toggled',
@@ -78,6 +82,18 @@ export type EventProps =
   | { event: 'upgrade_clicked'; from_tier: string; target_tier: string; context?: string }
   | { event: 'cancel_clicked'; from_tier: string }
   | { event: 'referral_clicked'; target: 'link_copy' | 'share_twitter' | 'share_email' }
+  | {
+      event: 'social_link_clicked';
+      social: 'discord' | 'x';
+      /** Whether the destination came from the env override or the
+       *  checked-in fallback — so a forgotten env var is visible in the
+       *  data rather than only in the code. */
+      destination_source: 'env' | 'fallback';
+      utm_source: string | null;
+      utm_medium: string | null;
+      utm_campaign: string | null;
+      referrer: string | null;
+    }
   | { event: 'waitlist_joined'; tier: 'pro' | 'enterprise' }
   | {
       event: 'persona_changed';
