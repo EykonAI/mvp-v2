@@ -68,3 +68,24 @@ export const PLATFORM_STATS = {
 export function stat(n: number): string {
   return n.toLocaleString('en-US');
 }
+
+/**
+ * The founding-cohort figure is rendered only once it clears this floor.
+ *
+ * Below it the number argues against us: it reads as "nobody uses this" on the
+ * one page whose job is credibility. Live on 2026-09-01 it stood at roughly 39
+ * — 36 registered users plus 4 closing_leads — and per the onboarding brief all
+ * /start traffic to date has been the founder and two agent probes, so those 4
+ * are test rows rather than prospects.
+ *
+ * Two things this must never do: count the fiat_waitlist rows (all 25 are
+ * unsubscribed farmed bot rows — the admin view says "25 on this list reserve
+ * nothing"), and render a hardcoded fallback. The homepage previously shipped a
+ * fabricated seat count of 847 that rendered while the live counter loaded; it
+ * was removed in #368. Below the floor the figure is simply absent.
+ *
+ * Founder decision 2026-09-01: ship the band with the seat counter alone and
+ * let this appear on its own once it clears. Raise or lower the floor freely —
+ * it is one number, and nothing else depends on it.
+ */
+export const COHORT_DISPLAY_FLOOR = 250;

@@ -1506,3 +1506,240 @@
   gap: 12px;
   margin-top: 18px;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   USE CASES (LP v2, PR-B)
+   Chassis mirrors .pricing-carousel deliberately — same overlap, same
+   centre zoom, same fallbacks. A second visual language for the same
+   idea would only drift.
+   ═══════════════════════════════════════════════════════════════════ */
+
+.eykon-landing .uc-grid {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 30px 32px 10px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.eykon-landing .uc-carousel {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 40px 32px 24px;
+  display: grid;
+}
+.eykon-landing .uc-carousel .uc-slot {
+  grid-area: 1 / 1;
+  width: 34%;
+  justify-self: center;
+  display: flex;
+  transition: transform 0.5s ease, opacity 0.5s ease;
+}
+.eykon-landing .uc-carousel .uc-slot .uc-card { flex: 1; }
+.eykon-landing .uc-carousel .uc-slot.pos-center { transform: translateX(0) scale(1.06); z-index: 3; }
+.eykon-landing .uc-carousel .uc-slot.pos-left {
+  transform: translateX(-92%) scale(0.94);
+  opacity: 0.7; z-index: 2; cursor: pointer;
+}
+.eykon-landing .uc-carousel .uc-slot.pos-right {
+  transform: translateX(92%) scale(0.94);
+  opacity: 0.7; z-index: 2; cursor: pointer;
+}
+
+.eykon-landing .uc-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 22px 20px 18px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-panel-mute);
+}
+.eykon-landing .uc-card.highlight {
+  border-color: var(--cyan);
+  background: var(--bg-panel);
+  box-shadow: 0 0 0 1px var(--teal-deep), 0 26px 64px -22px rgba(0, 0, 0, 0.85);
+}
+.eykon-landing .uc-flag {
+  position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+  font-family: var(--f-mono); font-size: 9.5px; font-weight: 600;
+  letter-spacing: 0.15em; text-transform: uppercase;
+  color: var(--bg-void); background: var(--cyan);
+  padding: 4px 12px; border-radius: 3px; white-space: nowrap;
+}
+.eykon-landing .uc-code {
+  font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--cyan);
+}
+.eykon-landing .uc-persona {
+  align-self: flex-start;
+  font-family: var(--f-mono); font-size: 9.5px; font-weight: 600;
+  letter-spacing: 0.15em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 2px; border: 1px solid currentColor;
+}
+.eykon-landing .uc-persona.trader { color: var(--cyan); }
+.eykon-landing .uc-persona.press { color: var(--violet); }
+.eykon-landing .uc-title {
+  font-family: var(--f-display); font-size: 17px; font-weight: 600;
+  line-height: 1.28; color: var(--text-primary); margin: 0;
+}
+
+.eykon-landing .uc-figure {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-void);
+  overflow: hidden;
+}
+.eykon-landing .uc-figure svg { display: block; width: 100%; height: auto; }
+.eykon-landing .uc-prov {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 7px;
+  padding: 7px 10px; border-top: 1px solid var(--border);
+  font-family: var(--f-mono); font-size: 8.5px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-tertiary);
+}
+.eykon-landing .uc-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 6px; border-radius: 2px; border: 1px solid currentColor;
+}
+.eykon-landing .uc-chip::before {
+  content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor;
+}
+.eykon-landing .uc-chip.live { color: var(--green); }
+.eykon-landing .uc-chip.diagram { color: var(--violet); }
+.eykon-landing .uc-wm { color: var(--cyan); font-weight: 600; letter-spacing: 0.14em; }
+.eykon-landing .uc-sep { color: var(--ink-ghost); }
+
+.eykon-landing .uc-question {
+  font-style: italic; font-size: 13px; line-height: 1.5;
+  color: var(--text-primary);
+  border-left: 2px solid var(--border-hi); padding-left: 11px; margin: 0;
+}
+.eykon-landing .uc-sub {
+  font-family: var(--f-mono); font-size: 9.5px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--text-tertiary);
+}
+.eykon-landing .uc-points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.eykon-landing .uc-points li {
+  position: relative; padding-left: 16px;
+  font-size: 12.5px; line-height: 1.5; color: var(--text-secondary);
+}
+.eykon-landing .uc-points li::before { content: "▸"; position: absolute; left: 0; color: var(--cyan); font-size: 11px; }
+.eykon-landing .uc-points li b { color: var(--text-primary); font-weight: 600; }
+
+.eykon-landing .uc-limit {
+  border: 1px solid var(--border); border-radius: 2px;
+  background: var(--bg-void); padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.eykon-landing .uc-limit-k {
+  font-family: var(--f-mono); font-size: 9px; letter-spacing: 0.13em;
+  text-transform: uppercase; color: var(--amber);
+}
+.eykon-landing .uc-limit p { margin: 0; font-size: 12px; line-height: 1.45; color: var(--text-secondary); }
+
+.eykon-landing .uc-foot {
+  margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+}
+.eykon-landing .uc-btn {
+  font-family: var(--f-mono); font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--cyan); text-decoration: none; white-space: nowrap;
+}
+.eykon-landing .uc-btn:hover, .eykon-landing .uc-btn:focus-visible { text-decoration: underline; }
+.eykon-landing .uc-btn.primary {
+  padding: 9px 14px; border-radius: 2px;
+  background: var(--cyan); color: var(--bg-void);
+}
+.eykon-landing .uc-btn.primary:hover { background: var(--cyan-dim); text-decoration: none; }
+.eykon-landing .uc-gate {
+  font-family: var(--f-mono); font-size: 9px; letter-spacing: 0.1em;
+  text-transform: uppercase; padding: 2px 7px; border-radius: 2px;
+  border: 1px solid var(--border-hi); color: var(--text-tertiary); white-space: nowrap;
+}
+.eykon-landing .uc-gate.free { color: var(--green); border-color: var(--green); }
+
+.eykon-landing .uc-controls {
+  display: flex; align-items: center; justify-content: center; gap: 12px; margin: 10px 0 4px;
+}
+.eykon-landing .uc-arw {
+  font-family: var(--f-mono); font-size: 14px; line-height: 1;
+  padding: 6px 12px; border-radius: 2px;
+  border: 1px solid var(--border-hi); background: transparent; color: var(--text-secondary);
+  cursor: pointer;
+}
+.eykon-landing .uc-arw:hover { color: var(--cyan); border-color: var(--cyan); }
+.eykon-landing .uc-dots { display: flex; align-items: center; gap: 8px; }
+.eykon-landing .uc-dots button {
+  width: 9px; height: 9px; padding: 0; border: 0; border-radius: 50%;
+  background: var(--ink-ghost); cursor: pointer;
+}
+.eykon-landing .uc-dots button.on { background: var(--cyan); width: 22px; border-radius: 5px; }
+
+/* ═══ NEXT STEP — the /start hand-off ═══ */
+
+.eykon-landing .nextstep {
+  border-top: 1px solid var(--teal-deep);
+  border-bottom: 1px solid var(--teal-deep);
+  background:
+    radial-gradient(90% 140% at 50% 0%, var(--teal-glow), transparent 62%),
+    var(--bg-panel-mute);
+  padding: 58px 24px;
+}
+.eykon-landing .nextstep-in {
+  max-width: 780px; margin: 0 auto;
+  display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center;
+}
+.eykon-landing .nextstep-in h2 {
+  font-family: var(--f-display); font-size: 30px; font-weight: 600;
+  line-height: 1.16; letter-spacing: -0.01em; color: var(--text-primary); margin: 0;
+  max-width: 22ch;
+}
+.eykon-landing .nextstep-lede {
+  margin: 0; max-width: 60ch; font-size: 14px; line-height: 1.62; color: var(--text-secondary);
+}
+.eykon-landing .nextstep-metrics {
+  display: flex; flex-wrap: wrap; justify-content: center;
+  border: 1px solid var(--border-hi); border-radius: 3px;
+  background: var(--bg-void); overflow: hidden;
+}
+.eykon-landing .nextstep-metric {
+  padding: 14px 30px; display: flex; flex-direction: column; gap: 5px; min-width: 190px;
+}
+.eykon-landing .nextstep-metric + .nextstep-metric { border-left: 1px solid var(--border-hi); }
+.eykon-landing .nextstep-metric .n {
+  font-family: var(--f-display); font-size: 30px; font-weight: 600; line-height: 1;
+  color: var(--cyan); font-variant-numeric: tabular-nums;
+}
+.eykon-landing .nextstep-metric .n small {
+  font-family: var(--f-mono); font-size: 10px; font-weight: 400;
+  color: var(--text-tertiary); margin-left: 6px;
+}
+.eykon-landing .nextstep-metric .k {
+  font-family: var(--f-mono); font-size: 9.5px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--text-tertiary);
+}
+.eykon-landing .nextstep-cta {
+  font-family: var(--f-mono); font-size: 12px; font-weight: 600;
+  letter-spacing: 0.11em; text-transform: uppercase;
+  padding: 14px 26px; border-radius: 2px;
+  background: var(--cyan); color: var(--bg-void); text-decoration: none;
+}
+.eykon-landing .nextstep-cta:hover { background: var(--cyan-dim); }
+.eykon-landing .nextstep-fine {
+  margin: 0; font-family: var(--f-mono); font-size: 10.5px;
+  letter-spacing: 0.05em; color: var(--text-tertiary);
+}
+.eykon-landing .nextstep-fine a { color: var(--cyan); }
+
+@media (max-width: 1100px) {
+  .eykon-landing .uc-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .eykon-landing .nextstep-metric + .nextstep-metric { border-left: none; border-top: 1px solid var(--border-hi); }
+  .eykon-landing .nextstep-metrics { flex-direction: column; width: 100%; }
+  .eykon-landing .nextstep-in h2 { font-size: 25px; }
+}
