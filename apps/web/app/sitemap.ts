@@ -14,6 +14,14 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 1.0,
     },
     {
+      // The public half of the MCP surface. Crawlable on purpose: it is
+      // how a person evaluating eYKON finds out an agent can use it.
+      url: `${baseUrl}/mcp`,
+      lastModified,
+      changeFrequency: 'monthly',
+      priority: 0.7,
+    },
+    {
       url: `${baseUrl}/terms`,
       lastModified,
       changeFrequency: 'monthly',
