@@ -1,6 +1,6 @@
 // ─── MCP daily quota (migration 118) ─────────────────────────────
 //
-// Founder decision 2026-09-05: Pro gets MCP at 50 calls/day.
+// Founder decision 2026-09-05: Pro gets MCP at 10 calls/day.
 //
 // This is DELIBERATELY NOT usage_counters / increment_usage_counter.
 // That instrument is keyed on date_trunc('month') and is the right
@@ -21,19 +21,25 @@ import type { Tier } from '@/lib/pricing';
 /**
  * Calls per UTC calendar day, by effective tier.
  *
- * pro: 50 is the founder decision. member: 0 is the LITERAL reading of
- * that decision — "Pro gets MCP" — and is the conservative default; a
- * Member subset can be opened later without anyone having relied on it,
- * whereas closing it afterwards would be taking something away.
+ * pro: 10 is the founder decision (2026-09-05, revised down from an
+ * initial 50 before either number shipped). member: 0 is the LITERAL
+ * reading of that decision — "Pro gets MCP" — and is the conservative
+ * default; a Member subset can be opened later without anyone having
+ * relied on it, whereas closing it afterwards would be taking
+ * something away.
  *
- * desk and enterprise are scaled from pro rather than decided; they are
- * flagged in the PR as needing confirmation before either tier is sold
- * on the strength of them.
+ * desk and enterprise are NOT founder-decided. They were scaled from
+ * the original pro: 50 and are deliberately left unchanged here rather
+ * than silently re-derived from pro: 10 — inventing a second number to
+ * preserve a ratio nobody chose is how a placeholder becomes a
+ * commitment. The ladder is consequently steep (pro 10 -> desk 250)
+ * and that is flagged on the PR. desk is unmarketed today, so nothing
+ * is sold on it in the meantime.
  */
 export const MCP_DAILY_LIMITS: Record<Tier, number> = {
   citizen: 0,
   member: 0,
-  pro: 50,
+  pro: 10,
   desk: 250,
   enterprise: 1_000,
 };
