@@ -95,18 +95,30 @@ export function buildMcpServer(caller: ApiCaller): Server {
     if (!quota.allowed) {
       return refusal(
         quota.limit <= 0
-          ? {
-              // Every tier now carries a non-zero default allowance, so
-              // this branch is only reached when an operator has set
-              // MCP_DAILY_LIMIT_<TIER>=0 — a deliberate per-tier kill
-              // switch. It therefore must NOT name a tier to upgrade
-              // to: the cap is a runtime setting, not a plan boundary,
-              // and pointing at /pricing would send someone to buy
-              // something that would not fix it.
-              error: `MCP access is currently disabled for the ${caller.tier} tier.`,
-              your_tier: caller.tier,
-              contact: 'hello@eykon.ai',
-            }
+          ? // A zero allowance has two completely different causes and
+            // they need different advice. If the tier's DEFAULT is
+            // also zero, this is a plan boundary — MCP is a paid
+            // feature and /pricing genuinely fixes it. If the default
+            // is non-zero and the effective limit is zero, an operator
+            // has set MCP_DAILY_LIMIT_<TIER>=0 as a kill switch, and
+            // no purchase would fix that; sending them to /pricing
+            // would be selling something that does not help.
+            //
+            // Derived by comparing effective against default rather
+            // than hardcoding "citizen", so it stays correct if the
+            // paid boundary ever moves.
+            MCP_DAILY_LIMITS[caller.tier] <= 0
+            ? {
+                error: `MCP access is included on paid plans. The ${caller.tier} tier does not include it.`,
+                your_tier: caller.tier,
+                required_tier: 'member',
+                upgrade_url: 'https://eykon.ai/pricing?from=mcp',
+              }
+            : {
+                error: `MCP access is currently disabled for the ${caller.tier} tier.`,
+                your_tier: caller.tier,
+                contact: 'hello@eykon.ai',
+              }
           : {
               error: `Daily MCP limit reached (${quota.limit} calls).`,
               used: quota.used,
@@ -184,4 +196,3 @@ export function buildMcpServer(caller: ApiCaller): Server {
   return server;
 }
 
-export { MCP_DAILY_LIMITS };

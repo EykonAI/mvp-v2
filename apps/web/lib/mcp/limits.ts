@@ -1,7 +1,7 @@
 // ─── MCP daily quota (migration 118) ─────────────────────────────
 //
-// Founder-set daily caps, 2026-09-05: citizen 5 · member 5 · pro 25
-// · desk 100 · enterprise 500. MCP is NOT Pro-only.
+// Founder-set daily caps, 2026-09-05: citizen 0 · member 5 · pro 25
+// · desk 100 · enterprise 500. MCP is a PAID-TIER feature.
 //
 // This is DELIBERATELY NOT usage_counters / increment_usage_counter.
 // That instrument is keyed on date_trunc('month') and is the right
@@ -26,16 +26,17 @@ import type { Tier } from '@/lib/pricing';
  * rather than a placeholder — earlier editions of this file carried
  * scaled guesses for desk and enterprise, and they are gone.
  *
- * The material change from the first pass is that MCP is no longer
- * Pro-only: citizen and member each get 5/day. A free account can
- * therefore mint a key and call the platform.
+ * MCP is a PAID-TIER feature: citizen is 0 and every paid tier has an
+ * allowance, starting at member 5. A free account can still mint a key
+ * — key issuance is not tier-gated — but every call it makes is
+ * refused, and the refusal points at /pricing.
  *
- * That is bounded on the tool axis as well as the call axis, which is
- * what makes it affordable: toolsForTier('citizen') returns the 13
- * cheap single-source reads and excludes every compute-heavy tool —
- * convergences, posture, shadow fleet, dark contacts, precursor
- * analogs, regime shifts, actor-network expansion, and both
- * simulators. A citizen key cannot reach them at any call volume.
+ * Keeping citizen at 0 also keeps the abuse surface bounded to people
+ * who have paid: free accounts are cheap to create, and /api/waitlist
+ * shipped without Turnstile and was farmed until 22 of its 25 rows
+ * were bots. Key minting still needs its own guard (PR-4), but the
+ * blast radius of getting it wrong is now a paying customer rather
+ * than an anonymous bot.
  *
  * These are DEFAULTS. MCP_DAILY_LIMIT_<TIER> overrides each one at
  * runtime (see dailyLimitFor), so tuning does not need a deploy. They
@@ -45,7 +46,7 @@ import type { Tier } from '@/lib/pricing';
  * next session to read this file would believe it.
  */
 export const MCP_DAILY_LIMITS: Record<Tier, number> = {
-  citizen: 5,
+  citizen: 0,
   member: 5,
   pro: 25,
   desk: 100,
