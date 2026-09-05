@@ -18,8 +18,21 @@
  */
 
 export const PLATFORM_STATS = {
-  /** lib/anthropic.ts CLAUDE_TOOLS — count the entries, they are the contract. */
-  analystTools: 23,
+  /**
+   * Wired analyst tools. Not "defined" — wired: every entry in CLAUDE_TOOLS
+   * has a matching case in lib/tool-executor.ts, so a tool counted here is one
+   * a user can actually make fire.
+   *   grep -cE "^\s+name: '[a-z_]+'," lib/anthropic.ts            -> 24
+   *   grep -cE "^\s+case '[a-z_]+':"  lib/tool-executor.ts        -> 24
+   * The two sets are identical — scripts/marketing/check-tool-count.mjs
+   * asserts that on every CI run, and asserts this constant matches them.
+   * Verified 2026-09-05 on main @ 98017c2.
+   *
+   * This figure has now been wrong in BOTH directions: #441 corrected an
+   * overcount, then query_dark_contact_events landed and made 23 an
+   * undercount. Do not hand-edit it — change a tool, run the check.
+   */
+  analystTools: 24,
 
   /** select count(distinct theatre_slug) from posture_scores where computed_at > now() - interval '24 hours' */
   postureTheatres: 6,
