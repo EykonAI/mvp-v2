@@ -70,9 +70,14 @@ export function buildMcpServer(caller: ApiCaller): Server {
       return refusal(
         known.has(name)
           ? {
+              // Only the citizen tier is tool-filtered (toolsForTier);
+              // member and above receive the full set. So the tier a
+              // refused tool actually unlocks at is MEMBER, not pro.
+              // Naming the wrong tier here would send a citizen to buy
+              // the wrong thing.
               error: `The tool "${name}" is not available on the ${caller.tier} tier.`,
               your_tier: caller.tier,
-              required_tier: 'pro',
+              required_tier: 'member',
               upgrade_url: 'https://eykon.ai/pricing?from=mcp',
             }
           : {
@@ -91,10 +96,16 @@ export function buildMcpServer(caller: ApiCaller): Server {
       return refusal(
         quota.limit <= 0
           ? {
-              error: `MCP access is not included on the ${caller.tier} tier.`,
+              // Every tier now carries a non-zero default allowance, so
+              // this branch is only reached when an operator has set
+              // MCP_DAILY_LIMIT_<TIER>=0 — a deliberate per-tier kill
+              // switch. It therefore must NOT name a tier to upgrade
+              // to: the cap is a runtime setting, not a plan boundary,
+              // and pointing at /pricing would send someone to buy
+              // something that would not fix it.
+              error: `MCP access is currently disabled for the ${caller.tier} tier.`,
               your_tier: caller.tier,
-              required_tier: 'pro',
-              upgrade_url: 'https://eykon.ai/pricing?from=mcp',
+              contact: 'hello@eykon.ai',
             }
           : {
               error: `Daily MCP limit reached (${quota.limit} calls).`,

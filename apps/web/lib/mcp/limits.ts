@@ -1,6 +1,7 @@
 // ─── MCP daily quota (migration 118) ─────────────────────────────
 //
-// Founder decision 2026-09-05: Pro gets MCP at 10 calls/day.
+// Founder-set daily caps, 2026-09-05: citizen 5 · member 5 · pro 25
+// · desk 100 · enterprise 500. MCP is NOT Pro-only.
 //
 // This is DELIBERATELY NOT usage_counters / increment_usage_counter.
 // That instrument is keyed on date_trunc('month') and is the right
@@ -21,27 +22,34 @@ import type { Tier } from '@/lib/pricing';
 /**
  * Calls per UTC calendar day, by effective tier.
  *
- * pro: 10 is the founder decision (2026-09-05, revised down from an
- * initial 50 before either number shipped). member: 0 is the LITERAL
- * reading of that decision — "Pro gets MCP" — and is the conservative
- * default; a Member subset can be opened later without anyone having
- * relied on it, whereas closing it afterwards would be taking
- * something away.
+ * Founder-set, 2026-09-05. Every one of these five is now a decision
+ * rather than a placeholder — earlier editions of this file carried
+ * scaled guesses for desk and enterprise, and they are gone.
  *
- * desk and enterprise are NOT founder-decided. They were scaled from
- * the original pro: 50 and are deliberately left unchanged here rather
- * than silently re-derived from pro: 10 — inventing a second number to
- * preserve a ratio nobody chose is how a placeholder becomes a
- * commitment. The ladder is consequently steep (pro 10 -> desk 250)
- * and that is flagged on the PR. desk is unmarketed today, so nothing
- * is sold on it in the meantime.
+ * The material change from the first pass is that MCP is no longer
+ * Pro-only: citizen and member each get 5/day. A free account can
+ * therefore mint a key and call the platform.
+ *
+ * That is bounded on the tool axis as well as the call axis, which is
+ * what makes it affordable: toolsForTier('citizen') returns the 13
+ * cheap single-source reads and excludes every compute-heavy tool —
+ * convergences, posture, shadow fleet, dark contacts, precursor
+ * analogs, regime shifts, actor-network expansion, and both
+ * simulators. A citizen key cannot reach them at any call volume.
+ *
+ * These are DEFAULTS. MCP_DAILY_LIMIT_<TIER> overrides each one at
+ * runtime (see dailyLimitFor), so tuning does not need a deploy. They
+ * are kept in code rather than left to env alone so that the
+ * repository states the same numbers production runs — a checked-in
+ * default that disagrees with production is a label that lies, and the
+ * next session to read this file would believe it.
  */
 export const MCP_DAILY_LIMITS: Record<Tier, number> = {
-  citizen: 0,
-  member: 0,
-  pro: 10,
-  desk: 250,
-  enterprise: 1_000,
+  citizen: 5,
+  member: 5,
+  pro: 25,
+  desk: 100,
+  enterprise: 500,
 };
 
 /**
