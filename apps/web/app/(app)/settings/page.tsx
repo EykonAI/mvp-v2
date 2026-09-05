@@ -11,6 +11,7 @@ import { ChannelsCard } from '@/components/settings/ChannelsCard';
 import { RecentNotificationsCard } from '@/components/settings/RecentNotificationsCard';
 import { AdvancedPersonasCard } from '@/components/settings/AdvancedPersonasCard';
 import { DigestPreferenceCard } from '@/components/settings/DigestPreferenceCard';
+import { ApiKeysCard } from '@/components/settings/ApiKeysCard';
 
 export const metadata: Metadata = {
   title: 'Settings — eYKON.ai',
@@ -138,6 +139,13 @@ export default async function SettingsPage() {
       {tierMeetsRequirement(displayTier, 'pro') && <RecentNotificationsCard />}
 
       <DigestPreferenceCard />
+
+      {/* Rendered for every tier, not gated like the Pro cards above:
+          a citizen needs to SEE that MCP exists and what it costs, and
+          anyone whose plan has lapsed must still be able to revoke a
+          key they issued while paying. The card reads the effective
+          allowance and adapts. */}
+      <ApiKeysCard />
 
       <ClearHistoryCard />
 
