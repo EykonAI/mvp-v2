@@ -22,9 +22,28 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { getTierForUserId } from '@/lib/subscription';
+import { APP_URL } from '@/lib/url';
 import type { Tier } from '@/lib/pricing';
 
 export const KEY_PREFIX = 'eyk_';
+
+/**
+ * Where a person actually manages their keys — stated ONCE.
+ *
+ * These refusals travel outside the site: they surface inside someone
+ * else's agent session, where a bare relative path is not clickable and
+ * may not even be resolvable. So it is absolute, built from APP_URL like
+ * llms.txt and the /mcp page.
+ *
+ * It is a constant rather than three string literals because the first
+ * version of this file named /settings/api, the card then shipped on
+ * /settings, and the messages kept pointing at a page that does not
+ * exist — including the one shown when a key is REVOKED, which is the
+ * worst possible moment to send someone to a dead URL. Same failure as
+ * the tool count: a label restated by hand outlives the thing it
+ * described.
+ */
+export const KEY_MANAGEMENT_URL = `${APP_URL}/settings`;
 const SECRET_BYTES = 32;
 const PREFIX_DISPLAY_CHARS = 8;
 
@@ -163,7 +182,7 @@ export async function resolveApiKey(
     return {
       ok: false,
       reason: 'malformed',
-      message: `Not an eYKON API key — keys start with "${KEY_PREFIX}". Create one at /settings/api.`,
+      message: `Not an eYKON API key — keys start with "${KEY_PREFIX}". Create one at ${KEY_MANAGEMENT_URL}.`,
     };
   }
 
@@ -193,7 +212,7 @@ export async function resolveApiKey(
       reason: 'revoked',
       message: `API key ${data.key_prefix}… was revoked on ${new Date(
         data.revoked_at as string,
-      ).toISOString().slice(0, 10)}. Create a new one at /settings/api.`,
+      ).toISOString().slice(0, 10)}. Create a new one at ${KEY_MANAGEMENT_URL}.`,
     };
   }
   if (data.expires_at && new Date(data.expires_at as string).getTime() <= Date.now()) {
@@ -202,7 +221,7 @@ export async function resolveApiKey(
       reason: 'expired',
       message: `API key ${data.key_prefix}… expired on ${new Date(
         data.expires_at as string,
-      ).toISOString().slice(0, 10)}. Create a new one at /settings/api.`,
+      ).toISOString().slice(0, 10)}. Create a new one at ${KEY_MANAGEMENT_URL}.`,
     };
   }
 
