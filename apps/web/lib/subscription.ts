@@ -71,9 +71,43 @@ export async function getCurrentTier(): Promise<Tier> {
   const profile = await getUserProfile();
   const base: Tier = profile?.tier ?? 'citizen';
   if (!profile?.id) return base;
+  return raiseByOverride(profile.id, base);
+}
+
+/**
+ * The effective tier for a user id, with NO cookie involved.
+ *
+ * This exists because API-key callers (the MCP server, mig 117) have a
+ * user id but never a session, so getCurrentTier() — which reads
+ * next/headers cookies via getUserProfile — cannot serve them.
+ *
+ * It deliberately shares raiseByOverride() with getCurrentTier rather
+ * than restating the Week Pass rule, so the two paths cannot drift.
+ * §16.6: single config, not scattered constants. A key holder whose
+ * pass expires must re-lock exactly like a browser session does.
+ *
+ * Note the dev short-circuit is NOT repeated here. getCurrentTier
+ * returns 'pro' when auth is disabled so the app stays explorable
+ * locally; a key resolver has an actual row to read and must report
+ * what the database says, or local testing would silently pass on a
+ * tier production would refuse.
+ */
+export async function getTierForUserId(userId: string): Promise<Tier> {
+  const admin = createServerSupabase();
+  const { data } = await admin
+    .from('user_profiles')
+    .select('tier')
+    .eq('id', userId)
+    .maybeSingle();
+  const base: Tier = (data?.tier as Tier) ?? 'citizen';
+  return raiseByOverride(userId, base);
+}
+
+/** Raise a base tier by an active Week Pass override, never downgrade. */
+async function raiseByOverride(userId: string, base: Tier): Promise<Tier> {
   // Only look up overrides below the override tier — pro+ can't gain.
   if (TIER_RANK[base] >= TIER_RANK.pro) return base;
-  const override = await activeOverrideTier(profile.id);
+  const override = await activeOverrideTier(userId);
   if (override && TIER_RANK[override] > TIER_RANK[base]) return override;
   return base;
 }
