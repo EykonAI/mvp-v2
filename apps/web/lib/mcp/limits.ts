@@ -44,6 +44,55 @@ export const MCP_DAILY_LIMITS: Record<Tier, number> = {
   enterprise: 1_000,
 };
 
+/**
+ * Per-tier env overrides, so a cap can be moved on Railway without a
+ * code change. Same shape as the analyst model knobs
+ * (ANALYST_MODEL / _DEEP / _UTILITY) — a checked-in default that an
+ * env var may raise or lower.
+ *
+ * NOT prefixed NEXT_PUBLIC_, deliberately: that prefix inlines a value
+ * at BUILD time, which would mean a cap change needed a rebuild rather
+ * than a restart, and would also publish the number to every browser.
+ * These are read at RUNTIME, per call.
+ */
+const ENV_KEYS: Record<Tier, string> = {
+  citizen: 'MCP_DAILY_LIMIT_CITIZEN',
+  member: 'MCP_DAILY_LIMIT_MEMBER',
+  pro: 'MCP_DAILY_LIMIT_PRO',
+  desk: 'MCP_DAILY_LIMIT_DESK',
+  enterprise: 'MCP_DAILY_LIMIT_ENTERPRISE',
+};
+
+/**
+ * The effective cap for a tier: the env override when it is present
+ * AND valid, otherwise the checked-in default.
+ *
+ * A malformed override does NOT silently become 0 or NaN. `Number('')`
+ * is 0 and `Number('abc')` is NaN, and either would quietly turn MCP
+ * off for a whole tier while the dashboard showed a variable that
+ * looked set — the looks-alive-but-isn't class in §16.3. An invalid
+ * value is refused loudly and the default stands.
+ *
+ * Read per call rather than cached at module scope. Railway restarts
+ * the service on a variable change so a cached read would also be
+ * correct, but a per-call read cannot go stale in a long-lived process
+ * and the cost is a property lookup.
+ */
+export function dailyLimitFor(tier: Tier): number {
+  const fallback = MCP_DAILY_LIMITS[tier] ?? 0;
+  const raw = process.env[ENV_KEYS[tier]];
+  if (raw === undefined || raw.trim() === '') return fallback;
+
+  const n = Number(raw.trim());
+  if (!Number.isInteger(n) || n < 0) {
+    console.warn(
+      `[mcp/limits] ${ENV_KEYS[tier]}="${raw}" is not a non-negative integer — ignoring it and using the built-in default of ${fallback}/day for ${tier}.`,
+    );
+    return fallback;
+  }
+  return n;
+}
+
 export interface QuotaDecision {
   allowed: boolean;
   used: number;
@@ -81,7 +130,7 @@ export async function checkDailyQuota(
   userId: string,
   tier: Tier,
 ): Promise<QuotaDecision> {
-  const limit = MCP_DAILY_LIMITS[tier] ?? 0;
+  const limit = dailyLimitFor(tier);
   const reset = nextUtcMidnight();
   const base: Omit<QuotaDecision, 'allowed' | 'used'> = {
     limit,
