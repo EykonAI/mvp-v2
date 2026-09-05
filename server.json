@@ -1,0 +1,14 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "ai.eykon/intelligence",
+  "title": "eYKON Intelligence",
+  "description": "Live geopolitical intelligence feeds, plus eYKON's own scored and published forecast record.",
+  "version": "1.0.0",
+  "websiteUrl": "https://eykon.ai/mcp",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://eykon.ai/api/mcp"
+    }
+  ]
+}
