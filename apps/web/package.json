@@ -13,7 +13,8 @@
     "a11y:dom": "node scripts/a11y/check-dom.mjs",
     "a11y:dom:app": "node scripts/a11y/check-dom.mjs --app",
     "copy:codex": "node scripts/copy/check-codex.mjs",
-    "copy:harm": "node scripts/copy/check-harm-gate.mjs"
+    "copy:harm": "node scripts/copy/check-harm-gate.mjs",
+    "marketing:tools": "node scripts/marketing/check-tool-count.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

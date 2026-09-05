@@ -933,10 +933,10 @@ export function Landing() {
         <Faq q="I'm a crypto day-trader. What do I actually get that I couldn't cobble together myself?">
           A single screen where a Hormuz escalation, a refinery going dark on satellite
           thermal, and a fresh OFAC designation land in one feed — with the infrastructure
-          context to interpret them, and an AI analyst with 24 tools over the live tables.
-          You could piece together ACLED, FIRMS, sanctions lists and a map yourself — but
-          not in one place, with one provenance trail. The ranked-instruments loop
-          (<code>IM-13</code>) is the roadmap&apos;s centrepiece and is labelled ROADMAP
+          context to interpret them, and an AI analyst with {PS.analystTools} tools over the
+          live tables. You could piece together ACLED, FIRMS, sanctions lists and a map
+          yourself — but not in one place, with one provenance trail. The ranked-instruments
+          loop (<code>IM-13</code>) is the roadmap&apos;s centrepiece and is labelled ROADMAP
           until it ships — we don&apos;t sell it as live.
         </Faq>
         <Faq q="How fresh is the data?">

@@ -50,8 +50,8 @@ export function toolsForTier(tier: Tier): Anthropic.Tool[] {
 //
 // The chat panel can reach every surface of the Intelligence Center.
 // Core live-data tools (vessels, aircraft, conflicts, infrastructure,
-// weather, agent reports) plus ten Intelligence-Center tools added
-// in Phase 8:
+// weather, agent reports) plus the Intelligence-Center tools added in
+// Phase 8 and since:
 //   query_posture_scores, query_convergences, query_shadow_fleet_leads,
 //   query_dark_contact_events, query_calibration, query_precursor_matches,
 //   run_chokepoint_scenario, run_sanctions_wargame, query_regime_shifts,

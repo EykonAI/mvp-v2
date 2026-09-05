@@ -14,7 +14,13 @@ on:
       - 'apps/web/app/globals.css'
       - 'apps/web/components/**'
       - 'apps/web/app/**'
-      - 'apps/web/scripts/a11y/**'
+      # lib/** and the whole scripts/ tree: the source gates below now
+      # read lib/anthropic.ts, lib/tool-executor.ts and lib/marketing/*,
+      # and a gate that does not run on the file it guards is not a gate.
+      # The tool-count drift this catches originates in lib/, which was
+      # outside this filter.
+      - 'apps/web/lib/**'
+      - 'apps/web/scripts/**'
       - '.github/workflows/a11y.yml'
   push:
     branches: [main]
@@ -47,6 +53,13 @@ jobs:
       - name: Harm register gate (hard gate)
         working-directory: apps/web
         run: node scripts/copy/check-harm-gate.mjs
+      # The public analyst tool count has been wrong in both directions
+      # (#441 overcount, then query_dark_contact_events made it an
+      # undercount). Asserts platform-stats matches the wired tool set,
+      # and that no surface hardcodes a second copy of the number.
+      - name: Analyst tool count (hard gate)
+        working-directory: apps/web
+        run: node scripts/marketing/check-tool-count.mjs
 
   # DOM-level check. Separate job because it needs a build, a server and a
   # browser — the source gates above stay fast so PR feedback stays fast.

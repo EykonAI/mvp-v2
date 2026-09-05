@@ -120,7 +120,7 @@ export async function runAnalystTurn(input: EngineTurnInput): Promise<EngineTurn
     acc.legs += 1;
   }
 
-  // Prompt caching (brief §8.3): the system prompt + 22 tool defs are
+  // Prompt caching (brief §8.3): the system prompt + the tool defs are
   // large and static within a session. A cache_control breakpoint on
   // the system block caches tools + system together (render order is
   // tools → system → messages), so legs 2+ of the loop and turns 2+ of
