@@ -138,10 +138,11 @@ export async function POST(req: NextRequest) {
   // parameters back makes a stale build visible from outside — a ?limit=2000
   // request answering "limit: 500" is the deploy telling you it is old. The
   // remaining count is what says whether a backfill is actually progressing.
-  const { count: remaining } = await supabase
-    .from('predictions_register')
-    .select('id', { count: 'exact', head: true })
-    .lte('resolves_at', now.toISOString());
+  // due_unscored, not due_total. The first cut counted every DUE row whether or
+  // not it already had an outcome, so it sat at 46,986 across consecutive ticks
+  // that were each scoring 1,992 rows — a progress field that could not show
+  // progress. §16.4: a label that claims what the code does not compute.
+  const { data: remaining } = await supabase.rpc('due_unscored_predictions_count');
 
   return NextResponse.json({
     ok: true,
@@ -150,7 +151,7 @@ export async function POST(req: NextRequest) {
     limit,
     selection,
     candidates: toScore.length,
-    due_total: remaining ?? null,
+    due_unscored: remaining ?? null,
   });
 }
 

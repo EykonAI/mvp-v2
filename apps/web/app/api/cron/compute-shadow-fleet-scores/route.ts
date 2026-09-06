@@ -83,13 +83,21 @@ export async function POST(req: NextRequest) {
   // Refresh per-vessel cadence baselines (mig 111) — the denominator of the
   // v3 silence feature. Loud failure for the same reason as liveness: scoring
   // absolute silence against no baseline is the v2 bug this replaces.
+  // NOT fatal. A failed REFRESH is not the same as having NO baseline, and
+  // conflating the two cost six days of dark-contact lifecycle: from
+  // 2026-09-01 02:05 to 2026-09-06 this RPC exceeded PostgREST's 8 s
+  // statement_timeout on every run (a 6.09M-row window aggregation measured at
+  // 20.7 s), the handler returned 500 here, and everything downstream — the
+  // profile upsert, the event close loop, the claim emission — never ran. 10,588
+  // events sat open past their deadline while vessel_cadence still held 44,352
+  // perfectly usable rows that were merely a few days old.
+  //
+  // Migration 121 makes the refresh affordable. This line makes the lifecycle
+  // independent of it either way: closing an event past its deadline needs a
+  // clock and a position, not a cadence baseline. The real gate is below, on
+  // whether a baseline EXISTS at all — which is the v2 bug this was written for.
   const cadRefresh = await supabase.rpc('refresh_vessel_cadence');
-  if (cadRefresh.error) {
-    return NextResponse.json(
-      { ok: false, error: `refresh_vessel_cadence: ${cadRefresh.error.message}` },
-      { status: 500 },
-    );
-  }
+  const cadenceRefreshError = cadRefresh.error?.message ?? null;
   const cadence = new Map<string, number>();
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
@@ -103,6 +111,30 @@ export async function POST(req: NextRequest) {
     for (const r of data as any[]) cadence.set(r.mmsi, r.median_interval_h);
     if (data.length < PAGE) break;
   }
+  // The original gate, kept exactly where it belongs: scoring absolute silence
+  // against NO baseline is the v2 bug and stays fatal. A STALE baseline is a
+  // different thing — median inter-fix interval is slowly varying, and running
+  // on a few-day-old one beats not running at all for a week.
+  if (cadence.size === 0) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `vessel_cadence is empty${cadenceRefreshError ? ` (refresh failed: ${cadenceRefreshError})` : ''}`,
+      },
+      { status: 500 },
+    );
+  }
+
+  const { data: cadFresh } = await supabase
+    .from('vessel_cadence')
+    .select('computed_at')
+    .order('computed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const cadenceStaleHours = cadFresh?.computed_at
+    ? round1((now.getTime() - Date.parse(cadFresh.computed_at)) / 3600_000)
+    : null;
+
   const livenessRes = await supabase.from('ais_box_liveness').select('*');
   if (livenessRes.error || !livenessRes.data?.length) {
     return NextResponse.json(
@@ -486,6 +518,10 @@ export async function POST(req: NextRequest) {
     scored: upserts.length - unscoredNoBaseline,
     unscored_no_baseline: unscoredNoBaseline,
     cadence_baselines: cadence.size,
+    // Surfaced, not swallowed: a refresh that keeps failing is now visible in
+    // every response instead of being a 500 that hides the whole tick.
+    cadence_refresh_error: cadenceRefreshError,
+    cadence_stale_hours: cadenceStaleHours,
     voided_dead_box: voidedMmsis.length,
     events_opened: evOpened,
     events_reappeared: evReappeared,
