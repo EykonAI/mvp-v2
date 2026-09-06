@@ -15,6 +15,20 @@ const FLAT_PRIOR = 0.5;
 const INFORMATIVE_EPS = 0.05; // a prediction is informative only if |mean - 0.5| >= this
 const MIN_RESOLVED = 10;      // require this many resolved outcomes before publishing a score
 
+// Batch bounds for one tick. 500 is the scheduled default; the ceiling exists
+// because every row costs a resolver round-trip and the Railway cron client
+// gives up at 110 s regardless of what maxDuration says.
+const DEFAULT_LIMIT = 500;
+const MAX_LIMIT = 2000;
+
+function parseLimit(raw: string | null): number {
+  const n = Number(raw);
+  // Number('') is 0 and Number('abc') is NaN; either would silently mean
+  // "score nothing". Refuse both and keep the default.
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_LIMIT;
+  return Math.min(Math.floor(n), MAX_LIMIT);
+}
+
 /**
  * Score-predictions · hourly.
  * Finds predictions_register rows whose resolves_at ≤ now but have
@@ -34,15 +48,39 @@ export async function POST(req: NextRequest) {
   const supabase = createServerSupabase();
   const now = new Date();
 
-  const { data: pending, error } = await supabase
-    .from('predictions_register')
-    .select('id, feature, source, predicted_distribution, target_observable, resolves_at, issued_at, context, persona, prediction_outcomes(prediction_id)')
-    .lte('resolves_at', now.toISOString())
-    .limit(500);
+  // ?limit=N lets the founder drain a backlog in a few manual ticks without
+  // touching the schedule. Bounded, because the BINDING timeout here is the
+  // Railway cron's `curl --max-time 110`, not this route's maxDuration (§15.3),
+  // and each row costs one round-trip to its resolver.
+  const limit = parseLimit(req.nextUrl.searchParams.get('limit'));
 
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  let toScore: any[] = [];
+  let selection: 'rpc' | 'fallback' = 'rpc';
 
-  const toScore = (pending ?? []).filter((r: any) => !r.prediction_outcomes || r.prediction_outcomes.length === 0);
+  // Server-side "due AND unscored", ordered oldest-first. The previous query
+  // fetched 500 due rows with NO ordering and filtered out the scored ones in
+  // JS, which cannot drain a backlog: as the scored share grows the window
+  // fills with rows that are already done, so throughput decays toward zero
+  // exactly as the queue gets long. With 46,494 unscored due rows that is the
+  // difference between finishing and never finishing.
+  const { data: rpcRows, error: rpcError } = await supabase.rpc('due_unscored_predictions', {
+    p_limit: limit,
+  });
+
+  if (rpcError) {
+    // Migration 120 not applied yet — degrade to the old path rather than 500.
+    selection = 'fallback';
+    const { data: pending, error } = await supabase
+      .from('predictions_register')
+      .select('id, feature, source, predicted_distribution, target_observable, resolves_at, issued_at, context, persona, prediction_outcomes(prediction_id)')
+      .lte('resolves_at', now.toISOString())
+      .order('resolves_at', { ascending: true })
+      .limit(limit);
+    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    toScore = (pending ?? []).filter((r: any) => !r.prediction_outcomes || r.prediction_outcomes.length === 0);
+  } else {
+    toScore = rpcRows ?? [];
+  }
   const writes: any[] = [];
   let deferred = 0;
 
@@ -96,7 +134,24 @@ export async function POST(req: NextRequest) {
   // Materialise the aggregate into calibration_summary.
   await materialiseSummary(supabase);
 
-  return NextResponse.json({ ok: true, scored: writes.length, deferred });
+  // Echo the inputs and what is left. §16.3: an endpoint that reports its own
+  // parameters back makes a stale build visible from outside — a ?limit=2000
+  // request answering "limit: 500" is the deploy telling you it is old. The
+  // remaining count is what says whether a backfill is actually progressing.
+  const { count: remaining } = await supabase
+    .from('predictions_register')
+    .select('id', { count: 'exact', head: true })
+    .lte('resolves_at', now.toISOString());
+
+  return NextResponse.json({
+    ok: true,
+    scored: writes.length,
+    deferred,
+    limit,
+    selection,
+    candidates: toScore.length,
+    due_total: remaining ?? null,
+  });
 }
 
 async function materialiseSummary(supabase: any) {

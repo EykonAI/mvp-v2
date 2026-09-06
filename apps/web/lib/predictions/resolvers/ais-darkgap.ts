@@ -1,49 +1,67 @@
-import type { Resolver } from './types';
+import type { Resolver, SupabaseAny } from './types';
 
 /**
  * Dark-contact reappearance resolver (machine track).
  *
- * target_observable convention (set by issue-dark-contact.ts, mirroring the
- * event table's dedup key):
+ * HOW THE EVENT ROW IS FOUND — and why it is no longer found by timestamp.
  *
- *   `ais:dark_contact:<mmsi>:<gap_started_at ISO>`
+ * The claim's target_observable is `ais:dark_contact:<mmsi>:<gap_started_at ISO>`,
+ * which mirrors the event table's UNIQUE (mmsi, gap_started_at) dedup key. That
+ * makes it a good IDEMPOTENCY key and a terrible LOOKUP key: the issuer builds it
+ * with Date#toISOString(), which is MILLISECOND precision, while
+ * dark_contact_events.gap_started_at is a timestamptz holding MICROSECONDS. So
+ * `.eq('gap_started_at', '2026-08-25T01:06:42.842Z')` never matched a row stored
+ * as 01:06:42.842297+00 — it missed by 297 microseconds.
  *
- * The register row resolves FROM the event row — the event lifecycle (owned
- * by the hourly compute-shadow-fleet-scores cron, mig 112) is the single
- * source of truth, and this resolver only translates its terminal states:
+ * The resolver then read that miss as evidence the event did not exist and, after
+ * the 7-day grace, VOIDed the claim with "event row not found". Measured on
+ * production 2026-09-06: 450 of 450 voided claims had their event row present and
+ * RESOLVED, and 0 were genuinely missing. Exact-timestamp matching returned 0/450;
+ * second-truncated matching returned 450/450. A further 34,081 overdue claims were
+ * in the same state, unresolved rather than voided only because they had not yet
+ * aged past the grace window.
  *
- *   reappeared  → observed = 1  (a newer fix arrived — positive observation)
- *   still_dark  → observed = 0  (not re-observed by our coverage in 72 h —
- *                 exactly what the claim asserted would not be the case)
- *   void        → VOID with the event's coverage_lost reason. The box that
- *                 measured the silence died; nothing was seen; the claim is
- *                 neither a win nor a loss.
- *   open        → null (defer to the next score-predictions tick; the event
- *                 cron closes events at the same deadline this row resolves
- *                 at, so at most one tick of lag)
+ * That is worse than a missed score. VOID is reserved for "we did not look" — the
+ * platform's first directive. Here we looked, the answer was there, and the
+ * resolver filed it as absence. It MANUFACTURED voids on the one track that is
+ * supposed to prove the instruments work.
  *
- * If the event row is MISSING (deleted, or the observable was malformed),
- * defer for 7 days past resolution then VOID with a stated reason — the
- * EIA lesson: never let an absence of data resolve a claim in either
- * direction.
+ * THE FIX: resolve by context.event_id — the event's own uuid primary key, written
+ * onto every claim at issue time by issue-dark-contact.ts and present on 46,936 of
+ * 46,936 machine rows in production. An identifier that never round-trips through
+ * string formatting cannot drift. The timestamp path is kept only for rows with no
+ * event_id (none exist today) and is now a half-open RANGE over the millisecond the
+ * key encodes, so sub-millisecond precision can never bite again.
+ *
+ * The event lifecycle (hourly compute-shadow-fleet-scores, mig 112) remains the
+ * single source of truth; this resolver only translates its terminal states:
+ *
+ *   reappeared  -> observed = 1  (a newer fix arrived — positive observation)
+ *   still_dark  -> observed = 0  (not re-observed in 72 h — what the claim denied)
+ *   void        -> VOID with the event's own coverage_lost reason
+ *   open        -> null (defer to the next tick)
+ *   MISSING     -> defer 7 days past resolution, then VOID with a stated reason.
+ *                  This path is correct and stays; it is simply no longer reached
+ *                  by rows whose event exists.
  */
 
 const VOID_AFTER_MISSING_DAYS = 7;
 
+type EventRow = {
+  status: string | null;
+  resolution: string | null;
+  void_reason: string | null;
+  closed_at: string | null;
+};
+
 export const resolveAisDarkgap: Resolver = async (row, supabase) => {
-  const parsed = parse(row.target_observable);
-  if (!parsed) return null;
+  const ev = await findEvent(row, supabase);
 
-  const { data: ev, error } = await supabase
-    .from('dark_contact_events')
-    .select('status, resolution, void_reason, closed_at')
-    .eq('mmsi', parsed.mmsi)
-    .eq('gap_started_at', parsed.gapStartedAt)
-    .maybeSingle();
+  // A transient lookup failure must not be read as absence — that is the whole
+  // bug this file exists to correct. undefined = "could not ask", retry later.
+  if (ev === undefined) return null;
 
-  if (error) return null; // transient — retry next tick
-
-  if (!ev) {
+  if (ev === null) {
     const overdueMs = Date.now() - Date.parse(row.resolves_at);
     if (overdueMs > VOID_AFTER_MISSING_DAYS * 86_400_000) {
       return {
@@ -70,6 +88,58 @@ export const resolveAisDarkgap: Resolver = async (row, supabase) => {
     source_url: '/intel/shadow-fleet',
   };
 };
+
+const EVENT_COLUMNS = 'status, resolution, void_reason, closed_at';
+
+/**
+ * Returns the event row, null when it provably does not exist, or undefined when
+ * the lookup itself failed. The three states are distinct on purpose: collapsing
+ * "could not ask" into "not there" is what produced 450 false voids.
+ */
+async function findEvent(
+  row: { target_observable: string; context: Record<string, unknown> | null },
+  supabase: SupabaseAny,
+): Promise<EventRow | null | undefined> {
+  const eventId = readEventId(row.context);
+
+  if (eventId) {
+    const { data, error } = await supabase
+      .from('dark_contact_events')
+      .select(EVENT_COLUMNS)
+      .eq('id', eventId)
+      .maybeSingle();
+    if (error) return undefined;
+    if (data) return data as EventRow;
+    // Fall through: an event_id that resolves to nothing is worth one more
+    // attempt on the natural key before we call it missing.
+  }
+
+  const parsed = parse(row.target_observable);
+  if (!parsed) return eventId ? null : undefined;
+
+  // Half-open range over the millisecond the observable encodes. The key carries
+  // ms precision; the column stores µs. Exact equality cannot match, so bound it.
+  const startMs = Date.parse(parsed.gapStartedAt);
+  if (Number.isNaN(startMs)) return undefined;
+  const from = new Date(startMs).toISOString();
+  const to = new Date(startMs + 1).toISOString();
+
+  const { data, error } = await supabase
+    .from('dark_contact_events')
+    .select(EVENT_COLUMNS)
+    .eq('mmsi', parsed.mmsi)
+    .gte('gap_started_at', from)
+    .lt('gap_started_at', to)
+    .maybeSingle();
+
+  if (error) return undefined;
+  return (data as EventRow | null) ?? null;
+}
+
+function readEventId(context: Record<string, unknown> | null): string | null {
+  const raw = context?.event_id;
+  return typeof raw === 'string' && raw.length > 0 ? raw : null;
+}
 
 function parse(observable: string): { mmsi: string; gapStartedAt: string } | null {
   // ais:dark_contact:<mmsi>:<ISO timestamp — itself contains colons>
