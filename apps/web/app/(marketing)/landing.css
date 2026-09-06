@@ -1610,7 +1610,21 @@
 .eykon-landing .uc-chip.live { color: var(--green); }
 .eykon-landing .uc-chip.diagram { color: var(--violet); }
 .eykon-landing .uc-wm { color: var(--cyan); font-weight: 600; letter-spacing: 0.14em; }
-.eykon-landing .uc-sep { color: var(--ink-ghost); }
+/* Was var(--ink-ghost) (#3A4256) = 2.00:1 on --bg-void — below even the
+   3:1 non-text floor, and the a11y dom gate's only blocking failure for
+   six merges. #767F96 measures 5.01:1 on the surface these cards
+   actually sit on, and stays DIMMER than the row's own text (#758CA2,
+   5.75:1) so the separator keeps reading as subordinate to the labels
+   it separates — var(--ink-faint) would have inverted that, being
+   brighter than the text.
+
+   A literal and not a token on purpose: --ink-faint (#8791A4) is
+   already the darkest value safe on all five surfaces (4.61:1 worst,
+   on --bg-hover), so there is no room for a dimmer SHARED token —
+   every candidate below it fails on --bg-hover. This value is correct
+   for --bg-void only. If .uc-card ever moves to a lighter surface,
+   re-measure. */
+.eykon-landing .uc-sep { color: #767F96; }
 
 .eykon-landing .uc-question {
   font-style: italic; font-size: 13px; line-height: 1.5;
