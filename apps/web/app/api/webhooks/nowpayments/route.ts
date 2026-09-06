@@ -53,10 +53,57 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'invalid json' }, { status: 400 });
   }
 
-  const eventId = String(payload.payment_id ?? '');
-  if (!eventId) {
+  // ─── Idempotency key: payment_id AND status ──────────────────
+  //
+  // NOWPayments sends one IPN per STATUS TRANSITION, and every one of
+  // them carries the SAME payment_id:
+  //
+  //   waiting -> confirming -> confirmed -> sending -> finished
+  //
+  // This key was previously the bare payment_id. Combined with
+  // UNIQUE (provider, event_id) on webhook_events, that meant the FIRST
+  // status a payment ever reported claimed the key, and every later
+  // transition — including 'finished' — hit 23505, was classified a
+  // duplicate, and short-circuited with HTTP 200 before reaching any
+  // handler. complete_crypto_purchase was therefore never called, by
+  // any payment, ever.
+  //
+  // Two properties made it invisible:
+  //   1. It returns 200, so NOWPayments records successful delivery and
+  //      never retries. Recurring-notification retries cannot help
+  //      because there is no failure to detect.
+  //   2. It only manifests on a payment's SECOND status, so an
+  //      abandoned checkout (which never leaves 'waiting') looks
+  //      identical to a healthy one.
+  //
+  // Found 2026-09-06 by the first real-money payment ever sent through
+  // this rail: $9 confirmed on-chain 44 deep and swept by NOWPayments,
+  // marked 'finished' on their side, granting nothing on ours. Every
+  // webhook_events row in the platform's history was 'waiting', max one
+  // row per payment — the signature of exactly this bug.
+  //
+  // Including the status keeps real duplicate protection intact: a
+  // genuine redelivery of the SAME status still collides and is
+  // dropped. Only distinct transitions get through, which is what the
+  // handlers below expect. The downstream RPC is separately idempotent
+  // (is_idempotent_replay), so a redelivered 'finished' is guarded
+  // twice.
+  //
+  // The Resend webhook already keys on email_id:type:created_at — the
+  // correct pattern existed in the codebase; it was missing only in the
+  // handler that moves money.
+  const paymentId = String(payload.payment_id ?? '');
+  if (!paymentId) {
     return NextResponse.json({ error: 'missing payment_id' }, { status: 400 });
   }
+  const statusPart = String(payload.payment_status ?? '');
+  if (!statusPart) {
+    // Without a status we cannot build a correct key, and defaulting to
+    // the bare payment_id would silently reintroduce the bug for that
+    // delivery. Refuse loudly with a non-2xx so NOWPayments retries.
+    return NextResponse.json({ error: 'missing payment_status' }, { status: 400 });
+  }
+  const eventId = `${paymentId}:${statusPart}`;
 
   const admin = createServerSupabase();
 
