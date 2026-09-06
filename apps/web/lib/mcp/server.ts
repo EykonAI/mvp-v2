@@ -18,6 +18,7 @@ import { executeToolCall } from '@/lib/tool-executor';
 import { checkDailyQuota, recordCall, MCP_DAILY_LIMITS } from '@/lib/mcp/limits';
 import { envelopeFor } from '@/lib/mcp/provenance';
 import type { ApiCaller } from '@/lib/mcp/auth';
+import type { Tier } from '@/lib/pricing';
 
 export const MCP_SERVER_NAME = 'eykon';
 export const MCP_SERVER_VERSION = '1.0.0';
@@ -68,14 +69,40 @@ function refusal(payload: Record<string, unknown>) {
   };
 }
 
-export function buildMcpServer(caller: ApiCaller): Server {
-  const server = new Server(MCP_SERVER_INFO, { capabilities: { tools: {} } });
+/**
+ * Anonymous callers see the CATALOGUE: every tool, so a registry, a
+ * crawler or a person deciding whether to subscribe can see what eYKON
+ * actually offers. Authenticated callers see THEIR surface, filtered to
+ * their tier.
+ *
+ * Showing the full set to an anonymous caller is advertising, not a
+ * leak: names and schemas are the marketing, the data behind them is
+ * the product, and tools/call re-checks tier and quota on every call.
+ * The instructions string below says which of the two views the client
+ * is holding, so nobody mistakes the catalogue for their entitlement.
+ */
+const CATALOGUE_TIER: Tier = 'enterprise';
+
+export function buildMcpServer(caller: ApiCaller | null): Server {
+  const anonymous = caller === null;
+  const server = new Server(MCP_SERVER_INFO, {
+    capabilities: { tools: {} },
+    instructions: anonymous
+      ? 'PUBLIC CATALOGUE. This is every tool eYKON exposes, listed without a key so you can ' +
+        'see what is here before subscribing. Calling one requires an API key from ' +
+        'https://eykon.ai/settings and a paid plan; the tools available to a given key depend ' +
+        'on its tier. query_calibration returns eYKON\'s own measured forecast skill, so an ' +
+        'agent can check the track record before trusting any other answer.'
+      : 'Tools shown are the ones THIS key can call, filtered to its tier. Every result carries ' +
+        'a provenance envelope stating what the number is grounded in and what it does not ' +
+        'establish; read it before quoting a figure.',
+  });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     // The existing definitions are ALREADY JSON Schema. The only
     // transformation is the field name — input_schema -> inputSchema.
     // No Zod rewrite, and no second copy of 24 schemas to drift.
-    tools: toolsForTier(caller.tier).map((t) => ({
+    tools: toolsForTier(anonymous ? CATALOGUE_TIER : caller!.tier).map((t) => ({
       name: t.name,
       description: t.description ?? '',
       inputSchema: t.input_schema as Record<string, unknown>,
@@ -95,11 +122,24 @@ export function buildMcpServer(caller: ApiCaller): Server {
     const started = Date.now();
     const { name, arguments: args } = req.params;
 
+    // The route refuses an unauthenticated tools/call before it ever
+    // reaches here. This is the second lock: if the route's method
+    // detection is ever wrong, a call must still not execute without a
+    // caller rather than fall through to some default.
+    if (!caller) {
+      return refusal({
+        error: 'This tool requires an eYKON API key.',
+        hint: 'Create one at https://eykon.ai/settings. Listing tools is public; calling them is not.',
+        required_tier: 'member',
+        upgrade_url: 'https://eykon.ai/pricing?from=mcp',
+      });
+    }
+
     // ── Gate 1: tier ──────────────────────────────────────────────
     // Re-checked HERE and not only in tools/list, because a client can
     // call a tool it was never shown. A filter on the catalogue is a
     // convenience; this is the control.
-    const allowed = new Set(toolsForTier(caller.tier).map((t) => t.name));
+    const allowed = new Set(toolsForTier(caller!.tier).map((t) => t.name));
     if (!allowed.has(name)) {
       const known = new Set(toolsForTier('enterprise').map((t) => t.name));
       return refusal(
@@ -110,8 +150,8 @@ export function buildMcpServer(caller: ApiCaller): Server {
               // refused tool actually unlocks at is MEMBER, not pro.
               // Naming the wrong tier here would send a citizen to buy
               // the wrong thing.
-              error: `The tool "${name}" is not available on the ${caller.tier} tier.`,
-              your_tier: caller.tier,
+              error: `The tool "${name}" is not available on the ${caller!.tier} tier.`,
+              your_tier: caller!.tier,
               required_tier: 'member',
               upgrade_url: 'https://eykon.ai/pricing?from=mcp',
             }
@@ -126,7 +166,7 @@ export function buildMcpServer(caller: ApiCaller): Server {
     // checkDailyQuota throws on a read failure (fail closed). That
     // propagates to the route, which turns it into a 5xx naming the
     // cause — never a silent free call.
-    const quota = await checkDailyQuota(caller.userId, caller.tier);
+    const quota = await checkDailyQuota(caller!.userId, caller!.tier);
     if (!quota.allowed) {
       return refusal(
         quota.limit <= 0
@@ -142,16 +182,16 @@ export function buildMcpServer(caller: ApiCaller): Server {
             // Derived by comparing effective against default rather
             // than hardcoding "citizen", so it stays correct if the
             // paid boundary ever moves.
-            MCP_DAILY_LIMITS[caller.tier] <= 0
+            MCP_DAILY_LIMITS[caller!.tier] <= 0
             ? {
-                error: `MCP access is included on paid plans. The ${caller.tier} tier does not include it.`,
-                your_tier: caller.tier,
+                error: `MCP access is included on paid plans. The ${caller!.tier} tier does not include it.`,
+                your_tier: caller!.tier,
                 required_tier: 'member',
                 upgrade_url: 'https://eykon.ai/pricing?from=mcp',
               }
             : {
-                error: `MCP access is currently disabled for the ${caller.tier} tier.`,
-                your_tier: caller.tier,
+                error: `MCP access is currently disabled for the ${caller!.tier} tier.`,
+                your_tier: caller!.tier,
                 contact: 'hello@eykon.ai',
               }
           : {
@@ -159,9 +199,9 @@ export function buildMcpServer(caller: ApiCaller): Server {
               used: quota.used,
               limit: quota.limit,
               resets_at: quota.resetsAt,
-              your_tier: caller.tier,
+              your_tier: caller!.tier,
               upgrade_url:
-                caller.tier === 'pro'
+                caller!.tier === 'pro'
                   ? 'https://eykon.ai/pricing?plan=desk_founding_annual'
                   : 'https://eykon.ai/pricing?from=mcp',
             },
@@ -194,8 +234,8 @@ export function buildMcpServer(caller: ApiCaller): Server {
     // already ran, but it is logged loudly because silent logging
     // failure would quietly stop the quota counting.
     void recordCall({
-      userId: caller.userId,
-      apiKeyId: caller.keyId,
+      userId: caller!.userId,
+      apiKeyId: caller!.keyId,
       toolName: name,
       ok: !failed,
       durationMs,
