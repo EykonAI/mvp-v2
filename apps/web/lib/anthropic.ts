@@ -369,11 +369,17 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'query_calibration',
-    description: 'Brier + log-loss aggregates for the given feature / window.',
+    description:
+      "eYKON's own forecast record: Brier and log-loss per TRACK over a window. " +
+      'Three tracks never blend — house (eYKON\'s own published forecasts), machine ' +
+      '(sensor observables) and creator. Each is returned separately with resolved, ' +
+      'scored and unscored counts; "scored" is the real n. Unscored rows are excluded, ' +
+      'never counted as zero. There is deliberately no combined figure.',
     input_schema: {
       type: 'object' as const,
       properties: {
         feature: { type: 'string', description: 'posture_shift | conflict_escalation | trade_flow | energy_stress' },
+        track: { type: 'string', description: 'house | machine | creator. Omit to get every track, reported separately.' },
         window_days: { type: 'number', description: '7 | 30 | 90 (default 30)' },
       },
       required: [],
