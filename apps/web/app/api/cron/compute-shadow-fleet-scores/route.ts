@@ -20,6 +20,7 @@ export const maxDuration = 300;
 const ACTIVE_WINDOW_H = 72;
 const UPSERT_BATCH = 1000;
 const PAGE = 1000;
+const CLOSE_BATCH = 1000;   // events per close_dark_contact_events() call
 // A dark-contact EVENT opens when silence reaches this multiple of the
 // vessel's own cadence (~12 h for an hourly reporter), and resolves at a 72 h
 // re-observation deadline. See migration 112 for the full lifecycle contract.
@@ -335,6 +336,8 @@ export async function POST(req: NextRequest) {
   let evStillDark = 0;
   let evVoided = 0;
   let evOpened = 0;
+  let evClosed = 0;                       // rows the DATABASE reports changed
+  let evCloseError: string | null = null;
 
   const openEvents: any[] = [];
   for (let from = 0; ; from += PAGE) {
@@ -364,39 +367,72 @@ export async function POST(req: NextRequest) {
       for (const r of (data ?? []) as any[]) posByMmsi.set(r.mmsi, r.updated_at);
     }
 
+    // Classify first, write once. This used to be one sequential UPDATE per
+    // event with NO error check, so `evReappeared++` fired whether or not the
+    // write landed — the counts were intentions, not effects. On 2026-09-06 the
+    // route reported reappeared 128 / still_dark 0 while 2,737 events sat open
+    // past deadline in live boxes, 1,540 of them reappeared and 1,197 still_dark
+    // by the same rules evaluated in SQL. Nothing in the response could have
+    // revealed that, because the errors were discarded.
+    //
+    // 9,876 sequential round-trips is also the wrong shape for a handler whose
+    // Railway client gives up at 110 s.
+    const closes: Array<Record<string, unknown>> = [];
     for (const ev of openEvents) {
       const lastFix = posByMmsi.get(ev.mmsi);
       const gapStartMs = new Date(ev.gap_started_at).getTime();
       if (lastFix && new Date(lastFix).getTime() > gapStartMs) {
         // A newer fix exists: the vessel was re-observed. Positive observation.
         const gapH = (new Date(lastFix).getTime() - gapStartMs) / 3600_000;
-        await supabase.from('dark_contact_events').update({
+        closes.push({
+          id: ev.id,
           status: 'resolved',
           resolution: 'reappeared',
           closed_at: lastFix,
           final_gap_hours: round1(gapH),
-        }).eq('id', ev.id);
+          void_reason: null,
+        });
         evReappeared++;
       } else if (ev.box_slug && boxState(liveness.get(ev.box_slug), now.getTime()) === 'dead') {
         // The box that measured this silence went dead: continued silence is
         // unmeasurable. Never a win, never a loss.
-        await supabase.from('dark_contact_events').update({
+        closes.push({
+          id: ev.id,
           status: 'void',
-          void_reason: `coverage_lost:${ev.box_slug}`,
+          resolution: null,
           closed_at: now.toISOString(),
-        }).eq('id', ev.id);
+          final_gap_hours: null,
+          void_reason: `coverage_lost:${ev.box_slug}`,
+        });
         evVoided++;
       } else if (now.getTime() > new Date(ev.deadline_at).getTime()) {
         // Not re-observed by our coverage within the deadline. A statement
         // about the instrument's view, and worded that way everywhere.
-        await supabase.from('dark_contact_events').update({
+        closes.push({
+          id: ev.id,
           status: 'resolved',
           resolution: 'still_dark',
           closed_at: now.toISOString(),
           final_gap_hours: round1((now.getTime() - gapStartMs) / 3600_000),
-        }).eq('id', ev.id);
+          void_reason: null,
+        });
         evStillDark++;
       }
+    }
+
+    // One statement per chunk, and the RPC returns rows ACTUALLY changed. Any
+    // gap between what we classified and what the database wrote is now
+    // visible in the response instead of being invisible by construction.
+    for (let i = 0; i < closes.length; i += CLOSE_BATCH) {
+      const chunk = closes.slice(i, i + CLOSE_BATCH);
+      const { data, error } = await supabase.rpc('close_dark_contact_events', {
+        p_events: chunk,
+      });
+      if (error) {
+        evCloseError = error.message;
+        break;
+      }
+      evClosed += Number(data ?? 0);
     }
   }
 
@@ -524,6 +560,11 @@ export async function POST(req: NextRequest) {
     events_reappeared: evReappeared,
     events_still_dark: evStillDark,
     events_voided: evVoided,
+    // classified_* are what this tick DECIDED; events_closed_applied is what the
+    // database actually changed. They should match — when they do not, that gap
+    // is the bug, and it used to be unobservable.
+    events_closed_applied: evClosed,
+    events_close_error: evCloseError,
     events_open_total: openEvents.length - evReappeared - evStillDark - evVoided + evOpened,
     claims_issued: claimsIssued,
     claims_already_present: claimsSkipped,
