@@ -22,6 +22,44 @@ import type { ApiCaller } from '@/lib/mcp/auth';
 export const MCP_SERVER_NAME = 'eykon';
 export const MCP_SERVER_VERSION = '1.0.0';
 
+/**
+ * Server identity advertised in the initialize handshake.
+ *
+ * MCP's Implementation schema carries more than name+version: title,
+ * websiteUrl, description and icons are all part of the spec (verified
+ * against @modelcontextprotocol/sdk 1.30). We were sending only the
+ * first two, so every client rendered a generated letter avatar and no
+ * description.
+ *
+ * HONEST CAVEAT, so nobody is surprised: whether a client RENDERS the
+ * icon is entirely the client's business. The branded entries in
+ * Claude's server list (Canva, Figma, Gmail…) are first-party
+ * connectors whose artwork comes from Anthropic's registry, NOT from
+ * MCP serverInfo — a different mechanism. This is spec-correct and
+ * costs nothing, but it is not a guarantee of a logo. The title and
+ * description are the parts most likely to show up.
+ *
+ * The icon is served from this app (app/icon.svg), so it needs no
+ * external host and cannot rot independently of the deploy.
+ */
+const APP_ORIGIN = (process.env.NEXT_PUBLIC_APP_URL ?? 'https://eykon.ai').replace(/\/$/, '');
+
+export const MCP_SERVER_INFO = {
+  name: MCP_SERVER_NAME,
+  title: 'eYKON',
+  version: MCP_SERVER_VERSION,
+  websiteUrl: APP_ORIGIN,
+  description:
+    'Live geopolitical intelligence — thermal anomalies, night-time radiance, vessels, ' +
+    'aircraft, conflict events and infrastructure, plus a published forecast record. ' +
+    'query_calibration returns eYKON\'s own measured skill, so an agent can check the ' +
+    'track record before trusting an answer.',
+  icons: [
+    { src: `${APP_ORIGIN}/icon.svg`, mimeType: 'image/svg+xml', sizes: ['any'] },
+    { src: `${APP_ORIGIN}/eykon-mark-512.png`, mimeType: 'image/png', sizes: ['512x512'] },
+  ],
+};
+
 /** Shape returned for any refusal, so an agent gets a reason it can act on. */
 function refusal(payload: Record<string, unknown>) {
   return {
@@ -31,10 +69,7 @@ function refusal(payload: Record<string, unknown>) {
 }
 
 export function buildMcpServer(caller: ApiCaller): Server {
-  const server = new Server(
-    { name: MCP_SERVER_NAME, version: MCP_SERVER_VERSION },
-    { capabilities: { tools: {} } },
-  );
+  const server = new Server(MCP_SERVER_INFO, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     // The existing definitions are ALREADY JSON Schema. The only
