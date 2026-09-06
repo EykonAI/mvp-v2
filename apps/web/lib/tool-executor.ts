@@ -834,23 +834,88 @@ async function queryCalibration(input: Record<string, any>): Promise<string> {
   try {
     const supabase = createServerSupabase();
     const feature = input.feature as string | undefined;
+    const track = input.track as string | undefined;
     const windowDays = Number(input.window_days ?? 30);
     const since = new Date(Date.now() - windowDays * 24 * 3600_000).toISOString();
+
     let q = supabase
       .from('prediction_outcomes')
-      .select('brier, log_loss, calibration_bin, observed_at, predictions_register!inner(feature, persona)')
+      .select('brier, log_loss, observed_at, predictions_register!inner(feature, track)')
       .gte('observed_at', since)
       .limit(5000);
     if (feature) q = q.eq('predictions_register.feature', feature);
-    const { data } = await q;
-    const briers = (data ?? []).map((r: any) => Number(r.brier)).filter(Number.isFinite);
-    const logLosses = (data ?? []).map((r: any) => Number(r.log_loss)).filter(Number.isFinite);
+    if (track) q = q.eq('predictions_register.track', track);
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+
+    // ─── Scored means scored ──────────────────────────────────────
+    //
+    // A resolved row whose brier is NULL has NOT been scored — it is
+    // unresolved, voided, or the scorer has not run. It is NOT a
+    // perfect prediction.
+    //
+    // The previous implementation did `Number(r.brier)` and kept
+    // anything Number.isFinite. Number(null) is 0 and 0 is finite, so
+    // every unscored row entered the mean AS A PERFECT SCORE and
+    // inflated the denominator. On 2026-09-06 that reported Brier
+    // 0.019 over "n=488" when the truth was 0.244 over n=38 — 450
+    // unscored machine rows counted as zeros. The platform's own first
+    // directive is that absence of an observation is not a result;
+    // this scored it as the best possible one, on the single number
+    // that is eYKON's differentiation, over MCP, to other agents.
+    const scoredNum = (v: unknown): number | null => {
+      if (v === null || v === undefined || v === '') return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const mean = (xs: number[]): number | null =>
+      xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+
+    // ─── Tracks never blend ───────────────────────────────────────
+    //
+    // §8.3: machine (sensor observables), house (eYKON's own
+    // forecasts) and creator are three separate records and averaging
+    // them is meaningless. The old code returned ONE number across all
+    // of them, so a dense machine track buried the house score that
+    // the reader actually asked for. There is deliberately no blended
+    // figure here — a missing number is better than a misleading one.
+    const byTrack = new Map<string, { resolved: number; briers: number[]; logs: number[] }>();
+    for (const row of (data ?? []) as any[]) {
+      const reg = Array.isArray(row.predictions_register)
+        ? row.predictions_register[0]
+        : row.predictions_register;
+      const t = (reg?.track as string) ?? 'unknown';
+      const acc = byTrack.get(t) ?? { resolved: 0, briers: [], logs: [] };
+      acc.resolved += 1;
+      const b = scoredNum(row.brier);
+      if (b !== null) acc.briers.push(b);
+      const l = scoredNum(row.log_loss);
+      if (l !== null) acc.logs.push(l);
+      byTrack.set(t, acc);
+    }
+
+    const tracks: Record<string, unknown> = {};
+    for (const [name, a] of byTrack) {
+      tracks[name] = {
+        resolved: a.resolved,
+        scored: a.briers.length,
+        unscored: a.resolved - a.briers.length,
+        avg_brier: mean(a.briers),
+        avg_log_loss: mean(a.logs),
+      };
+    }
+
     return JSON.stringify({
       feature: feature ?? 'all',
+      track: track ?? 'all (reported separately)',
       window_days: windowDays,
-      count: briers.length,
-      avg_brier: briers.length ? briers.reduce((a, b) => a + b, 0) / briers.length : null,
-      avg_log_loss: logLosses.length ? logLosses.reduce((a, b) => a + b, 0) / logLosses.length : null,
+      tracks,
+      note:
+        'Tracks never blend — machine, house and creator are separate records and a ' +
+        'combined average is meaningless. "scored" is the real n: rows counted in the ' +
+        'average. "unscored" are resolved rows with no Brier yet (unresolved, voided, or ' +
+        'not yet scored) and are EXCLUDED, never treated as zero. A Brier over a handful ' +
+        'of scored rows carries no weight — read scored before quoting any figure.',
     });
   } catch (err: any) {
     return JSON.stringify({ error: err.message, note: 'Predictions register is likely warming up.' });
