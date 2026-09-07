@@ -8,6 +8,7 @@ import { discordConfigured } from '@/lib/newsjack/discord-publish';
 import { xConfigured } from '@/lib/newsjack/xclient';
 import Link from 'next/link';
 import NewsjackActions from './Actions';
+import { redditSubmitTargets } from '@/lib/newsjack/reddit-submit';
 import Filters from './Filters';
 import { parseFacets, filterDrafts, buildGroups, activeCount } from '@/lib/newsjack/review-filters';
 
@@ -216,7 +217,10 @@ function DraftCard({ d }: { d: ReviewDraft }) {
       )}
 
       {isPending ? (
-        <NewsjackActions draftId={d.draft_id} posts={d.posts} channel={d.channel} publishTarget={publishTargetFor(d.channel)} />
+        <NewsjackActions draftId={d.draft_id} posts={d.posts} channel={d.channel} publishTarget={publishTargetFor(d.channel)}
+          // Decided here for the same reason publishTarget is: only the server
+          // sees the subreddit allowlist, and it should not ship to the client.
+          redditTargets={d.channel === 'reddit' ? redditSubmitTargets(d.posts) : undefined} />
       ) : (
         <div style={{ ...meta, marginTop: 10 }}>{d.status}</div>
       )}

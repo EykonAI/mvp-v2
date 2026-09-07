@@ -13,7 +13,14 @@ import { useState } from 'react';
 // "Approve" IS a publish, and a button that publishes without saying so is
 // the composer-badge gate all over again — state changing behind a label
 // that stopped being true.
-export default function NewsjackActions({ draftId, posts, channel, publishTarget }: { draftId: string; posts: string[]; channel: string; publishTarget: string | null }) {
+export interface RedditTarget {
+  slug: string;
+  url: string;
+  mode: 'full' | 'title-only';
+  flairRequired: string | null;
+}
+
+export default function NewsjackActions({ draftId, posts, channel, publishTarget, redditTargets }: { draftId: string; posts: string[]; channel: string; publishTarget: string | null; redditTargets?: RedditTarget[] }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -49,6 +56,24 @@ export default function NewsjackActions({ draftId, posts, channel, publishTarget
     setMsg('thread copied');
   }
 
+  // Reddit is DRAFT-ONLY and this does not change that. The link opens
+  // Reddit's own compose window with the draft already in it; the founder
+  // posts as themselves. No API, no bot, and a human still at the gate.
+  //
+  // In 'title-only' mode the body was too long to carry in a URL safely, so it
+  // goes to the clipboard instead. It is never truncated into the link — a
+  // silently shortened post is one that ships without its limits paragraph or
+  // its affiliation disclosure, which is the whole thing the artifact exists
+  // to carry.
+  function openReddit(t: RedditTarget) {
+    if (t.mode === 'title-only') {
+      void navigator.clipboard?.writeText(posts[1] ?? '');
+      setMsg(`body copied — paste it into r/${t.slug}`);
+    } else {
+      setMsg(`compose window opened for r/${t.slug}${t.flairRequired ? ` — set flair: ${t.flairRequired}` : ''}`);
+    }
+  }
+
   const btn: React.CSSProperties = {
     fontFamily: 'var(--f-mono)',
     fontSize: 11,
@@ -73,6 +98,21 @@ export default function NewsjackActions({ draftId, posts, channel, publishTarget
       <button style={btn} disabled={busy} onClick={copyThread}>
         Copy
       </button>
+      {channel === 'reddit' && (redditTargets ?? []).map((t) => (
+        <a
+          key={t.slug}
+          href={t.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() => openReddit(t)}
+          // "Open" and not "Post": this hands you a compose window, it does not
+          // publish. A button that says more than it does is the composer-badge
+          // gate again.
+          style={{ ...btn, textDecoration: 'none', display: 'inline-block' }}
+        >
+          {t.mode === 'full' ? `Open in r/${t.slug}` : `Open r/${t.slug} + copy body`}
+        </a>
+      ))}
       {msg && <span style={{ fontSize: 12, color: 'var(--ink-dim)' }}>{msg}</span>}
     </div>
   );
