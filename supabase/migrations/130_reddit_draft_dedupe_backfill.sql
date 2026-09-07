@@ -33,8 +33,18 @@
 -- new 'no-repeated-sentence' craft WARNING surfaces the residue to whoever
 -- reviews the draft. These 6 rows are unposted drafts in a queue that
 -- regenerates daily — trim the repeat in Reddit's compose window, or let them
--- age out. Total picture: 36 of 56 drafts carry some repetition; 30 are fixed
--- mechanically here, 6 are flagged for a human.
+-- age out.
+--
+-- CORRECTED AFTER APPLYING (2026-09-07 18:17). The "6" above is the count of
+-- drafts whose ONLY duplication is sentence-level — it is not the residue.
+-- Verified post-backfill: paragraph duplicates 0, STEP 1 replays to 0 rows,
+-- 30 rows touched, and 13 drafts still repeat a sentence. The gap is 7 drafts
+-- that carried BOTH a duplicated paragraph AND an independent repeated
+-- sentence: removing the paragraph fixed one problem and left the other, and
+-- counting only "misses" hid them. Residue is 13 of 56 (23%), all now covered
+-- by the 'no-repeated-sentence' warning. The lesson is the same one this
+-- migration is about: measuring what a fix MISSES is not the same as
+-- measuring what is LEFT.
 --
 -- THE RULE, byte-identical to dedupeParagraphs() in
 -- apps/web/lib/copy/channels/reddit/index.ts so the queue and the writer cannot
