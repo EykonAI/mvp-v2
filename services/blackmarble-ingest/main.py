@@ -411,7 +411,7 @@ def list_night_files(night: date) -> dict[str, str]:
 
 
 def sample_tile(night: date, tile: str, href: str,
-                facilities: list[dict]) -> list[dict]:
+                facilities: list[dict]) -> list[dict] | None:
     """Download one granule, sample every facility in it, return rows.
 
     `href` is the listing's downloadsLink (absolute) or a bare filename
@@ -431,7 +431,20 @@ def sample_tile(night: date, tile: str, href: str,
         url = f"{CLOUD_BASE}/VNP46A2/{href}"
     r = http_get(url, {"Authorization": f"Bearer {EARTHDATA_TOKEN}"}, stream=True)
     if r.status_code == 404:
-        return []
+        # LISTED BUT NOT DOWNLOADABLE. NASA reprocesses nights ~8 days after
+        # first publication (08-21 was restamped 08-29; 08-24..08-29 were
+        # restamped 09-04/06) and the listing updates BEFORE the bytes land
+        # on the cloud mirror. A worker that runs mid-wave sees the new
+        # filename and gets 404 for it. That is a transient, and it must be
+        # reported as a MISSING tile so the night stays incomplete and is
+        # retried next run. Returning [] here made it look like a tile with
+        # no facilities, which process_night counted as "processed", which
+        # completed_nights then froze forever: 08-26..08-29 wrote ZERO
+        # facilities across 84 "processed" tiles with ok=true, and 08-25
+        # wrote 20 tiles of 84, and none of them was ever retried. The data
+        # clock stuck at a partial night and every night-lights claim
+        # family anchored on it.
+        return None
     assert_not_auth_bounce(r, f"granule {tile} {night}")
 
     rows: list[dict] = []
@@ -510,9 +523,21 @@ def completed_nights() -> set[str]:
     one in steady state, while still re-checking anything incomplete."""
     try:
         rows = sb_get_all(
-            "blackmarble_ingest_runs?select=night,tiles_missing,ok&tiles_missing=eq.0&ok=is.true"
+            "blackmarble_ingest_runs?select=night,tiles_missing,tiles_expected,tiles_processed,facilities_written,ok"
+            "&tiles_missing=eq.0&ok=is.true"
         )
-        return {r["night"] for r in rows}
+        # A night is complete only if every expected tile was actually
+        # PROCESSED and something was written. tiles_missing=0 alone was
+        # satisfied by nights where every tile 404'd, because the old code
+        # counted a 404 as processed. Requiring processed == expected AND
+        # written > 0 makes "we looked everywhere and saw nothing" and "we
+        # did not look" impossible to confuse — and a roster is never empty
+        # here (main() exits if it is), so written == 0 is never legitimate.
+        return {
+            r["night"] for r in rows
+            if r.get("tiles_processed") == r.get("tiles_expected")
+            and (r.get("facilities_written") or 0) > 0
+        }
     except Exception as e:                # noqa: BLE001 — non-fatal optimisation
         log(f"WARN: could not read completed nights ({e}) — will rescan all")
         return set()
@@ -537,10 +562,18 @@ def process_night(night: date, roster: dict[str, list[dict]]) -> None:
 
     written = 0
     processed = 0
+    unavailable = 0
     night_errors: list[str] = []
     for t in have:
         try:
             rows = sample_tile(night, t, published[t], roster[t])
+            if rows is None:
+                # Listed, not downloadable (see sample_tile). Counted as
+                # MISSING so tiles_missing > 0 keeps the night out of
+                # completed_nights() and it is retried next run.
+                unavailable += 1
+                log(f"{night} {t}: listed but 404 on download — treated as missing, will retry")
+                continue
             if rows:
                 sb_upsert("blackmarble_facility_radiance",
                           "facility_type,facility_id,period", rows)
@@ -553,10 +586,14 @@ def process_night(night: date, roster: dict[str, list[dict]]) -> None:
             errors.append(msg)
             log(f"ERROR {msg}")
 
+    if unavailable:
+        log(f"{night}: {unavailable} tile(s) listed but not downloadable — night left incomplete")
+
     sb_upsert("blackmarble_ingest_runs", "night", [{
         "night": night.isoformat(),
         "tiles_expected": len(expected), "tiles_processed": processed,
-        "tiles_missing": missing, "facilities_written": written,
+        # missing = not listed + listed-but-404. Either way we did not look.
+        "tiles_missing": missing + unavailable, "facilities_written": written,
         "ok": len(night_errors) == 0,
         "error": "; ".join(night_errors)[:500] or None,
         "ran_at": datetime.now(timezone.utc).isoformat(),
