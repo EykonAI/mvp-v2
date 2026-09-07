@@ -48,61 +48,70 @@ const FAMILIES = [
   { key: 'surge', source: 'nightlights', verdict: 'exclude' as const, reason: 'radiance variance, not a state change' },
 ];
 
+type TrackAgg = {
+  issued: number;
+  resolved: number;
+  void: number;
+  open: number;
+  headline: unknown | null;
+  integrity: unknown;
+  reliability: unknown[];
+  history: unknown[];
+  families: unknown[];
+};
+
+/**
+ * Every figure is aggregated in SQL (migration 124), not by fetching rows and
+ * counting them here.
+ *
+ * The previous version read prediction_outcomes with `.limit(5000)` and no
+ * ORDER BY, then split by track in JS. Measured on production 2026-09-07 that
+ * returned 41 house + 4,959 machine — exactly 5,000 — against a true 34,802
+ * machine outcomes, and the page rendered the slice as "all resolved · n=4959".
+ * It reported machine skill -0.40 where the truth is -0.246.
+ *
+ * The worse failure was structural rather than numeric: with no ORDER BY, the
+ * 41 house rows sat inside that window only by luck of scan order. The house
+ * track is the public benchmark, and it was one physical-order change away from
+ * silently reporting a smaller n, or none.
+ *
+ * A bigger limit would only move the cliff. Aggregating server-side removes it:
+ * there is no row cap to outgrow and the numbers cannot depend on fetch order.
+ */
 export async function GET(_req: NextRequest) {
   try {
     const supabase = createServerSupabase();
 
-    const [predsRes, outcomesRes, firmsRes, nlRes] = await Promise.all([
-      supabase
-        .from('predictions_register')
-        .select('id, feature, track, issued_at, resolves_at, commit_hash, revealed_at, source'),
-      supabase
-        .from('prediction_outcomes')
-        .select('prediction_id, observed_value, observed_at, brier, log_loss, calibration_bin, void_reason')
-        .limit(5000),
-      supabase.from('firms_significant_events').select('event_type'),
-      supabase.from('nightlights_significant_events').select('event_type'),
-    ]);
+    const { data, error } = await supabase.rpc('calibration_ledger_tracks');
+    if (error) throw error;
 
-    if (predsRes.error) throw predsRes.error;
-    if (outcomesRes.error) throw outcomesRes.error;
+    const payload = (data ?? {}) as {
+      tracks?: Record<string, TrackAgg>;
+      family_counts?: Record<string, number>;
+    };
+    const agg = payload.tracks ?? {};
+    const familyCounts = payload.family_counts ?? {};
 
-    const preds = predsRes.data ?? [];
-    const outcomes = outcomesRes.data ?? [];
-    const byId = new Map(preds.map(p => [p.id, p]));
-
-    // Family event counts feed the families panel. A failure here must
-    // not cost the whole ledger, so they degrade to null rather than throw.
-    const familyCounts = new Map<string, number>();
-    for (const r of (firmsRes.data ?? []) as Array<{ event_type: string }>) {
-      familyCounts.set(r.event_type, (familyCounts.get(r.event_type) ?? 0) + 1);
-    }
-    for (const r of (nlRes.data ?? []) as Array<{ event_type: string }>) {
-      familyCounts.set(r.event_type, (familyCounts.get(r.event_type) ?? 0) + 1);
-    }
-
+    // Still driven by TRACKS, so a track with no rows renders as an honest
+    // empty panel rather than disappearing from the page.
     const tracks = TRACKS.map(track => {
-      const trackPreds = preds.filter(p => (p.track ?? 'house') === track);
-      const ids = new Set(trackPreds.map(p => p.id));
-      const trackOutcomes = outcomes.filter(o => ids.has(o.prediction_id));
-      // Void rows are excluded from EVERY aggregate — they are the
-      // absence of a look, not a result.
-      const scored = trackOutcomes.filter(o => !o.void_reason && o.brier != null);
-      const voids = trackOutcomes.filter(o => !!o.void_reason);
-
+      const t = agg[track];
+      const resolved = t?.resolved ?? 0;
       return {
         key: track,
         ...TRACK_META[track],
-        issued: trackPreds.length,
-        resolved: scored.length,
-        void: voids.length,
-        open: trackPreds.length - trackOutcomes.length,
-        calibrating: scored.length < MIN_SAMPLE,
-        headline: headlineFor(scored),
-        integrity: integrityFor(trackPreds, trackOutcomes, scored.length + voids.length),
-        reliability: reliabilityFor(scored),
-        history: historyFor(scored),
-        families: familiesFor(scored, byId),
+        issued: t?.issued ?? 0,
+        resolved,
+        void: t?.void ?? 0,
+        open: t?.open ?? 0,
+        calibrating: resolved < MIN_SAMPLE,
+        headline: t?.headline ?? null,
+        integrity: t?.integrity ?? {
+          issued: 0, sealed: 0, sealed_pct: null, resolved_total: 0, median_lead_days: null,
+        },
+        reliability: t?.reliability ?? [],
+        history: t?.history ?? [],
+        families: t?.families ?? [],
       };
     });
 
@@ -111,7 +120,7 @@ export async function GET(_req: NextRequest) {
       min_sample: MIN_SAMPLE,
       observable_families: FAMILIES.map(f => ({
         ...f,
-        events: familyCounts.get(f.key) ?? null,
+        events: familyCounts[f.key] ?? null,
         // Measured, or honestly absent. Never a placeholder.
         base_rate: null as number | null,
       })),
@@ -123,168 +132,4 @@ export async function GET(_req: NextRequest) {
       { status: 200 },
     );
   }
-}
-
-/**
- * Brier, skill, sharpness. Skill is reported against the ACTUAL base
- * rate of the outcomes in the track: a Brier alone is gameable by
- * always predicting the base rate, so the number that matters is how
- * much better than that we did. Sharpness — mean distance from a
- * non-committal 0.5 — is reported alongside, because good calibration
- * with no sharpness is just cowardice with a good score.
- */
-function headlineFor(scored: Array<{ brier: number | null; observed_value: number | null; calibration_bin: number | null }>) {
-  if (scored.length === 0) return null;
-  const briers = scored.map(o => Number(o.brier)).filter(Number.isFinite);
-  if (briers.length === 0) return null;
-  const brier = briers.reduce((a, b) => a + b, 0) / briers.length;
-
-  const observed = scored.map(o => Number(o.observed_value)).filter(Number.isFinite);
-  const baseRate = observed.length ? observed.reduce((a, b) => a + b, 0) / observed.length : null;
-  // Brier of the strategy "always predict the base rate" = p(1-p).
-  const baselineBrier = baseRate == null ? null : baseRate * (1 - baseRate);
-  const skill = baselineBrier && baselineBrier > 0 ? 1 - brier / baselineBrier : null;
-
-  // Predicted probability is recovered from the calibration bin's
-  // midpoint — the register stores a distribution, the outcome stores
-  // the bin it fell in, and the bin is what the reliability diagram is
-  // built on, so the two panels stay consistent by construction.
-  const preds = scored
-    .map(o => (o.calibration_bin == null ? null : (Number(o.calibration_bin) - 0.5) / 10))
-    .filter((v): v is number => v != null && Number.isFinite(v));
-  const sharpness = preds.length
-    ? preds.reduce((a, p) => a + Math.abs(p - 0.5), 0) / preds.length
-    : null;
-
-  return {
-    brier: round3(brier),
-    skill: skill == null ? null : round3(skill),
-    base_rate: baseRate == null ? null : round3(baseRate),
-    sharpness: sharpness == null ? null : round3(sharpness),
-  };
-}
-
-/**
- * The panel a sceptic reads first. Commit-reveal coverage is reported
- * as it IS — if claims were registered without a hash, the ledger says
- * so rather than implying a sealing that never happened.
- */
-function integrityFor(
-  preds: Array<{ commit_hash: string | null; issued_at: string | null; resolves_at: string | null }>,
-  outcomes: Array<unknown>,
-  resolvedTotal: number,
-) {
-  const sealed = preds.filter(p => !!p.commit_hash).length;
-  const leads = preds
-    .map(p => (p.issued_at && p.resolves_at
-      ? (Date.parse(p.resolves_at) - Date.parse(p.issued_at)) / 86_400_000
-      : null))
-    .filter((v): v is number => v != null && Number.isFinite(v) && v >= 0)
-    .sort((a, b) => a - b);
-  const medianLead = leads.length ? leads[Math.floor(leads.length / 2)] : null;
-
-  return {
-    issued: preds.length,
-    sealed,
-    sealed_pct: preds.length ? Math.round((sealed / preds.length) * 100) : null,
-    resolved_total: resolvedTotal,
-    median_lead_days: medianLead == null ? null : Math.round(medianLead * 10) / 10,
-  };
-}
-
-/**
- * Real reliability bins. Deciles of predicted probability from
- * calibration_bin; observed frequency is the mean outcome in the bin.
- * n is returned per bin so the UI can size the bars and widen the
- * uncertainty whiskers — a bin holding two claims must not be able to
- * masquerade as evidence, which is exactly what the previous
- * hardcoded diagonal did.
- */
-function reliabilityFor(scored: Array<{ calibration_bin: number | null; observed_value: number | null }>) {
-  const bins: Array<{ bin: number; predicted: number; observed: number | null; n: number }> = [];
-  for (let i = 1; i <= 10; i++) {
-    const inBin = scored.filter(o => Number(o.calibration_bin) === i);
-    const obs = inBin.map(o => Number(o.observed_value)).filter(Number.isFinite);
-    bins.push({
-      bin: i,
-      predicted: (i - 0.5) / 10,
-      observed: obs.length ? round3(obs.reduce((a, b) => a + b, 0) / obs.length) : null,
-      n: inBin.length,
-    });
-  }
-  return bins;
-}
-
-/** Rolling mean Brier by resolution week — is calibration drifting? */
-function historyFor(scored: Array<{ observed_at: string | null; brier: number | null }>) {
-  const byWeek = new Map<string, number[]>();
-  for (const o of scored) {
-    if (!o.observed_at || o.brier == null) continue;
-    const d = new Date(o.observed_at);
-    const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - ((d.getUTCDay() + 6) % 7)));
-    const k = monday.toISOString().slice(0, 10);
-    (byWeek.get(k) ?? byWeek.set(k, []).get(k)!).push(Number(o.brier));
-  }
-  return Array.from(byWeek.entries())
-    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-    .map(([week, vals]) => ({
-      week,
-      brier: round3(vals.reduce((a, b) => a + b, 0) / vals.length),
-      n: vals.length,
-    }));
-}
-
-/** Per claim family, within the track. */
-/**
- * Per claim family, within the track — INCLUDING per-family skill.
- *
- * Brier alone cannot be compared across families, because each family
- * has its own base rate: a family whose event happens 5% of the time
- * scores a flattering Brier by predicting "no" forever. Skill against
- * each family's OWN base rate is the comparable number, and it is what
- * stops one broken family hiding behind a working one — the aggregate
- * read −0.10 while AIS was at +0.05 and a single mis-resolved family
- * carried the whole deficit.
- */
-function familiesFor(
-  scored: Array<{ prediction_id: string; brier: number | null; log_loss: number | null; observed_value: number | null }>,
-  byId: Map<string, { feature: string }>,
-) {
-  const groups = new Map<string, { brier: number[]; ll: number[]; obs: number[] }>();
-  for (const o of scored) {
-    const feature = byId.get(o.prediction_id)?.feature ?? 'unknown';
-    const g = groups.get(feature) ?? { brier: [], ll: [], obs: [] };
-    if (o.brier != null) g.brier.push(Number(o.brier));
-    if (o.log_loss != null) g.ll.push(Number(o.log_loss));
-    if (o.observed_value != null && Number.isFinite(Number(o.observed_value))) g.obs.push(Number(o.observed_value));
-    groups.set(feature, g);
-  }
-  return Array.from(groups.entries())
-    .map(([feature, g]) => {
-      const brier = g.brier.length ? g.brier.reduce((a, b) => a + b, 0) / g.brier.length : null;
-      const baseRate = g.obs.length ? g.obs.reduce((a, b) => a + b, 0) / g.obs.length : null;
-      const baselineBrier = baseRate == null ? null : baseRate * (1 - baseRate);
-      // A degenerate family (base rate 0 or 1) has a baseline Brier of
-      // 0 — nothing can beat it, so skill is undefined rather than
-      // infinitely negative. Reported as null, and the base rate next
-      // to it tells the reader why.
-      const skill = brier != null && baselineBrier != null && baselineBrier > 0.001
-        ? 1 - brier / baselineBrier
-        : null;
-      return {
-        feature,
-        n: g.brier.length,
-        brier: brier == null ? null : round3(brier),
-        log_loss: g.ll.length ? round3(g.ll.reduce((a, b) => a + b, 0) / g.ll.length) : null,
-        base_rate: baseRate == null ? null : round3(baseRate),
-        skill: skill == null ? null : round3(skill),
-        degenerate: baselineBrier != null && baselineBrier <= 0.001,
-        thin: g.brier.length < MIN_SAMPLE,
-      };
-    })
-    .sort((a, b) => b.n - a.n);
-}
-
-function round3(n: number): number {
-  return Math.round(n * 1000) / 1000;
 }
