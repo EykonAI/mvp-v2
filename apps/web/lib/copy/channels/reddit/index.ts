@@ -101,15 +101,36 @@ function assembleReddit(input: unknown, refUrl: string): ChannelArtifact | null 
   // the model put the URL mid-body on its own closing line (as told),
   // split there; when it left the URL out, append it — the craft lint
   // then verifies exactly-once and unaltered either way.
+  // Append only what the body does not ALREADY contain, matched on exact
+  // trimmed text.
+  //
+  // The paragraph dedupe below cannot catch these: when the model writes the
+  // disclosure at the end of an existing paragraph rather than as its own, the
+  // appended copy and the inline one sit in DIFFERENT paragraphs, so neither
+  // is an exact paragraph repeat. Measured: 5 of the 56 stored drafts repeat
+  // the disclosure sentence exactly this way, invisible to paragraph dedupe.
+  //
+  // Matching is exact and never by regex. The lint's DISCLOSURE_RE and
+  // LIMIT_RE detect PRESENCE, and they are deliberately loose so a rephrased
+  // statement still passes — `affiliat\w*` matches "vessels affiliated with",
+  // and `not confirmed` matches ordinary analysis like "the claim is not
+  // independently confirmed by this second sensor". Suppressing an append on
+  // a loose match would drop the real disclosure or the real limit paragraph
+  // and publish a post without it. A duplicate reads badly; a missing
+  // disclosure is a different category of problem. Exact match only.
+  const has = (needle: string) => body.includes(needle.trim());
+  const limitPart = has(limitParagraph) ? '' : limitParagraph;
+  const disclosurePart = has(disclosure) ? '' : disclosure;
+
   const urlIdx = body.indexOf(refUrl);
   let selfText: string;
   if (urlIdx >= 0) {
     const lineStart = body.lastIndexOf('\n', urlIdx) + 1; // 0 when the URL opens the body
     const method = body.slice(0, lineStart).trimEnd();
     const linkLine = body.slice(lineStart).trim();
-    selfText = [method, limitParagraph, disclosure, linkLine].filter(Boolean).join('\n\n');
+    selfText = [method, limitPart, disclosurePart, linkLine].filter(Boolean).join('\n\n');
   } else {
-    selfText = [body, limitParagraph, disclosure, refUrl].join('\n\n');
+    selfText = [body, limitPart, disclosurePart, refUrl].filter(Boolean).join('\n\n');
   }
 
   // Both branches above append the limit paragraph and the disclosure
