@@ -1,3 +1,4 @@
+import { loadFamilyCalibration, priorFor, applyRecalibration, calibrationContext } from './calibration';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { EIA_CUSHING_CRUDE_STOCKS } from '@/lib/eia/client';
 import { computePredictionHash } from './hash';
@@ -75,7 +76,22 @@ export async function issueEiaWeekly(opts: { now?: Date } = {}): Promise<IssueEi
   // flat 0.5 prior so the Ledger grades an informative forecast; falls back to
   // 0.5 only when there is too little history to estimate a rate.
   const draw = weekOverWeekDrawRate(history ?? []);
-  const predictedMean = draw == null ? 0.5 : round3(clampProbability(draw.rate));
+  // The fallback is the family's MEASURED base rate, not 0.5 (mig 126). Of 45
+  // scored house claims, 6 EIA rows were issued at exactly 0.500 and all six
+  // drew — free losses to a prior that claimed to know nothing when the
+  // register already knew the rate. 0.5 survives only where the family itself
+  // has no history, which is the one case it is honest.
+  const cal = await loadFamilyCalibration(supabase);
+  const rawMean = draw == null
+    ? priorFor(cal, 'eia_weekly_inventory')
+    : round3(clampProbability(draw.rate));
+  // Self-gating: applies only while this family passes its own leave-one-out
+  // test. It does NOT today — measured skill -0.1839 -> -0.3082 — because
+  // recalibration fixes bias, not direction, and §8.3 found this forecaster
+  // leaning the wrong way. The call is re-made from live data every run.
+  const predictedMean = round3(clampProbability(
+    applyRecalibration(cal, 'eia_weekly_inventory', rawMean),
+  ));
   const statement = `EIA Cushing crude inventories on ${ymdUtc(resolvesAt)} will draw versus the prior week's ${formatThousands(baseline)} kbbl print.`;
 
   const hash = computePredictionHash({
@@ -105,6 +121,7 @@ export async function issueEiaWeekly(opts: { now?: Date } = {}): Promise<IssueEi
         // history stood behind it. A reader must be able to tell a blend
         // against real climatology apart from one against a 0.5 prior —
         // they are different claims and they deserve different trust.
+        ...calibrationContext(cal, 'eia_weekly_inventory'),
         forecast_anchor: draw?.anchor ?? null,
         forecast_anchor_transitions: draw?.anchor_transitions ?? 0,
         // Both inputs are recorded so a reader can see WHY the forecast
