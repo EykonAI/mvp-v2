@@ -1,3 +1,7 @@
+import {
+  buildNlClaimRow, nlObservable,
+  type NlEvent, type NlEventType, type NlPlan,
+} from '@/lib/predictions/issue-blackmarble';
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
@@ -359,6 +363,76 @@ async function handle(req: NextRequest) {
   // while ingest keeps reporting green, and every downstream surface
   // degrades to "nothing is happening anywhere". Fail the run so
   // Railway shows it red.
+  // ─── Machine-track claims for both night-lights families (mig 128) ───
+  // §6.3 built this as a sensor physically independent of FIRMS and it had
+  // never issued a claim. Both families beat everything else in the register
+  // out-of-sample: first_light persistence +0.163, went_dark_lights +0.091.
+  let nlIssued = 0;
+  let nlSkipped = 0;
+  let nlDeclined: Record<string, number> = {};
+  let nlError: string | null = null;
+  {
+    const { data: planData, error: planErr } = await supabase.rpc('blackmarble_claim_plan');
+    if (planErr) {
+      nlError = planErr.message;   // additive — never fail a detection run over it
+    } else {
+      const plan = planData as NlPlan;
+      // The DATA clock, not the wall clock: this sensor runs ~13 days behind,
+      // so "unsettled" means unsettled relative to the newest published night.
+      const cutoff = new Date(Date.parse(`${plan.data_clock}T00:00:00Z`) - plan.horizon_days * 86_400_000)
+        .toISOString().slice(0, 10);
+
+      for (const et of ['first_light', 'went_dark_lights'] as NlEventType[]) {
+        const fam = plan.families[et];
+        if (!fam) { nlDeclined[`${et}: no measured base rate`] = 1; continue; }
+        if (!fam.eligible) { nlDeclined[`${et}: ${fam.reason ?? 'not eligible'}`] = 1; continue; }
+        if (fam.remaining <= 0) { nlDeclined[`${et}: daily cap reached`] = 1; continue; }
+
+        const { data: cand, error: candErr } = await supabase
+          .from('nightlights_significant_sites')
+          .select('site_key, site_name, country, period, event_type, observed_radiance, baseline_mean, deviation_sigma, dark_nights, unit_rows')
+          .eq('event_type', et)
+          .gt('period', cutoff)
+          .order('period', { ascending: false })
+          .limit(plan.daily_cap * 3);
+        if (candErr) { nlError = candErr.message; continue; }
+
+        const events = (cand ?? []) as NlEvent[];
+        const seen = new Set<string>();
+        const observables = events.map(nlObservable);
+        for (let i = 0; i < observables.length; i += 200) {
+          const { data: have } = await supabase
+            .from('predictions_register')
+            .select('target_observable')
+            .eq('source', 'blackmarble')
+            .in('target_observable', observables.slice(i, i + 200));
+          for (const r of (have ?? []) as Array<{ target_observable: string }>) seen.add(r.target_observable);
+        }
+
+        const fresh = events.filter(e => !seen.has(nlObservable(e)));
+        nlSkipped += events.length - fresh.length;
+        const take = fresh.slice(0, fam.remaining);
+        if (fresh.length > take.length) {
+          nlDeclined[`${et}: over daily cap`] = (nlDeclined[`${et}: over daily cap`] ?? 0) + (fresh.length - take.length);
+        }
+
+        const now = new Date();
+        const rows = take.map(e => buildNlClaimRow(e, plan, now)).filter(Boolean) as Array<Record<string, unknown>>;
+        // A site with no usable threshold (null or zero radiance basis) cannot
+        // carry a frozen pass mark, so it is not claimed at all.
+        if (take.length > rows.length) {
+          nlDeclined[`${et}: no usable threshold`] = (nlDeclined[`${et}: no usable threshold`] ?? 0) + (take.length - rows.length);
+        }
+        if (rows.length > 0) {
+          const { data: ins, error: insErr } = await supabase
+            .from('predictions_register').insert(rows).select('id');
+          if (insErr) nlError = insErr.message;
+          else nlIssued += (ins ?? []).length;
+        }
+      }
+    }
+  }
+
   const ok = errors.length === 0;
 
   return NextResponse.json(
@@ -370,6 +444,14 @@ async function handle(req: NextRequest) {
       // publication latency, not a fault here — but it must be visible.
       newest_night: newestNight,
       lag_days: lagDays,
+      // Both night-lights families (mig 128). declined is broken out by reason
+      // and family: a selection rule you cannot audit is no selection rule.
+      nightlights_claims: {
+        issued: nlIssued,
+        already_present: nlSkipped,
+        declined: nlDeclined,
+        error: nlError,
+      },
       // events counts registry ROWS; site_events counts PHYSICAL SITES.
       // Quote site_events in anything user-facing — one plant is many
       // rows (one per generating unit) at identical coordinates.
