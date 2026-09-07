@@ -1,4 +1,15 @@
 import { loadFamilyCalibration, priorFor, applyRecalibration, calibrationContext } from './calibration';
+
+/** Shape of eia_draw_plan() (migration 129). */
+interface EiaDrawPlan {
+  n: number;
+  base_rate: number;
+  eligible: boolean;
+  as_of: string | null;
+  current_cell: string | null;
+  forecast: number;
+  cells: Record<string, { n: number; rate: number }>;
+}
 import { createServerSupabase } from '@/lib/supabase-server';
 import { EIA_CUSHING_CRUDE_STOCKS } from '@/lib/eia/client';
 import { computePredictionHash } from './hash';
@@ -76,15 +87,26 @@ export async function issueEiaWeekly(opts: { now?: Date } = {}): Promise<IssueEi
   // flat 0.5 prior so the Ledger grades an informative forecast; falls back to
   // 0.5 only when there is too little history to estimate a rate.
   const draw = weekOverWeekDrawRate(history ?? []);
-  // The fallback is the family's MEASURED base rate, not 0.5 (mig 126). Of 45
-  // scored house claims, 6 EIA rows were issued at exactly 0.500 and all six
-  // drew — free losses to a prior that claimed to know nothing when the
-  // register already knew the rate. 0.5 survives only where the family itself
-  // has no history, which is the one case it is honest.
+
+  // THE FORECAST IS NOW A DIRECTION, NOT A RATE (mig 129). The old model
+  // predicted a blended week-over-week draw RATE, and a rate is a level — it
+  // cannot turn when the series turns, which is exactly how §8.3 caught it
+  // running 0.500 -> 0.573 -> 0.688 while the observed rate ran 1.000 ->
+  // 0.500 -> 0.000. Cushing is autocorrelated: last week's direction plus
+  // whether the last three weeks agree separates the outcome from 0.263 to
+  // 0.657. Walk-forward over 199 weeks, expanding window and no lookahead,
+  // that is skill +0.0584 against -0.0065 for the rate model.
+  const { data: planData, error: planErr } = await supabase.rpc('eia_draw_plan');
+  const plan = planErr ? null : (planData as EiaDrawPlan | null);
+
+  // The fallback ladder, most-informed first. 0.5 survives only where the
+  // family itself has no history — the one case it is honest (mig 126).
   const cal = await loadFamilyCalibration(supabase);
-  const rawMean = draw == null
-    ? priorFor(cal, 'eia_weekly_inventory')
-    : round3(clampProbability(draw.rate));
+  const rawMean = plan?.eligible && Number.isFinite(plan.forecast)
+    ? round3(clampProbability(plan.forecast))
+    : draw == null
+      ? priorFor(cal, 'eia_weekly_inventory')
+      : round3(clampProbability(draw.rate));
   // Self-gating: applies only while this family passes its own leave-one-out
   // test. It does NOT today — measured skill -0.1839 -> -0.3082 — because
   // recalibration fixes bias, not direction, and §8.3 found this forecaster
@@ -122,6 +144,13 @@ export async function issueEiaWeekly(opts: { now?: Date } = {}): Promise<IssueEi
         // against real climatology apart from one against a 0.5 prior —
         // they are different claims and they deserve different trust.
         ...calibrationContext(cal, 'eia_weekly_inventory'),
+        // What the streak model saw and decided. Recorded so a reader can
+        // check the forecast against the cell it came from.
+        forecast_model: plan?.eligible ? 'streak_direction' : 'legacy_draw_rate',
+        forecast_cell: plan?.current_cell ?? null,
+        forecast_cell_rate: plan?.forecast ?? null,
+        forecast_cells_n: plan?.n ?? null,
+        forecast_series_as_of: plan?.as_of ?? null,
         forecast_anchor: draw?.anchor ?? null,
         forecast_anchor_transitions: draw?.anchor_transitions ?? 0,
         // Both inputs are recorded so a reader can see WHY the forecast
