@@ -1,4 +1,5 @@
 import type { Resolver, SupabaseAny } from './types';
+import { instrumentDataClock, windowVerdict } from './data-clock';
 
 /**
  * FIRMS went_dark recovery resolver (machine track, mig 127).
@@ -51,6 +52,16 @@ export const resolveFirmsRecovery: Resolver = async (row, supabase) => {
 
   const end = new Date(Date.parse(`${period}T00:00:00Z`) + horizon * 86_400_000)
     .toISOString().slice(0, 10);
+
+  // Judge nothing the instrument has not finished publishing (see data-clock.ts).
+  // FIRMS is near-real-time, so this mostly costs one day: the window's last
+  // day is only known complete once the following day's rows exist.
+  const clock = await instrumentDataClock('firms_facility_observations', supabase);
+  const verdict = windowVerdict('FIRMS', clock, end);
+  if (verdict.kind === 'defer') return null;            // window not yet published — retry
+  if (verdict.kind === 'void') {
+    return { observed: 0, source_url: '/intel/calibration', void_reason: verdict.reason };
+  }
 
   const { data, error } = await supabase
     .from('firms_facility_observations')
