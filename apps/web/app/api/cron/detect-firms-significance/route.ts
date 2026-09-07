@@ -1,3 +1,9 @@
+import {
+  buildFirmsRecoveryClaimRow,
+  firmsRecoveryObservable,
+  type FirmsRecoveryEvent,
+  type FirmsRecoveryPlan,
+} from '@/lib/predictions/issue-firms-recovery';
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
@@ -236,6 +242,75 @@ async function handle(req: NextRequest) {
     }
   }
 
+  // ─── Machine-track recovery claims (mig 127) ─────────────────────
+  // §6.1 built FIRMS to be a self-resolving observable family and it had never
+  // issued a claim. It does now — per SITE, at the only horizon that is a real
+  // question (3 days; 7d resolves 0.912 and 14d 0.982, both formalities), with
+  // the forecast taken from the (dark_days x baseline_rate) cell rather than a
+  // single family number. Measured leave-one-out over 442 settled events, that
+  // conditioning is worth skill +0.0557 against -0.0045 for a flat family rate.
+  let recoveryIssued = 0;
+  let recoverySkipped = 0;
+  let recoveryDeclined: Record<string, number> = {};
+  let recoveryError: string | null = null;
+  {
+    const { data: planData, error: planErr } = await supabase.rpc('firms_recovery_plan');
+    if (planErr) {
+      // Additive. A claim we could not issue must not fail a detection run.
+      recoveryError = planErr.message;
+    } else {
+      const plan = planData as FirmsRecoveryPlan;
+      if (!plan?.family?.eligible) {
+        recoveryDeclined['family outside informative band'] = 1;
+      } else if (plan.remaining <= 0) {
+        recoveryDeclined['daily cap reached'] = 1;
+      } else {
+        // Only sites whose window has NOT yet closed can still be claimed —
+        // issuing on a settled event would be predicting a known outcome.
+        const cutoff = new Date(Date.now() - plan.horizon_days * 86_400_000)
+          .toISOString().slice(0, 10);
+        const { data: cand, error: candErr } = await supabase
+          .from('firms_significant_sites')
+          .select('site_key, site_name, country, period, dark_days, baseline_rate, unit_rows, latitude, longitude')
+          .eq('event_type', 'went_dark')
+          .gt('period', cutoff)
+          .order('period', { ascending: false })
+          .limit(plan.daily_cap * 3);
+
+        if (candErr) {
+          recoveryError = candErr.message;
+        } else {
+          const events = (cand ?? []) as FirmsRecoveryEvent[];
+          const observables = events.map(firmsRecoveryObservable);
+          const existing = new Set<string>();
+          for (let i = 0; i < observables.length; i += 200) {
+            const { data: seen } = await supabase
+              .from('predictions_register')
+              .select('target_observable')
+              .eq('source', 'firms-recovery')
+              .in('target_observable', observables.slice(i, i + 200));
+            for (const r of (seen ?? []) as Array<{ target_observable: string }>) existing.add(r.target_observable);
+          }
+
+          const fresh = events.filter(e => !existing.has(firmsRecoveryObservable(e)));
+          recoverySkipped = events.length - fresh.length;
+          const take = fresh.slice(0, plan.remaining);
+          if (fresh.length > take.length) recoveryDeclined['over daily cap'] = fresh.length - take.length;
+
+          if (take.length > 0) {
+            const now = new Date();
+            const { data: ins, error: insErr } = await supabase
+              .from('predictions_register')
+              .insert(take.map(e => buildFirmsRecoveryClaimRow(e, plan, now)))
+              .select('id');
+            if (insErr) recoveryError = insErr.message;
+            else recoveryIssued = (ins ?? []).length;
+          }
+        }
+      }
+    }
+  }
+
   // ─── Emit Thermal anomaly_flags for the convergence engine ───────
   // Idempotent: this route re-scans a trailing window every run, so a
   // significant event would otherwise be re-flagged each tick. We fetch
@@ -403,6 +478,14 @@ async function handle(req: NextRequest) {
       // engine. inserted counts only NEW flags (idempotent re-runs → 0);
       // skipped_no_geo = significant events whose facility lacked
       // coordinates and so cannot enter a convergence cell.
+      // The FIRMS recovery family (mig 127). declined is broken out by
+      // reason: a selection rule you cannot audit is no selection rule.
+      recovery_claims: {
+        issued: recoveryIssued,
+        already_present: recoverySkipped,
+        declined: recoveryDeclined,
+        error: recoveryError,
+      },
       thermal_flags: {
         inserted: thermalFlagsInserted,
         collapsed_to_site: thermalFlagsCollapsedToSite,
