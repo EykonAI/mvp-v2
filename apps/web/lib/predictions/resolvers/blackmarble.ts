@@ -1,4 +1,5 @@
 import type { Resolver, SupabaseAny } from './types';
+import { instrumentDataClock, windowVerdict } from './data-clock';
 
 /**
  * Black Marble resolver (machine track, mig 128) for both night-lights
@@ -49,6 +50,14 @@ export const resolveBlackmarble: Resolver = async (row, supabase) => {
 
   const end = new Date(Date.parse(`${period}T00:00:00Z`) + horizon * 86_400_000).toISOString().slice(0, 10);
 
+  // Judge nothing the instrument has not finished publishing (see data-clock.ts).
+  const clock = await instrumentDataClock('blackmarble_facility_radiance', supabase);
+  const verdict = windowVerdict('night-lights', clock, end);
+  if (verdict.kind === 'defer') return null;            // window not yet published — retry
+  if (verdict.kind === 'void') {
+    return { observed: 0, source_url: '/intel/calibration', void_reason: verdict.reason };
+  }
+
   const { data, error } = await supabase
     .from('blackmarble_facility_radiance')
     .select('radiance_3x3, period')
@@ -61,8 +70,9 @@ export const resolveBlackmarble: Resolver = async (row, supabase) => {
 
   const clear = data ?? [];
   if (clear.length === 0) {
-    // Either cloud, or the ~13-day publication lag has not reached this window
-    // yet. Both are "we did not look", and neither is darkness.
+    // Cloud on every night of a window the instrument HAS published (the
+    // data-clock guard above rules out "not yet published"). Still "we did
+    // not look", and still not darkness.
     return {
       observed: 0,
       source_url: '/intel/calibration',
