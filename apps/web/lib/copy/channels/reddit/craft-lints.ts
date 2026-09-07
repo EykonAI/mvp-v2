@@ -150,6 +150,29 @@ export function redditCraftLint(
     push('state-the-limit', 'no limit statement found in the body — say plainly what the observation does not establish (no confirmed cause, no ground truth)');
   }
 
+  // ── nothing said twice ─────────────────────────────────────────
+  // Assembly suppresses an EXACT duplicate of the limit paragraph or the
+  // disclosure, and dedupes exact duplicate paragraphs. Neither can catch a
+  // restatement whose wrapping differs — "None of this establishes X. <same
+  // sentence>" beside "This does not establish X. <same sentence>" is two
+  // different paragraphs containing one identical sentence. That is the
+  // residue, and it is a craft problem rather than a mechanical one: deleting
+  // a sentence out of running prose would leave an orphan clause, so this
+  // surfaces it to the reviewer instead of editing silently.
+  {
+    const seen = new Set<string>();
+    const repeated = new Set<string>();
+    for (const raw of bodyProse.split(/(?<=[.!?])\s+/)) {
+      const sentence = raw.trim();
+      if (sentence.length < 40) continue;
+      if (seen.has(sentence)) repeated.add(sentence);
+      else seen.add(sentence);
+    }
+    for (const sentence of repeated) {
+      push('no-repeated-sentence', `a sentence appears twice — "${sentence.slice(0, 70)}…"`);
+    }
+  }
+
   // ── community targeting ────────────────────────────────────────
   // Every r/Name the draft utters must be an APPROVED allowlist entry
   // — with the allowlist empty, ANY community mention fails, which is

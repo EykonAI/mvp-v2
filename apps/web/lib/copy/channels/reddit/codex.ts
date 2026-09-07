@@ -103,6 +103,14 @@ export const CODEX_RULES: CodexRule[] = [
     enforcement: 'hard',
   },
   {
+    id: 'no-repeated-sentence',
+    rule: 'No sentence appears twice in the body. Say the limit once and the disclosure once; restating either in different words reads as padding to the exact audience we are writing for.',
+    verified: true,
+    verifiedOn: '2026-09-07',
+    source: 'Measured on the stored queue: 33 of 56 Reddit drafts repeated a sentence. Assembly appended the limit paragraph and the disclosure while the model had already written them, and the presence lints could not tell the two cases apart.',
+    enforcement: 'warn',
+  },
+  {
     id: 'one-subreddit-per-artifact',
     rule: 'One artifact targets one community. A second community gets a different write, not a crosspost of this one.',
     verified: true,
