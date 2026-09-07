@@ -6,6 +6,7 @@ import { resolveAisChokepoint } from './ais-chokepoint';
 import { resolveFirms } from './firms';
 import { resolveAisDarkgap } from './ais-darkgap';
 import { resolveFirmsRecovery } from './firms-recovery';
+import { resolveBlackmarble } from './blackmarble';
 import type { PredictionRow, Resolution, SupabaseAny } from './types';
 
 export type { PredictionRow, Resolution } from './types';
@@ -35,6 +36,8 @@ export async function resolveBySource(
       return resolveAisDarkgap(row, supabase);
     case 'firms-recovery':
       return resolveFirmsRecovery(row, supabase);
+    case 'blackmarble':
+      return resolveBlackmarble(row, supabase);
     case 'manual':
     default:
       return resolveManual(row, supabase);
