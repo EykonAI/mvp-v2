@@ -38,7 +38,18 @@ import { computePredictionHash } from './hash';
  *
  * Idempotent by construction: target_observable is `ais:dark_contact:
  * <mmsi>:<gap_started_at>`, mirroring the event table's UNIQUE
- * (mmsi, gap_started_at) — one claim per gap, ever.
+ * (mmsi, gap_started_at) — one claim per gap, ever. That key is a DEDUP key
+ * and must never be used to look the event up: it carries a millisecond ISO
+ * timestamp against a microsecond column, which is what produced 450
+ * fabricated voids (#465). Resolve by context.event_id.
+ *
+ * SELECTION (mig 125). Not every open event earns a claim. A box qualifies
+ * only if its measured rate sits inside the informative band with enough n,
+ * and each eligible box has a daily cap taken in descending confidence. The
+ * rule is recorded in context.selection_rule on every row, because an
+ * unstated selection rule is the first thing a sceptic attacks — and because
+ * "we issue a claim for everything" was producing ~6,700 a day, 64% of them
+ * in the one box where the answer is 85% predictable.
  */
 
 export interface DarkContactEventForClaim {
@@ -69,10 +80,18 @@ export function familyBaseRate(reappeared: number, resolvedNonVoid: number): num
   return Math.round(((reappeared + 1) / (resolvedNonVoid + 2)) * 1000) / 1000;
 }
 
+export interface SelectionRule {
+  band_lo: number;
+  band_hi: number;
+  min_n: number;
+  daily_cap_per_box: number;
+}
+
 export function buildDarkContactClaimRow(
   ev: DarkContactEventForClaim,
   baseRate: { p: number; k: number; n: number },
   now: Date,
+  rule?: SelectionRule,
 ): Record<string, unknown> {
   const targetObservable = darkContactObservable(ev);
   const statement = darkContactStatement(ev);
@@ -97,6 +116,17 @@ export function buildDarkContactClaimRow(
           : 'laplace_shrunk_base_rate_completed_cohorts_only',
       forecast_base_rate_k: baseRate.k,
       forecast_base_rate_n: baseRate.n,
+      // The forecast is this BOX's own rate, not a global one. Skill is
+      // discrimination: one number for every claim scores zero by
+      // construction, however accurate that number is. Measured
+      // out-of-sample on 23,468 events, swapping the global rate for the
+      // per-box rate moved Brier 0.1410 -> 0.1322 and skill -0.084 -> -0.017.
+      forecast_scope: 'box',
+      // The rule that admitted this claim, recorded ON the claim so a reader
+      // can check what got into the register and why (mig 125).
+      selection_rule: rule
+        ? `v1 · box rate in [${rule.band_lo},${rule.band_hi}] · n>=${rule.min_n} · <=${rule.daily_cap_per_box}/box/day · confidence desc`
+        : 'v0 · all open events, global rate',
       // The board confidence is suspicion, not reappearance probability —
       // recorded as context, deliberately NOT used as the forecast.
       note: 'observable = re-observation by eYKON coverage, instrument-view wording; VOID on coverage_lost',
