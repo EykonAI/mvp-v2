@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { scoreVessel, computeRealFeatures } from '@/lib/intel/shadowFleet';
 import { boxForPosition, boxState, BOX_DEAD_AFTER_H, type BoxLiveness } from '@/lib/intel/aisCoverage';
-import { buildDarkContactClaimRow, darkContactObservable, familyBaseRate } from '@/lib/predictions/issue-dark-contact';
+import { buildDarkContactClaimRow, darkContactObservable, type SelectionRule } from '@/lib/predictions/issue-dark-contact';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -21,6 +21,12 @@ const ACTIVE_WINDOW_H = 72;
 const UPSERT_BATCH = 1000;
 const PAGE = 1000;
 const CLOSE_BATCH = 1000;   // events per close_dark_contact_events() call
+// Per box, per UTC day. Env-overridable; a malformed value keeps the default
+// rather than silently issuing nothing (Number('') is 0, Number('abc') is NaN).
+const DARKGAP_DAILY_CAP_PER_BOX = (() => {
+  const raw = Number(process.env.DARKGAP_DAILY_CAP_PER_BOX);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 200;
+})();
 // A dark-contact EVENT opens when silence reaches this multiple of the
 // vessel's own cadence (~12 h for an hourly reporter), and resolves at a 72 h
 // re-observation deadline. See migration 112 for the full lifecycle contract.
@@ -461,6 +467,8 @@ export async function POST(req: NextRequest) {
   // which mirrors the event table's UNIQUE (mmsi, gap_started_at).
   let claimsIssued = 0;
   let claimsSkipped = 0;
+  let claimsDeclined: Record<string, number> = {};
+  let claimsRuleError: string | null = null;
   {
     // COMPLETED COHORTS ONLY — the censoring fix. Counting all resolved
     // events biases the rate upward while the family is young: before the
@@ -472,20 +480,24 @@ export async function POST(req: NextRequest) {
     // deadline has passed — both outcomes were possible — so only those
     // events inform the rate. Until the first cohort completes this yields
     // the flat 0.5 prior, honestly labelled.
-    const nowIso = now.toISOString();
-    const { count: kCount } = await supabase
-      .from('dark_contact_events')
-      .select('*', { count: 'exact', head: true })
-      .eq('resolution', 'reappeared')
-      .lte('deadline_at', nowIso);
-    const { count: nCount } = await supabase
-      .from('dark_contact_events')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'resolved')
-      .lte('deadline_at', nowIso);
-    const k = kCount ?? 0;
-    const n = nCount ?? 0;
-    const baseRate = { p: familyBaseRate(k, n), k, n };
+    // Per-box eligibility, forecast rate and remaining daily quota (mig 125).
+    // Replaces "count every completed cohort globally, forecast one number for
+    // every claim". Both halves of that were wrong: it issued ~6,700 claims a
+    // day with no stated rule, and 64% of them were europe-med, where the
+    // answer is 85% predictable — §17.2's formality-with-a-good-Brier.
+    const { data: planData, error: planErr } = await supabase.rpc('dark_contact_issuance_plan', {
+      p_daily_cap: DARKGAP_DAILY_CAP_PER_BOX,
+    });
+    if (planErr) {
+      // Issuance is additive. Skip the emission rather than fail a tick that
+      // has already scored vessels and closed events.
+      claimsSkipped = -1;
+      claimsRuleError = planErr.message;
+    }
+    const plan = (planData ?? { rule: null, boxes: {} }) as {
+      rule: SelectionRule | null;
+      boxes: Record<string, { rate: number; k: number; n: number; eligible: boolean; reason: string | null; remaining: number }>;
+    };
 
     const openForClaims: any[] = [];
     for (let from = 0; ; from += PAGE) {
@@ -513,10 +525,40 @@ export async function POST(req: NextRequest) {
         for (const r of (data ?? []) as any[]) existing.add(r.target_observable);
       }
 
-      const toInsert = openForClaims
-        .filter(e => !existing.has(darkContactObservable(e)))
-        .map(e => buildDarkContactClaimRow(e, baseRate, now));
+      // THE SELECTION RULE, applied. Eligible boxes only; within a box, the
+      // most suspicious contacts first, up to that box's remaining daily
+      // quota. Everything declined is counted by reason so the tick reports
+      // what it refused as well as what it issued.
+      const candidates = openForClaims.filter(e => !existing.has(darkContactObservable(e)));
+      const declined: Record<string, number> = {};
+      const byBox = new Map<string, typeof candidates>();
+      for (const e of candidates) {
+        const box = plan.boxes[e.box_slug ?? ''];
+        if (!box || !box.eligible) {
+          const why = box?.reason ?? 'no measured base rate for box';
+          declined[why] = (declined[why] ?? 0) + 1;
+          continue;
+        }
+        const list = byBox.get(e.box_slug!) ?? [];
+        list.push(e);
+        byBox.set(e.box_slug!, list);
+      }
+
+      const toInsert: Array<Record<string, unknown>> = [];
+      for (const [box, list] of byBox) {
+        const quota = plan.boxes[box]?.remaining ?? 0;
+        // Descending confidence: the most suspicious contacts are the ones a
+        // reader would want scored, and picking by a stated criterion is what
+        // makes the register defensible rather than merely large.
+        list.sort((a, b) => Number(b.confidence_at_open ?? 0) - Number(a.confidence_at_open ?? 0));
+        if (list.length > quota) declined['over daily cap'] = (declined['over daily cap'] ?? 0) + (list.length - quota);
+        for (const e of list.slice(0, quota)) {
+          const b = plan.boxes[box];
+          toInsert.push(buildDarkContactClaimRow(e, { p: b.rate, k: b.k, n: b.n }, now, plan.rule ?? undefined));
+        }
+      }
       claimsSkipped = openForClaims.length - toInsert.length;
+      claimsDeclined = declined;
 
       for (let i = 0; i < toInsert.length; i += UPSERT_BATCH) {
         const { data, error } = await supabase
@@ -568,6 +610,11 @@ export async function POST(req: NextRequest) {
     events_open_total: openEvents.length - evReappeared - evStillDark - evVoided + evOpened,
     claims_issued: claimsIssued,
     claims_already_present: claimsSkipped,
+    // What the rule REFUSED, by reason. A selection rule you cannot audit is
+    // the same problem as no selection rule.
+    claims_declined: claimsDeclined,
+    claims_rule_error: claimsRuleError,
+    claims_daily_cap_per_box: DARKGAP_DAILY_CAP_PER_BOX,
     voided_by_box: Object.fromEntries(voidedByBox),
     pruned: delErr ? `error: ${delErr.message}` : 'ok',
   });
