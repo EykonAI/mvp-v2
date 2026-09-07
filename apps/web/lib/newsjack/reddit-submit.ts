@@ -60,13 +60,35 @@ function composeUrl(slug: string, title: string, text?: string): string {
 }
 
 /**
- * `posts` for a Reddit artifact is [title, selfText] (see the channel writer).
- * Anything else is not a Reddit draft and yields no targets.
+ * `posts` for a Reddit artifact is EXACTLY [title, selfText] (see the channel
+ * writer). Anything else is not a postable Reddit draft and yields no targets.
+ *
+ * The length check is load-bearing, not defensive dressing. Reddit drafts come
+ * from two writers with DIFFERENT shapes:
+ *
+ *   LLM path      posts: [title, selfText]              — 2 parts
+ *   template path posts: ['UNASSIGNED', title, body]    — 3 parts, placeholder
+ *                                                          in slot 0
+ *
+ * Reading slot 0 and 1 positionally without checking the length prefills the
+ * compose window with the title "UNASSIGNED" and the real title as the body,
+ * dropping the actual body — and with it the limit paragraph and the
+ * affiliation disclosure, the two things the artifact exists to carry. It
+ * looks like a working button right up to the moment it posts.
+ *
+ * This is the common case, not a corner one: 11 of 67 stored Reddit drafts
+ * (16%) are the 3-part shape, every one of them with 'UNASSIGNED' in slot 0.
+ * A fallback draft has no approved destination BY CONSTRUCTION — that is what
+ * UNASSIGNED means — so it is not postable and no targets is the right answer.
  */
 export function redditSubmitTargets(posts: string[] | null | undefined): RedditSubmitTarget[] {
-  const title = (posts?.[0] ?? '').trim();
-  const body = (posts?.[1] ?? '').trim();
-  if (!title) return [];
+  if (!Array.isArray(posts) || posts.length !== 2) return [];
+
+  const title = (posts[0] ?? '').trim();
+  const body = (posts[1] ?? '').trim();
+  // A body is required, including in 'title-only' mode where it goes to the
+  // clipboard: an empty body is a post with no disclosure and no limits.
+  if (!title || !body) return [];
 
   return approvedSubreddits().map((entry) => {
     const full = composeUrl(entry.slug, title, body);

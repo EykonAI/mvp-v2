@@ -39,6 +39,48 @@ const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 // here: limit paragraph after the method, disclosure directly above
 // the link. The final selfText therefore always reads
 // method → what-this-does-not-establish → disclosure → replay URL.
+// Drop paragraphs this text already contains, verbatim.
+//
+// WHY THIS IS NEEDED, and why the lint did not catch it. The craft lint
+// REQUIRES the limit paragraph and the disclosure to be present in the
+// assembled body (craft-lints.ts: 'no affiliation disclosure found in the
+// body', 'no limit statement found in the body'). A model that also writes
+// them into `body` — roughly half of runs — therefore satisfies the lint,
+// and the append below adds a SECOND copy. The lint only ever sees the
+// finished text, so it cannot tell "model omitted, assembler added" from
+// "model included, assembler added again": it passes the duplicate. The gate
+// that enforces the honesty language is what produced the repetition.
+//
+// Measured over the stored Reddit drafts: 30 of the 56 POSTABLE two-part
+// drafts (53.6%) carried a duplicated paragraph — 30 of 67 counting the
+// unpostable template fallbacks. Replaying this exact rule over them removes
+// 36 paragraphs and 4,182 characters, and touches nothing else. The other
+// three channels carried zero duplicates across 479 drafts, because only
+// Reddit splits the disclosure and limit paragraph into their own fields.
+//
+// Deduping here is deterministic; a prompt instruction is not, which is why
+// this is the fix rather than sharper wording in the codex. It matches on
+// exact text after trimming — every duplicate observed was byte-identical —
+// and deliberately does NOT try to catch a rephrased near-duplicate, because
+// guessing at semantic equality would silently delete real content. Short
+// lines are left alone for the same reason: a repeated short line can be
+// legitimate, a repeated paragraph cannot.
+const DEDUPE_MIN_CHARS = 40;
+
+function dedupeParagraphs(text: string): string {
+  const seen = new Set<string>();
+  return text
+    .split('\n\n')
+    .filter((p) => {
+      const key = p.trim();
+      if (key.length < DEDUPE_MIN_CHARS) return true;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join('\n\n');
+}
+
 function assembleReddit(input: unknown, refUrl: string): ChannelArtifact | null {
   if (typeof input !== 'object' || input === null) return null;
   const i = input as Record<string, unknown>;
@@ -69,6 +111,10 @@ function assembleReddit(input: unknown, refUrl: string): ChannelArtifact | null 
   } else {
     selfText = [body, limitParagraph, disclosure, refUrl].join('\n\n');
   }
+
+  // Both branches above append the limit paragraph and the disclosure
+  // unconditionally, so either can duplicate what the model already wrote.
+  selfText = dedupeParagraphs(selfText);
 
   return {
     body: `${title}\n\n${selfText}`,
