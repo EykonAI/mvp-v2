@@ -1,3 +1,4 @@
+import { loadFamilyCalibration, priorFor, applyRecalibration, calibrationContext } from './calibration';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { computePredictionHash } from './hash';
 import { round3, clampProbability, normalCdf } from './forecast';
@@ -109,7 +110,21 @@ export async function issueChokepointWeekly(opts: {
     ? recent.reduce((a, b) => a + b, 0) / recent.length
     : mean;
   const z = stddev > 0 ? (recentMean - mean) / stddev : 0;
-  const predictedMean = round3(clampProbability(normalCdf(z)));
+  // normalCdf(z) is centred on 0.5 by construction: it assumes "exceeds the
+  // trailing average" is a coin flip. Measured, this family resolves true
+  // 65.5% of the time — the question is asymmetric and the forecaster assumed
+  // it was not. With no momentum signal at all (z=0) the honest answer is the
+  // family's measured rate, not 0.5.
+  const cal = await loadFamilyCalibration(supabase);
+  const rawMean = stddev > 0
+    ? round3(clampProbability(normalCdf(z)))
+    : priorFor(cal, 'ais_chokepoint_weekly');
+  // Self-gating (mig 126). This family DOES pass its own leave-one-out test —
+  // skill -0.0426 -> -0.0086 — because it is mis-centred rather than pointing
+  // the wrong way. If that stops being true the gate closes on its own.
+  const predictedMean = round3(clampProbability(
+    applyRecalibration(cal, 'ais_chokepoint_weekly', rawMean),
+  ));
   const statement = buildStatement({
     slug,
     resolvesAt,
@@ -137,6 +152,7 @@ export async function issueChokepointWeekly(opts: {
         baseline_observation_count: counts.length,
         predicted_direction: predictedDirection,
         forecast_basis: 'recent_vs_baseline_momentum',
+        ...calibrationContext(cal, 'ais_chokepoint_weekly'),
         recent_mean_vessels: round2(recentMean),
         forecast_z: round2(z),
       },
