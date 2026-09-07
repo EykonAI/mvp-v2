@@ -180,24 +180,54 @@ async function handle(req: NextRequest) {
     (Date.parse(`${ymd(today)}T00:00:00Z`) - anchor.getTime()) / 86_400_000,
   );
 
+  // ─── Detection runs on pg_cron, not here (migration 134) ───────────
+  //
+  // This route called nightlights_detect_significant_events over PostgREST,
+  // which inherits authenticator's 8 s statement_timeout. It was cancelled on
+  // every run from 2026-09-01: no night newer than 08-23 was judged, both
+  // night-lights claim families ran out of candidates, and the route sat red
+  // for six days. The query is fast hot (0.3 s) and slow cold — the plan
+  // walked a facility-led index for a period range, thousands of random heap
+  // reads on a 512 MB cache the AIS firehose churns every half hour. Mig 134
+  // fixes the plan with a period-led index AND moves the call onto pg_cron
+  // (database statement_timeout, 120 s), the rule mig 122 already set: heavy
+  // periodic SQL never runs on a PostgREST RPC.
+  //
+  // What this route does now is READ the job's run record and say loudly when
+  // it has not kept up. nightlights_detect_runs holds a row iff a night was
+  // judged — nightlights_significant_events cannot say that, because a night
+  // judged with nothing significant leaves no row there.
   let totalEvents = 0;
-  for (const day of days) {
-    const { data, error } = await supabase.rpc('nightlights_detect_significant_events', {
-      p_day: day,
-      p_baseline_nights: BASELINE_NIGHTS,
-      p_min_clear: MIN_CLEAR,
-      p_surge_sigma: SURGE_SIGMA,
-      p_dark_frac: DARK_FRAC,
-      p_dark_nights: DARK_NIGHTS,
-      p_lit_floor: LIT_FLOOR,
-    });
+  const judged = new Map<string, { events: number; judged_at: string }>();
+  {
+    const { data, error } = await supabase
+      .from('nightlights_detect_runs')
+      .select('night, events, judged_at')
+      .in('night', days);
     if (error) {
-      errors.push(`detect ${day}: ${error.message}`);
+      errors.push(`detect-runs read: ${error.message}`);
     } else {
-      const n = typeof data === 'number' ? data : 0;
-      results.push({ day, events: n });
-      totalEvents += n;
+      for (const row of (data ?? []) as Array<{ night: string; events: number; judged_at: string }>) {
+        judged.set(row.night, { events: row.events, judged_at: row.judged_at });
+      }
     }
+  }
+  for (const day of days) {
+    const j = judged.get(day);
+    if (j) {
+      results.push({ day, events: j.events });
+      totalEvents += j.events;
+    }
+  }
+  // The newest night on the data clock has not been judged: the pg_cron job
+  // has not run since the worker landed it. An error, not a note — a silent
+  // gap here is the six red-for-nobody days again. It clears itself the
+  // moment the job runs (daily 10:05 UTC, after the 09:44 UTC worker).
+  const unjudged = days.filter((d) => !judged.has(d));
+  if (unjudged.includes(days[0])) {
+    errors.push(
+      `detection stale: data clock ${newestNight} has not been judged — pg_cron job detect-nightlights (mig 134) has not run since the worker landed it; unjudged nights: ${unjudged.join(', ')}`,
+    );
   }
 
   // How many facilities had enough CLEAR history to be judged at all.
@@ -444,6 +474,22 @@ async function handle(req: NextRequest) {
       // publication latency, not a fault here — but it must be visible.
       newest_night: newestNight,
       lag_days: lagDays,
+      // Detection is pg_cron's (mig 134). judged/unjudged come from
+      // nightlights_detect_runs, which holds a row iff a night was judged.
+      detection: {
+        source: 'pg_cron detect-nightlights (mig 134), daily 10:05 UTC',
+        judged: days.filter((d) => judged.has(d)),
+        unjudged,
+        // The rule this route expects the job to apply. The values live in
+        // nightlights_detect_recent() in SQL now; these are the copy the
+        // route publishes so a reader can check the two agree. Verified
+        // equal 2026-09-07 — if either side is edited, re-verify.
+        rule: {
+          baseline_nights: BASELINE_NIGHTS, min_clear: MIN_CLEAR,
+          surge_sigma: SURGE_SIGMA, dark_frac: DARK_FRAC,
+          dark_nights: DARK_NIGHTS, lit_floor: LIT_FLOOR,
+        },
+      },
       // Both night-lights families (mig 128). declined is broken out by reason
       // and family: a selection rule you cannot audit is no selection rule.
       nightlights_claims: {
