@@ -33,7 +33,7 @@
 --
 --   base rate (what it does today)   skill -0.0065
 --   momentum alone                   skill +0.0399
---   momentum x streak                skill +0.0584   <- shipped
+--   momentum x streak                skill +0.0572   <- shipped
 --   momentum x quarter               skill +0.0040   (seasonality DILUTES; the
 --                                                     cells go thin and it
 --                                                     costs more than it adds)
@@ -41,6 +41,12 @@
 -- +0.058 is modest and is not dressed up as more. It is the difference between
 -- a forecaster that is worse than a constant and one that is better than a
 -- constant, on the family that has been dragging the house track down.
+--
+-- The +0.0572 figure is the SHIPPED estimator measured end to end. An earlier
+-- pass quoted +0.0584, which came from a shrinkage form that did not match what
+-- this function computes — (k + 4*rate)/(n + 8) rather than (k + 8*rate)/(n + 8),
+-- which is not a Beta prior centred on the running rate at all. The conclusion
+-- is unchanged; the number is the one the code actually produces.
 --
 -- Mean reversion was tested and does not exist here: bucketing on level
 -- against the trailing 52-week mean gives 0.513 / 0.507 / 0.547 / 0.533.
@@ -105,7 +111,7 @@ SELECT jsonb_build_object(
       'walk_forward_n', 199,
       'skill_base_rate', -0.0065,
       'skill_momentum',   0.0399,
-      'skill_this_model', 0.0584,
+      'skill_this_model', 0.0572,
       'note', 'expanding window, 100-week burn-in, no lookahead; seasonality tested and rejected at +0.0040'),
   'cells', COALESCE((
       SELECT jsonb_object_agg(c.cell, jsonb_build_object('n', c.n, 'rate', round(c.rate::numeric, 4)))
@@ -114,7 +120,7 @@ SELECT jsonb_build_object(
 $function$;
 
 COMMENT ON FUNCTION public.eia_draw_plan(text, numeric, integer) IS
-  'Streak-conditioned draw forecast for EIA Cushing (mig 129). Replaces a blended draw RATE, which is a level not a direction. Walk-forward skill +0.0584 against -0.0065.';
+  'Streak-conditioned draw forecast for EIA Cushing (mig 129). Replaces a blended draw RATE, which is a level not a direction. Walk-forward skill +0.0572 against -0.0065.';
 
 GRANT EXECUTE ON FUNCTION public.eia_draw_plan(text, numeric, integer) TO service_role;
 
