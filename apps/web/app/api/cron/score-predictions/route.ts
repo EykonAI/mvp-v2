@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { resolveBySource, type PredictionRow } from '@/lib/predictions/resolvers';
+import { recordScorerRun } from '@/lib/predictions/run-records';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 180;
@@ -76,7 +77,10 @@ export async function POST(req: NextRequest) {
       .lte('resolves_at', now.toISOString())
       .order('resolves_at', { ascending: true })
       .limit(limit);
-    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    if (error) {
+      await recordScorerRun(supabase, { candidates: 0, scored: 0, deferred: 0, voided: 0, limit, selection, due_unscored: null, ok: false, error: error.message });
+      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    }
     toScore = (pending ?? []).filter((r: any) => !r.prediction_outcomes || r.prediction_outcomes.length === 0);
   } else {
     toScore = rpcRows ?? [];
@@ -144,6 +148,20 @@ export async function POST(req: NextRequest) {
   // progress. §16.4: a label that claims what the code does not compute.
   const { data: remaining } = await supabase.rpc('due_unscored_predictions_count');
 
+  // Run record (mig 138): a row iff this tick ran, whatever it scored. A tick
+  // that defers everything writes no outcome row and was read as "did not
+  // run" on 2026-09-08; this is what the admin monitor reads instead.
+  const runRecordError = await recordScorerRun(supabase, {
+    candidates: toScore.length,
+    scored: writes.length,
+    deferred,
+    voided: writes.filter((w) => (w as { void_reason?: string | null }).void_reason).length,
+    limit,
+    selection,
+    due_unscored: typeof remaining === 'number' ? remaining : null,
+    ok: true,
+  });
+
   return NextResponse.json({
     ok: true,
     scored: writes.length,
@@ -152,6 +170,7 @@ export async function POST(req: NextRequest) {
     selection,
     candidates: toScore.length,
     due_unscored: remaining ?? null,
+    run_record_error: runRecordError,
   });
 }
 

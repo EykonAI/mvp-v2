@@ -9,6 +9,7 @@ import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { checkShardLiveness } from '@/lib/firms/liveness';
 import { checkFeedHealth } from '@/lib/monitoring/feed-health';
+import { recordIssuanceRun } from '@/lib/predictions/run-records';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -462,6 +463,11 @@ async function handle(req: NextRequest) {
   // "nothing is happening anywhere" — indistinguishable from a quiet
   // week. Fail the run so Railway shows it red.
   const ok = errors.length === 0;
+
+  await recordIssuanceRun(supabase, {
+    source: 'firms-recovery', issued: recoveryIssued, already_present: recoverySkipped,
+    declined: recoveryDeclined, error: recoveryError,
+  });
 
   return NextResponse.json(
     {

@@ -4,6 +4,7 @@ import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { scoreVessel, computeRealFeatures } from '@/lib/intel/shadowFleet';
 import { boxForPosition, boxState, BOX_DEAD_AFTER_H, type BoxLiveness } from '@/lib/intel/aisCoverage';
 import { buildDarkContactClaimRow, darkContactObservable, type SelectionRule } from '@/lib/predictions/issue-dark-contact';
+import { recordIssuanceRun } from '@/lib/predictions/run-records';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -568,6 +569,10 @@ export async function POST(req: NextRequest) {
         if (error) {
           // Loud but non-fatal: scoring and events already committed; report
           // the failure so the tick is visibly partial rather than green.
+          await recordIssuanceRun(supabase, {
+            source: 'ais-darkgap', issued: claimsIssued, already_present: claimsSkipped,
+            declined: claimsDeclined, error: `ledger emission: ${error.message}`,
+          });
           return NextResponse.json(
             { ok: false, error: `ledger emission: ${error.message}`, scored: upserts.length - unscoredNoBaseline, events_opened: evOpened, claims_issued: claimsIssued },
             { status: 500 },
@@ -580,6 +585,12 @@ export async function POST(req: NextRequest) {
 
   // Echo the inputs so a stale build is detectable from outside: `gap_source`
   // does not exist in any bundle before this change.
+  // Run record (mig 138): what this tick issued and refused, as a row.
+  await recordIssuanceRun(supabase, {
+    source: 'ais-darkgap', issued: claimsIssued, already_present: claimsSkipped,
+    declined: claimsDeclined, error: claimsRuleError ?? null,
+  });
+
   return NextResponse.json({
     ok: true,
     gap_source: 'updated_at',
