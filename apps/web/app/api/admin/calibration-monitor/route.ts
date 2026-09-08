@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { getCurrentUser } from '@/lib/auth/session';
 import { isFounder } from '@/lib/admin/access';
 import { createServerSupabase } from '@/lib/supabase-server';
-import { loadMonitor, parseFilters } from '@/lib/admin/calibration-monitor';
+import { loadMonitor, parseFilters, sanitizeProof } from '@/lib/admin/calibration-monitor';
 
 // /api/admin/calibration-monitor — founder-gated (build-prompt v1.1, §7).
 //
@@ -11,7 +11,9 @@ import { loadMonitor, parseFilters } from '@/lib/admin/calibration-monitor';
 //      each probe carries its own as_of and error — a failed RPC never fails
 //      the response.
 // POST { action: 'watch.add', text, due_at? } | { action: 'watch.seen', id } |
-//      { action: 'watch.unseen', id } | { action: 'watch.delete', id }
+//      { action: 'watch.unseen', id } | { action: 'watch.delete', id } | { action: 'watch.check' }
+//      watch.add may carry `proof` — a fixed-kind predicate (mig 147) that
+//      flips the item to SEEN when it holds; never free SQL.
 //      The ONLY writes this module makes (§10): watch-list entries. No
 //      resolution, no void, no register write happens from here.
 export const dynamic = 'force-dynamic';
@@ -26,7 +28,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user || !isFounder(user)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  let body: { action?: string; text?: string; due_at?: string | null; id?: number };
+  let body: { action?: string; text?: string; due_at?: string | null; id?: number; proof?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -39,7 +41,9 @@ export async function POST(req: NextRequest) {
       const text = (body.text ?? '').trim().slice(0, 500);
       if (!text) return NextResponse.json({ error: 'text required' }, { status: 400 });
       const due = body.due_at && !Number.isNaN(Date.parse(body.due_at)) ? new Date(body.due_at).toISOString() : null;
-      const { error } = await supabase.from('ledger_watch_items').insert({ text, due_at: due });
+      const proof = body.proof ? sanitizeProof(body.proof) : null;
+      if (body.proof && !proof) return NextResponse.json({ error: 'proof malformed — pick a kind and fill its parameters' }, { status: 400 });
+      const { error } = await supabase.from('ledger_watch_items').insert({ text, due_at: due, proof });
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ ok: true });
     }
@@ -52,6 +56,11 @@ export async function POST(req: NextRequest) {
         .eq('id', id);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       return NextResponse.json({ ok: true });
+    }
+    case 'watch.check': {
+      const { data, error } = await supabase.rpc('ledger_watch_check');
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: true, result: data });
     }
     case 'watch.delete': {
       if (!Number.isInteger(id)) return NextResponse.json({ error: 'id required' }, { status: 400 });

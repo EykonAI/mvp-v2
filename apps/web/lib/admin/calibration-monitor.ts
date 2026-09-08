@@ -208,7 +208,43 @@ export interface HouseGate {
 export interface LedgerTracks {
   tracks: Record<string, { issued?: number; resolved?: number; void?: number; open?: number; headline: { brier: number; skill: number | null; base_rate: number; log_loss?: number } | null }>;
 }
-export interface WatchItem { id: number; due_at: string | null; text: string; seen_at: string | null; created_at: string }
+export interface WatchItem {
+  id: number; due_at: string | null; text: string; seen_at: string | null; created_at: string;
+  // mig 147: a fixed-kind predicate that proves the item, and what proved it
+  proof: Record<string, unknown> | null; evidence: Record<string, unknown> | null; checked_at: string | null;
+}
+/** The proof kinds ledger_watch_prove() understands (mig 147) — a closed list, never free SQL. */
+export const WATCH_PROOF_KINDS = {
+  outcome_exists:             { label: 'an outcome exists for a source',            params: ['source'] },
+  family_scored_n:            { label: 'a family reaches n scored claims',          params: ['feature', 'min_n'] },
+  cohort_complete:            { label: 'an issuance cohort is complete',            params: ['track', 'day'] },
+  nights_judged_after_ingest: { label: 'nights judged after their newest ingest',   params: ['nights'] },
+  issuance_run_exists:        { label: 'an issuer has recorded a tick',             params: ['source'] },
+  alert_cleared:              { label: 'an alert has cleared',                      params: ['alert_id'] },
+  scorer_voided:              { label: 'a scorer tick voided claims',               params: ['min_voided'] },
+} as const;
+export type WatchProofKind = keyof typeof WATCH_PROOF_KINDS;
+const SLUG = /^[a-z0-9_-]{1,64}$/;
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** Validate a proof from the founder's form. Returns null when absent or malformed (the caller decides). */
+export function sanitizeProof(input: unknown): Record<string, unknown> | null {
+  if (!input || typeof input !== 'object') return null;
+  const o = input as Record<string, unknown>;
+  const kind = String(o.kind ?? '');
+  if (!(kind in WATCH_PROOF_KINDS)) return null;
+  const out: Record<string, unknown> = { kind };
+  const str = (k: string) => { const v = String(o[k] ?? '').trim(); return SLUG.test(v) ? v : null; };
+  const int = (k: string, dflt: number) => { const v = Number(o[k]); return Number.isInteger(v) && v > 0 && v < 1_000_000 ? v : dflt; };
+  switch (kind as WatchProofKind) {
+    case 'outcome_exists': case 'issuance_run_exists': { const s = str('source'); if (!s) return null; out.source = s; if (kind === 'outcome_exists') out.min_n = int('min_n', 1); break; }
+    case 'family_scored_n': { const f = str('feature'); if (!f) return null; out.feature = f; out.min_n = int('min_n', 10); break; }
+    case 'cohort_complete': { const t = str('track'); const d = String(o.day ?? '').trim(); if (!t || !DAY_RE.test(d)) return null; out.track = t; out.day = d; break; }
+    case 'nights_judged_after_ingest': { const raw = Array.isArray(o.nights) ? o.nights : String(o.nights ?? '').split(','); const nights = raw.map((v) => String(v).trim()).filter((v) => DAY_RE.test(v)); if (!nights.length) return null; out.nights = nights; break; }
+    case 'alert_cleared': { const a = str('alert_id'); if (!a) return null; out.alert_id = a; break; }
+    case 'scorer_voided': { out.min_voided = int('min_voided', 1); break; }
+  }
+  return out;
+}
 
 export interface Probe<T> { data: T | null; error: string | null; as_of: string }
 export interface Alert { id: string; severity: Severity; text: string; rule: string; evaluated_at: string; since?: string | null }
@@ -497,7 +533,7 @@ export async function loadMonitor(f: Filters, now: Date = new Date()): Promise<M
     probe<CohortsPayload>(() => supabase.rpc('calibration_cohorts', { p_days: Math.min(f.days, MAX_CUSTOM_SPAN_DAYS) })),
     probe<BoxCohort[]>(() => supabase.rpc('calibration_cohorts_by_box', { p_days: Math.min(Math.max(f.days, 14), 60) })),
     probe<WatchItem[]>(() =>
-      supabase.from('ledger_watch_items').select('id, due_at, text, seen_at, created_at').order('due_at', { ascending: true, nullsFirst: false }).limit(50),
+      supabase.from('ledger_watch_items').select('id, due_at, text, seen_at, created_at, proof, evidence, checked_at').order('due_at', { ascending: true, nullsFirst: false }).limit(50),
     ),
     probe<AlertState[]>(() => supabase.from('ledger_alert_state').select('alert_id, severity, text, rule, first_fired_at, last_seen_at, last_notified_at')),
     probe<AlertEvent[]>(() => supabase.from('ledger_alert_events').select('id, alert_id, transition, severity, text, at, notified').order('at', { ascending: false }).limit(8)),
