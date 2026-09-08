@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth/session';
 import { isFounder } from '@/lib/admin/access';
 import {
-  loadMonitor, parseFilters, wilson, MIN_QUOTABLE_N, TRACKS,
+  loadMonitor, parseFilters, wilson, MIN_QUOTABLE_N, TRACKS, ISSUER_SOURCES,
   type Monitor, type Severity, type Alert, type Bin, type Cohort, type FamilyView, type TrackStats,
 } from '@/lib/admin/calibration-monitor';
 import { Filters } from './Filters';
@@ -148,9 +148,13 @@ function Health({ m }: { m: Monitor }) {
   const missingAll = integ.reduce((s, [, t]) => s + t.missing_hash, 0);
   const hashPct = issuedAll ? ((100 * (issuedAll - missingAll)) / issuedAll).toFixed(missingAll ? 2 : 0) : '—';
   const issued24 = h?.issuance_24h ?? [];
-  const capFor = (source: string): number | null => {
-    const f = m.families.find((x) => x.source === source && x.plan);
-    return f?.plan?.cap ?? null;
+  // Caps are per UTC day; the 24 h count is rolling and spans two UTC days, so
+  // "today / cap" comes from the plan RPCs (issued_today) and is shown beside
+  // the rolling count, never compared to it.
+  const todayFor = (source: string): { today: number; cap: number } | null => {
+    const fs = m.families.filter((x) => x.source === source && x.plan && x.plan.issued_today != null);
+    if (!fs.length) return null;
+    return { today: fs.reduce((s, f) => s + (f.plan!.issued_today ?? 0), 0), cap: fs.reduce((s, f) => s + (f.plan!.cap ?? 0), 0) };
   };
   const roster = h?.blackmarble_roster ?? null;
   const nn = h?.blackmarble_newest_night ?? null;
@@ -204,7 +208,7 @@ function Health({ m }: { m: Monitor }) {
           badge={alertBadge(A, 'issuance')}
           err={err}
           v={nf(issued24.reduce((s, i) => s + i.issued, 0))}
-          s={issued24.map((i) => `${i.source} ${nf(i.issued)}${capFor(i.source) != null ? ` (≤${nf(capFor(i.source))}/day)` : ''}`).join(' · ') || 'nothing issued in 24 h'}
+          s={issued24.map((i) => { const t = todayFor(i.source); return `${i.source} ${nf(i.issued)} in 24 h${t ? ` · today ${nf(t.today)} / ${nf(t.cap)} cap` : ''}`; }).join(' · ') || 'nothing issued in 24 h'}
           why={
             (h?.issuance_runs ?? []).length
               ? <>last ticks: {(h?.issuance_runs ?? []).map((r) => `${r.source} ${hm(r.ran_at)} — issued ${r.issued}, present ${r.already_present ?? '—'}, declined ${Object.entries(r.declined ?? {}).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}${r.error ? `, ERROR ${r.error}` : ''}`).join(' · ')}</>
@@ -320,7 +324,8 @@ function FamilyMatrix({ m }: { m: Monitor }) {
     if (p.error) return <td className="num neg" title={p.error}>probe failed</td>;
     const x = p.data?.families?.find((y) => y.track === r.track && y.feature === r.feature);
     const allX = m.matrix.all.data?.families?.find((y) => y.track === r.track && y.feature === r.feature);
-    if (!x || x.resolved === 0) return <td className="num dim">{r.issued > 0 && (!allX || allX.resolved === 0) ? (c === 'all' ? `${nf(r.issued)} issued · 0 resolved` : 'deferred') : '—'}</td>;
+    const clocked = !!r.source && (ISSUER_SOURCES as readonly string[]).includes(r.source);
+    if (!x || x.resolved === 0) return <td className="num dim">{r.issued > 0 && (!allX || allX.resolved === 0) ? (c === 'all' ? `${nf(r.issued)} issued · 0 resolved` : clocked ? 'deferred' : 'unresolved') : '—'}</td>;
     if (x.scored < MIN_QUOTABLE_N) return <td className="num dim" title={`resolved ${x.resolved} · void ${x.void}`}>n&lt;10 ({x.scored}) · {f3(x.brier)}</td>;
     return <td className={`num ${(x.skill ?? 0) < 0 ? 'neg' : ''}`} title={`resolved ${x.resolved} · void ${x.void} · base ${f3(x.base_rate)}`}>{nf(x.scored)} · {f3(x.brier)} · {sg(x.skill)}</td>;
   };
@@ -380,7 +385,7 @@ function CohortPanel({ m }: { m: Monitor }) {
             <div className="bars">
               {series.map((c) => {
                 const flat = (c.sharpness ?? 0) < 0.005;
-                const h = c.skill == null ? 4 : Math.max(4, Math.round(((c.skill - min) / range) * 110));
+                const h = !c.complete ? 28 : c.skill == null ? 4 : Math.max(4, Math.round(((c.skill - min) / range) * 110));
                 return (
                   <div key={c.day} className={`bar${flat ? ' flat' : ''}${c.complete ? '' : ' open'}`} title={`${c.day} · issued ${c.issued} · scored ${c.n} · open ${c.open} · brier ${f3(c.brier)} · base ${f3(c.base_rate)} · sharpness ${f3(c.sharpness)}${c.complete ? '' : ' · cohort still open — not comparable'}`}>
                     <span className="mark" style={{ fontSize: 9, color: !c.complete ? 'var(--ink-faint)' : (c.skill ?? 0) > -0.05 ? 'var(--green)' : 'var(--ink-dim)' }}>{c.complete ? sg(c.skill) : `open ${nf(c.n)}/${nf(c.issued)}`}</span>
@@ -495,7 +500,7 @@ function ReliabilityPanel({ m }: { m: Monitor }) {
         </div>
         <div className="why">
           LOO κ=30, recomputed on every read; a gate turns itself on and off on its own evidence.
-          {eia && <> EIA live forecaster ({eia.basis ?? 'eia_draw_plan'}): cell {eia.current_cell ?? '—'} → {eia.forecast != null ? f3(eia.forecast) : '—'}, walk-forward n {nf(eia.walk_forward_n)}, skill this model {sg(eia.skill_this_model)} vs momentum {sg(eia.skill_momentum)} vs base rate {sg(eia.skill_base_rate)}{eia.eligible === false ? ' · NOT ELIGIBLE' : ''}.</>}
+          {eia && <> EIA live forecaster ({eia.basis ?? 'eia_draw_plan'}): cell {eia.current_cell ?? '—'} → {eia.forecast != null ? f3(eia.forecast) : '—'} on base {f3(eia.base_rate)} (n={nf(eia.n)}); walk-forward n {nf(eia.evidence?.walk_forward_n)}: this model {sg(eia.evidence?.skill_this_model)} vs momentum {sg(eia.evidence?.skill_momentum)} vs base rate {sg(eia.evidence?.skill_base_rate)}{eia.eligible === false ? ' · NOT ELIGIBLE' : ''}.</>}
           {m.plans.eia.error && <> EIA plan probe failed: {m.plans.eia.error}.</>}
         </div>
       </Card>
@@ -541,7 +546,7 @@ export default async function CalibrationMonitorPage({ searchParams }: { searchP
 
         <h2><span className="n">③</span> BY FAMILY × PERIOD — n · Brier · skill <span className="dim">· resolution date · trailing windows to now</span></h2>
         <FamilyMatrix m={m} />
-        <div className="legend"><span>cells: n · Brier · skill</span><span className="dim">“n&lt;10” = not quotable (Brier shown)</span><span className="dim">“deferred” = issued, no window published yet</span></div>
+        <div className="legend"><span>cells: n · Brier · skill</span><span className="dim">“n&lt;10” = not quotable (Brier shown)</span><span className="dim">“deferred” = issued, instrument has not published the window yet</span><span className="dim">“unresolved” = past deadline, no resolver has judged it</span></div>
 
         <h2><span className="n">④</span> COHORT TRAJECTORY — {f.track === 'all' ? 'machine' : f.track} · skill by <b>issuance day</b> · last {m.cohorts.data?.days ?? f.days} d <span className="dim">· as of {dt(m.cohorts.as_of)}</span></h2>
         <CohortPanel m={m} />

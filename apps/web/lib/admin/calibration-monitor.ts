@@ -35,9 +35,12 @@ const ALL_FROM = '2000-01-01T00:00:00.000Z';
 const DAY = 86_400_000;
 
 // Documented instrument lags (brief §6.3, corrected rev S): FIRMS is near-real-
-// time (~1 day); Black Marble VNP46A2 publishes ~9 days after the night.
-// Thresholds (§5 ①): green within documented +1 d · amber +3 d · red beyond.
-const DOC_LAG_DAYS = { firms: 1, blackmarble: 9 } as const;
+// time (~1 day, worker hourly); Black Marble VNP46A2 publishes ~9 days after
+// the night and its worker runs ONCE a day (~09:45 UTC), so the clock sits
+// one further day behind the wall by construction — measured 10.5 d on
+// 2026-09-08 with a healthy pipeline. Thresholds (§5 ①): green within
+// documented + cadence + 1 d · amber + 3 d · red beyond.
+const CLOCK_LAG = { firms: { doc: 1, cadence: 0 }, blackmarble: { doc: 9, cadence: 1 } } as const;
 
 // The source literals the issuers write — verified in code, not guessed:
 //   lib/predictions/issue-dark-contact.ts   source 'ais-darkgap'    feature 'ais_dark_contact_reappearance'
@@ -176,8 +179,9 @@ export interface BlackmarbleFamily { n: number; base_rate: number; eligible: boo
 export interface BlackmarblePlan { horizon_days: number; data_clock: string | null; daily_cap: number; rule: string; families: Record<string, BlackmarbleFamily> }
 export interface EiaPlan {
   as_of?: string; basis?: string; current_cell?: string; forecast?: number | null; eligible?: boolean; n?: number;
-  base_rate?: number; rate?: number; skill_this_model?: number | null; skill_momentum?: number | null; skill_base_rate?: number | null;
-  walk_forward_n?: number; note?: string;
+  base_rate?: number; rate?: number; note?: string;
+  // mig 129 nests the walk-forward evidence
+  evidence?: { walk_forward_n?: number; skill_this_model?: number | null; skill_momentum?: number | null; skill_base_rate?: number | null; note?: string };
 }
 export interface HouseGate {
   n: number; base_rate: number; mean_forecast: number; brier: number; prior: number; prior_basis: string;
@@ -273,7 +277,7 @@ function planFor(row: FamilyRow, plans: Monitor['plans']): FamilyPlan | null {
       if (!ep) return null;
       const cell = ep.current_cell ?? '—';
       return {
-        base_rate: ep.base_rate ?? ep.rate ?? null, n: ep.n ?? ep.walk_forward_n ?? null, eligible: ep.eligible ?? null, band: null,
+        base_rate: ep.base_rate ?? ep.rate ?? null, n: ep.n ?? null, eligible: ep.eligible ?? null, band: null,
         issued_today: null, cap: null, reason: ep.note ?? null,
         state: ep.forecast != null ? `cell ${cell} → ${Number(ep.forecast).toFixed(3)}` : `cell ${cell}`, source_rpc: 'eia_draw_plan() · mig 129',
       };
@@ -320,12 +324,14 @@ export function evaluateAlerts(m: Pick<Monitor, 'health' | 'cron' | 'plans' | 'f
 
   // clock-stalled · clocks · amber documented+1 d · red documented+3 d
   const lagF = daysSinceDate(h.clocks.firms, now), lagB = daysSinceDate(h.clocks.blackmarble, now), aisH = hoursSince(h.clocks.ais, now);
-  const clockText = (name: string, lag: number | null, doc: number) => `${name} ${lag === null ? 'never' : `${lag.toFixed(1)} d behind wall`} (documented ~${doc} d)`;
-  const worstClock = (lag: number | null, doc: number): Severity => lag === null || lag > doc + 3 ? 'crit' : lag > doc + 1 ? 'warn' : 'ok';
-  const cf = worstClock(lagF, DOC_LAG_DAYS.firms), cb = worstClock(lagB, DOC_LAG_DAYS.blackmarble);
+  const clockText = (name: string, lag: number | null, c: { doc: number; cadence: number }) =>
+    `${name} ${lag === null ? 'never' : `${lag.toFixed(1)} d behind wall`} (documented ~${c.doc} d${c.cadence ? ` + ${c.cadence} d worker cadence` : ''})`;
+  const worstClock = (lag: number | null, c: { doc: number; cadence: number }): Severity =>
+    lag === null || lag > c.doc + c.cadence + 3 ? 'crit' : lag > c.doc + c.cadence + 1 ? 'warn' : 'ok';
+  const cf = worstClock(lagF, CLOCK_LAG.firms), cb = worstClock(lagB, CLOCK_LAG.blackmarble);
   const ca: Severity = aisH === null || aisH > 6 ? 'crit' : aisH > 2 ? 'warn' : 'ok';
   const clockSev: Severity = [cf, cb, ca].includes('crit') ? 'crit' : [cf, cb, ca].includes('warn') ? 'warn' : 'ok';
-  add('clock-stalled', clockSev, `${clockText('FIRMS', lagF, DOC_LAG_DAYS.firms)} · ${clockText('Black Marble', lagB, DOC_LAG_DAYS.blackmarble)} · AIS newest fix ${aisH === null ? 'never' : `${aisH.toFixed(1)} h ago`}.`, 'data clock behind documented lag + 1 d (amber) / + 3 d (red); AIS > 2 h / 6 h');
+  add('clock-stalled', clockSev, `${clockText('FIRMS', lagF, CLOCK_LAG.firms)} · ${clockText('Black Marble', lagB, CLOCK_LAG.blackmarble)} · AIS newest fix ${aisH === null ? 'never' : `${aisH.toFixed(1)} h ago`}.`, 'data clock behind documented lag + worker cadence + 1 d (amber) / + 3 d (red); AIS > 2 h / 6 h');
 
   // partial-night · blackmarble_ingest_runs vs roster · red
   const nn = h.blackmarble_newest_night, roster = h.blackmarble_roster ?? 0;
