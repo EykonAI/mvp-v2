@@ -176,7 +176,11 @@ export interface FirmsPlan {
   daily_cap: number; issued_today: number; remaining: number; rule: string;
 }
 export interface BlackmarbleFamily { n: number; base_rate: number; eligible: boolean; reason: string | null; issued_today: number; remaining: number }
-export interface BlackmarblePlan { horizon_days: number; data_clock: string | null; daily_cap: number; rule: string; families: Record<string, BlackmarbleFamily> }
+export interface BlackmarblePlan {
+  horizon_days: number; data_clock: string | null; daily_cap: number; rule: string; families: Record<string, BlackmarbleFamily>;
+  // mig 142: the record is cached and refreshed hourly by pg_cron; the quota and clock are live
+  computed_at?: string | null; computed_on?: string | null; compute_ms?: number | null; cache?: 'hit' | 'miss'; cache_age_s?: number | null; stale?: boolean;
+}
 export interface EiaPlan {
   as_of?: string; basis?: string; current_cell?: string; forecast?: number | null; eligible?: boolean; n?: number;
   base_rate?: number; rate?: number; note?: string;
@@ -398,6 +402,14 @@ export function evaluateAlerts(m: Pick<Monitor, 'health' | 'cron' | 'plans' | 'f
   }
   if (!out.some((a) => a.id.startsWith('issuance-') && a.severity !== 'info')) add('issuance', 'ok', (h.issuance_24h ?? []).map((i) => `${i.source} ${i.issued.toLocaleString()}`).join(' · ') || 'nothing issued in 24 h', 'no eligible family silent, no issuer error');
 
+  // plan-stale · blackmarble_claim_plan_cache (mig 142) · amber — the record the
+  // night-lights issuer and the public ledger read must have been refreshed
+  const bp = m.plans.blackmarble.data;
+  if (m.plans.blackmarble.error) add('plan-stale', 'warn', `blackmarble plan probe failed: ${m.plans.blackmarble.error}`, 'blackmarble_claim_plan() errored');
+  else if (bp && bp.cache === 'miss') add('plan-stale', 'warn', 'blackmarble plan served by live computation — no cache row for the default parameters (refresh-blackmarble-plan has not run since migration 142).', 'blackmarble_claim_plan_cache miss');
+  else if (bp && bp.stale) add('plan-stale', 'warn', `blackmarble plan cache is ${((bp.cache_age_s ?? 0) / 3600).toFixed(1)} h old (computed ${bp.computed_at}) — refresh-blackmarble-plan (hourly at :12) is not running.`, 'cache older than 26 h');
+  else if (bp && bp.computed_at) add('plan-stale', 'ok', `blackmarble plan computed ${bp.computed_at.slice(0, 16).replace('T', ' ')} UTC in ${bp.compute_ms ?? '—'} ms, on data clock ${bp.computed_on ?? '—'} (cache hit).`, 'cache younger than 26 h');
+
   // box-dark · ais_box_liveness · amber per dark box
   const dark = (h.boxes ?? []).filter((b) => b.silent_hours === null || b.silent_hours > 24);
   if (dark.length) add('box-dark', 'warn', dark.map((b) => `${b.slug} silent ${b.silent_hours === null ? 'always' : `${(b.silent_hours / 24).toFixed(1)} d`}`).join(' · ') + ' — a coverage hole, not darkness; claims there VOID by the dead-box gate (mig 110).', 'AIS box newest_fix > 24 h');
@@ -441,7 +453,7 @@ export function evaluateAlerts(m: Pick<Monitor, 'health' | 'cron' | 'plans' | 'f
 export async function probeAlertInputs(supabase: ReturnType<typeof createServerSupabase>): Promise<AlertInputs> {
   const [health, cron, darkgap, firms, blackmarble, eia, house] = await Promise.all([
     probe<Health>(() => supabase.rpc('calibration_monitor_health')),
-    probe<Record<string, CronJob>>(() => supabase.rpc('pg_cron_recent_runs', { p_jobs: ['refresh-vessel-cadence', 'detect-nightlights'], p_limit: 5 })),
+    probe<Record<string, CronJob>>(() => supabase.rpc('pg_cron_recent_runs', { p_jobs: ['refresh-vessel-cadence', 'detect-nightlights', 'refresh-blackmarble-plan'], p_limit: 5 })),
     probe<DarkgapPlan>(() => supabase.rpc('dark_contact_issuance_plan')),
     probe<FirmsPlan>(() => supabase.rpc('firms_recovery_plan')),
     probe<BlackmarblePlan>(() => supabase.rpc('blackmarble_claim_plan')),

@@ -138,7 +138,7 @@ function Health({ m }: { m: Monitor }) {
   const err = m.health.error;
   const sc = h?.scorer ?? null;
   const cron = m.cron.data ?? {};
-  const dn = cron['detect-nightlights'], rv = cron['refresh-vessel-cadence'];
+  const dn = cron['detect-nightlights'], rv = cron['refresh-vessel-cadence'], rb = cron['refresh-blackmarble-plan'];
   const cronLine = (name: string, j?: { schedule: string; active: boolean; runs: { status: string; start: string; secs: number | null }[] }) =>
     j ? `${name} ${j.schedule}${j.active ? '' : ' · INACTIVE'} · last ${j.runs?.[0]?.status ?? '—'} ${j.runs?.[0]?.secs ?? '—'}s` : `${name}: ${m.cron.error ? 'probe failed' : 'not found'}`;
   const boxes = h?.boxes ?? [];
@@ -197,7 +197,7 @@ function Health({ m }: { m: Monitor }) {
           badge={alertBadge(A, 'detect')}
           err={err}
           small
-          v={<>newest judged night {h?.detect_runs?.[0]?.night ?? '—'}<br /><span className="dim">{cronLine('detect-nightlights', dn)}</span><br /><span className="dim">{cronLine('refresh-vessel-cadence', rv)}</span></>}
+          v={<>newest judged night {h?.detect_runs?.[0]?.night ?? '—'}<br /><span className="dim">{cronLine('detect-nightlights', dn)}</span><br /><span className="dim">{cronLine('refresh-vessel-cadence', rv)}</span><br /><span className="dim">{cronLine('refresh-blackmarble-plan', rb)}</span></>}
           s={`last: ${(h?.detect_runs ?? []).slice(0, 3).map((d) => `${md(d.night)} ${d.events}ev/${d.duration_ms ?? '—'}ms`).join(' · ') || '—'} · FIRMS events newest ${dt(h?.firms_events_newest)}`}
           why={h?.rejudge_needed?.length ? `Re-judge needed: ${h.rejudge_needed.join(', ')} — ingested after they were judged.` : 'Row-iff-judged table (mig 134). Red if the data clock is ahead of the newest judged night after 10:30 UTC; amber if a night was re-ingested after it was judged.'}
         />
@@ -264,7 +264,11 @@ function Health({ m }: { m: Monitor }) {
               </tbody>
             </table>
           </div>
-          <div className="why">{Object.entries(m.plans).filter(([, p]) => p.error).map(([k, p]) => `${k} plan probe failed: ${p.error}`).join(' · ') || 'Base rates and quotas come from the same plan RPCs the issuers use (migs 125–129), so this table and the claims it explains cannot disagree.'}</div>
+          <div className="why">
+            {Object.entries(m.plans).filter(([, p]) => p.error).map(([k, p]) => `${k} plan probe failed: ${p.error}`).join(' · ') || 'Base rates and quotas come from the same plan RPCs the issuers use (migs 125–129), so this table and the claims it explains cannot disagree.'}
+            {m.plans.blackmarble.data?.computed_at && <> Night-lights record computed {dt(m.plans.blackmarble.data.computed_at)} in {nf(m.plans.blackmarble.data.compute_ms)} ms on data clock {m.plans.blackmarble.data.computed_on ?? '—'} (cache {m.plans.blackmarble.data.cache}{m.plans.blackmarble.data.stale ? ' · STALE' : ''}); quota and clock live.</>}
+            {m.plans.blackmarble.data?.cache === 'miss' && <> Night-lights plan computed LIVE — no cache row yet (refresh-blackmarble-plan, mig 142).</>}
+          </div>
         </Card>
         <Card k="ALERTS · rules that fire" badge={<Badge sev={alerting.length ? worst(alerting.map((a) => a.severity)) : 'ok'} label={alerting.length ? `${alerting.length} OPEN` : 'ALL CLEAR'} />}>
           <ul className="watch" style={{ marginTop: 8 }}>
