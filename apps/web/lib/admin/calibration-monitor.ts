@@ -194,7 +194,9 @@ export interface LedgerTracks {
 export interface WatchItem { id: number; due_at: string | null; text: string; seen_at: string | null; created_at: string }
 
 export interface Probe<T> { data: T | null; error: string | null; as_of: string }
-export interface Alert { id: string; severity: Severity; text: string; rule: string; evaluated_at: string }
+export interface Alert { id: string; severity: Severity; text: string; rule: string; evaluated_at: string; since?: string | null }
+export interface AlertState { alert_id: string; severity: 'warn' | 'crit'; text: string; rule: string | null; first_fired_at: string; last_seen_at: string; last_notified_at: string | null }
+export interface AlertEvent { id: number; alert_id: string; transition: string; severity: string; text: string; at: string; notified: boolean }
 
 /** The plan that explains a family, joined by the issuer's feature literal. */
 export interface FamilyPlan {
@@ -219,10 +221,13 @@ export interface Monitor {
   cohorts: Probe<CohortsPayload>;
   boxCohorts: Probe<BoxCohort[]>;
   watch: Probe<WatchItem[]>;
+  alertState: Probe<AlertState[]>;
+  alertEvents: Probe<AlertEvent[]>;
   families: FamilyView[];
   agreement: Agreement[];
   alerts: Alert[];
 }
+export interface AlertInputs { health: Probe<Health>; cron: Probe<Record<string, CronJob>>; plans: Monitor['plans']; families: FamilyView[] }
 
 async function probe<T>(fn: () => PromiseLike<{ data: unknown; error: { message: string } | null }>): Promise<Probe<T>> {
   const as_of = new Date().toISOString();
@@ -429,14 +434,12 @@ export function evaluateAlerts(m: Pick<Monitor, 'health' | 'cron' | 'plans' | 'f
   return out.sort((a, b) => rank[a.severity] - rank[b.severity]);
 }
 
-export async function loadMonitor(f: Filters, now: Date = new Date()): Promise<Monitor> {
-  const supabase = createServerSupabase();
-  const toIso = new Date(now.getTime() + 60_000).toISOString();
-  const ago = (d: number) => new Date(now.getTime() + 60_000 - d * DAY).toISOString();
-  const stats = (from: string, to: string, basis: Basis, track: string | null, feature: string | null) =>
-    probe<WindowStats>(() => supabase.rpc('calibration_family_stats', { p_from: from, p_to: to, p_basis: basis, p_track: track, p_feature: feature }));
-
-  const [health, cron, darkgap, firms, blackmarble, eia, house, window, m7, m30, m90, mAll, ledger, cohorts, boxCohorts, watch] = await Promise.all([
+/**
+ * The probes the alert rules read — ① and the plans. Shared by the page and
+ * the hourly evaluator (lib/admin/ledger-alerts.ts), so both see the same facts.
+ */
+export async function probeAlertInputs(supabase: ReturnType<typeof createServerSupabase>): Promise<AlertInputs> {
+  const [health, cron, darkgap, firms, blackmarble, eia, house] = await Promise.all([
     probe<Health>(() => supabase.rpc('calibration_monitor_health')),
     probe<Record<string, CronJob>>(() => supabase.rpc('pg_cron_recent_runs', { p_jobs: ['refresh-vessel-cadence', 'detect-nightlights'], p_limit: 5 })),
     probe<DarkgapPlan>(() => supabase.rpc('dark_contact_issuance_plan')),
@@ -444,6 +447,21 @@ export async function loadMonitor(f: Filters, now: Date = new Date()): Promise<M
     probe<BlackmarblePlan>(() => supabase.rpc('blackmarble_claim_plan')),
     probe<EiaPlan>(() => supabase.rpc('eia_draw_plan')),
     probe<Record<string, HouseGate>>(() => supabase.rpc('house_family_calibration')),
+  ]);
+  const plans = { darkgap, firms, blackmarble, eia, house };
+  const families: FamilyView[] = (health.data?.families ?? []).map((r) => ({ ...r, plan: planFor(r, plans) }));
+  return { health, cron, plans, families };
+}
+
+export async function loadMonitor(f: Filters, now: Date = new Date()): Promise<Monitor> {
+  const supabase = createServerSupabase();
+  const toIso = new Date(now.getTime() + 60_000).toISOString();
+  const ago = (d: number) => new Date(now.getTime() + 60_000 - d * DAY).toISOString();
+  const stats = (from: string, to: string, basis: Basis, track: string | null, feature: string | null) =>
+    probe<WindowStats>(() => supabase.rpc('calibration_family_stats', { p_from: from, p_to: to, p_basis: basis, p_track: track, p_feature: feature }));
+
+  const [inputs, window, m7, m30, m90, mAll, ledger, cohorts, boxCohorts, watch, alertState, alertEvents] = await Promise.all([
+    probeAlertInputs(supabase),
     stats(f.from, f.to, f.basis, f.track === 'all' ? null : f.track, f.family === 'all' ? null : f.family),
     stats(ago(7), toIso, 'resolved', null, null),
     stats(ago(30), toIso, 'resolved', null, null),
@@ -455,10 +473,10 @@ export async function loadMonitor(f: Filters, now: Date = new Date()): Promise<M
     probe<WatchItem[]>(() =>
       supabase.from('ledger_watch_items').select('id, due_at, text, seen_at, created_at').order('due_at', { ascending: true, nullsFirst: false }).limit(50),
     ),
+    probe<AlertState[]>(() => supabase.from('ledger_alert_state').select('alert_id, severity, text, rule, first_fired_at, last_seen_at, last_notified_at')),
+    probe<AlertEvent[]>(() => supabase.from('ledger_alert_events').select('id, alert_id, transition, severity, text, at, notified').order('at', { ascending: false }).limit(8)),
   ]);
-
-  const plans = { darkgap, firms, blackmarble, eia, house };
-  const families: FamilyView[] = (health.data?.families ?? []).map((r) => ({ ...r, plan: planFor(r, plans) }));
+  const { health, cron, plans, families } = inputs;
 
   // Acceptance §12.1: with period = all, ② must equal calibration_ledger_tracks()
   // to the decimal. Computed here, shown on the page, never silently assumed.
@@ -470,14 +488,16 @@ export async function loadMonitor(f: Filters, now: Date = new Date()): Promise<M
     return { track: t, brier_stats: a?.brier ?? null, brier_ledger: b?.brier ?? null, skill_stats: a?.skill ?? null, skill_ledger: b?.skill ?? null, agree };
   });
 
-  const partial = { health, cron, plans, families };
+  // "Since when?" — the evaluator's state row, if one exists for the rule.
+  const since = new Map((alertState.data ?? []).map((st) => [st.alert_id, st.first_fired_at]));
+  const alerts = evaluateAlerts(inputs, now).map((a) => ({ ...a, since: since.get(a.id) ?? null }));
+
   return {
     generated_at: now.toISOString(),
     filters: f,
     health, cron, plans, window,
     matrix: { '7': m7, '30': m30, '90': m90, all: mAll },
-    ledger, cohorts, boxCohorts, watch, families, agreement,
-    alerts: evaluateAlerts(partial, now),
+    ledger, cohorts, boxCohorts, watch, alertState, alertEvents, families, agreement, alerts,
   };
 }
 

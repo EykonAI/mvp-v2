@@ -184,6 +184,9 @@ async function post(text: string): Promise<void> {
   }
 }
 
+/** The same webhook and payload shape, for the ledger monitor's alert transitions. */
+export const postAlertWebhook = post;
+
 function describe(f: FeedHealth): string {
   const stale = f.hoursStale === null ? 'unreadable' : `${f.hoursStale}h stale`;
   const latest = f.latest ?? 'no rows';
