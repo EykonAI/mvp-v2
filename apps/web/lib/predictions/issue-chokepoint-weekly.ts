@@ -72,17 +72,22 @@ export async function issueChokepointWeekly(opts: {
 
   // Pull the prior 28 days of snapshots.
   const baselineStart = new Date(now.getTime() - BASELINE_WINDOW_DAYS * 24 * 3600 * 1000);
-  const { data: obs, error: obsErr } = await supabase
-    .from('ais_chokepoint_observations')
-    .select('period, vessel_count')
-    .eq('chokepoint', slug)
-    .gte('period', ymdUtc(baselineStart))
-    .lte('period', ymdUtc(now))
-    .order('period', { ascending: true });
+  // Covered rows only (mig 148): a thin snapshot — below 0.35 of the strait's
+  // trailing 14-day median — is partial coverage and must not depress the
+  // baseline mean or widen its stddev. The number excluded is written onto
+  // the claim so a reader can see what the forecast stood on.
+  const { data: obsAll, error: obsErr } = await supabase.rpc('chokepoint_covered_observations', {
+    p_slug: slug,
+    p_from: ymdUtc(baselineStart),
+    p_to: ymdUtc(now),
+  });
 
   if (obsErr) {
     return { ok: false, skipped_reason: `baseline_read: ${obsErr.message}` };
   }
+  const obsRows = (obsAll ?? []) as Array<{ period: string; vessel_count: number; covered: boolean }>;
+  const obs = obsRows.filter((r) => r.covered);
+  const thinExcluded = obsRows.length - obs.length;
   if (!obs || obs.length < MIN_BASELINE_OBSERVATIONS) {
     return {
       ok: false,
@@ -148,6 +153,7 @@ export async function issueChokepointWeekly(opts: {
         chokepoint: slug,
         baseline_window_days: BASELINE_WINDOW_DAYS,
         baseline_mean_vessels: round2(mean),
+        baseline_thin_excluded: thinExcluded,
         baseline_stddev: round2(stddev),
         baseline_observation_count: counts.length,
         predicted_direction: predictedDirection,
