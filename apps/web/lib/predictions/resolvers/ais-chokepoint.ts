@@ -1,4 +1,5 @@
 import type { Resolver } from './types';
+import { INSTRUMENT_STALE_DAYS } from './data-clock';
 
 /**
  * AIS chokepoint resolver.
@@ -44,9 +45,47 @@ export const resolveAisChokepoint: Resolver = async (row, supabase) => {
     .lte('period', ymd(windowEnd))
     .order('period', { ascending: true });
 
-  if (error || !obs || obs.length < MIN_RESOLUTION_OBSERVATIONS) return null;
+  if (error) return null;
+  const rows = obs ?? [];
+  if (rows.length < MIN_RESOLUTION_OBSERVATIONS) {
+    // The #482 rule for a real-time instrument. The chokepoint snapshot cron
+    // publishes one row per strait per day and NEVER backfills: once it has
+    // moved past the window, a thin window stays thin forever, and deferring
+    // is a promise that cannot be kept. Six house claims sat "due" from
+    // 2026-08-16 for this reason — the AIS-dead fortnight left the 08-10 week
+    // with 0 rows and the 08-17 week with 3–4, under a resolver that only
+    // ever answered "not yet". VOID names what was not seen; it is excluded
+    // from every aggregate (types.ts), never a zero.
+    const { data: newest } = await supabase
+      .from('ais_chokepoint_observations')
+      .select('period')
+      .eq('chokepoint', parsed.slug)
+      .order('period', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const clock = (newest as { period?: string } | null)?.period ?? null;
+    if (clock !== null && clock > ymd(windowEnd)) {
+      return {
+        observed: 0,
+        source_url: 'https://eykon.ai/intel/calibration',
+        void_reason: `coverage_gap: ${rows.length}/${MIN_RESOLUTION_OBSERVATIONS} daily chokepoint observations for ${parsed.slug} in ${ymd(windowStart)}..${ymd(windowEnd)}; snapshots are not backfilled (newest ${clock}) — window cannot be judged`,
+      };
+    }
+    // Instrument has not moved past the window: the missing days may still
+    // land (today's snapshot). Backstop against a dead instrument, as for
+    // the satellite families.
+    const staleDays = (Date.now() - resolvesAtMs) / 86_400_000;
+    if (staleDays > INSTRUMENT_STALE_DAYS) {
+      return {
+        observed: 0,
+        source_url: 'https://eykon.ai/intel/calibration',
+        void_reason: `chokepoint snapshots for ${parsed.slug} published only to ${clock ?? 'nothing'}, ${staleDays.toFixed(0)} d after the window — instrument did not publish the window, not looked`,
+      };
+    }
+    return null;
+  }
 
-  const counts = obs
+  const counts = rows
     .map((r) => Number(r.vessel_count))
     .filter((n) => Number.isFinite(n));
   if (counts.length === 0) return null;
