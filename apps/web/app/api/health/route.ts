@@ -13,11 +13,30 @@ type DependencyStatus = {
   detail?: string;
 };
 
+// What is actually deployed, read from the variables Railway injects at
+// build and run time. "Deployed" is then a fact the page states, not one a
+// probe infers: on 2026-09-08 a build sat at "Building" for 94 minutes while
+// the previous commit kept serving, and nothing on the site could say which
+// commit was live. All null outside Railway (local dev, CI).
+type BuildInfo = {
+  commit: string | null;
+  branch: string | null;
+  deployment: string | null;
+};
+function buildInfo(): BuildInfo {
+  return {
+    commit: process.env.RAILWAY_GIT_COMMIT_SHA ?? null,
+    branch: process.env.RAILWAY_GIT_BRANCH ?? null,
+    deployment: process.env.RAILWAY_DEPLOYMENT_ID ?? null,
+  };
+}
+
 type HealthBody = {
   status: 'ok' | 'degraded' | 'down';
   service: 'eykon-web';
   timestamp: string;
   version: string;
+  build: BuildInfo;
   dependencies: {
     supabase: DependencyStatus;
     anthropic: DependencyStatus;
@@ -108,6 +127,7 @@ export async function GET(request: NextRequest) {
       service: 'eykon-web',
       timestamp,
       version,
+      build: buildInfo(),
       dependencies: {},
     });
   }
@@ -125,6 +145,7 @@ export async function GET(request: NextRequest) {
     service: 'eykon-web',
     timestamp,
     version,
+    build: buildInfo(),
     dependencies: { supabase, anthropic },
   };
 
