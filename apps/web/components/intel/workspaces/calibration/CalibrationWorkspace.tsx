@@ -420,9 +420,31 @@ function Cohorts({ points, changes, error, weekly }: {
   const lo = Math.min(-0.5, ...skills), hi = Math.max(0.25, ...skills);
   const y = (v: number) => PAD + ((hi - v) / (hi - lo)) * (H - PAD * 2);
   const zero = y(0);
-  const firstDay = Date.parse(`${shown[0].day}T00:00:00Z`);
-  const lastDay = Date.parse(`${shown[shown.length - 1].day}T00:00:00Z`) + 86_400_000 * (weekly ? 7 : 1);
-  const xOf = (iso: string) => ((Date.parse(iso) - firstDay) / (lastDay - firstDay)) * W;
+  // Markers sit on the SAME ordinal axis as the bars. Bars are one slot per
+  // cohort regardless of calendar gaps (no claims 09-02..09-05 while the
+  // shadow-fleet cron was dead), so a time-linear x would drop a 09-06 mark
+  // over the 09-07 bar — which is exactly what the first deploy did. A mark
+  // is placed inside the slot of the last cohort on or before it, at its
+  // fraction through that slot's span (a day, or a week for the house track).
+  const slotMs = 86_400_000 * (weekly ? 7 : 1);
+  const xOf = (iso: string): number | null => {
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return null;
+    let i = -1;
+    for (let k = 0; k < shown.length; k++) if (Date.parse(`${shown[k].day}T00:00:00Z`) <= t) i = k;
+    if (i < 0) return null;                                              // before the first cohort — not drawn
+    const start = Date.parse(`${shown[i].day}T00:00:00Z`);
+    const frac = Math.min(1, (t - start) / slotMs);
+    return (i + frac) * step;
+  };
+  // Labels of marks closer than ~26px are stepped down so they stay legible;
+  // the full timestamp and note are in each mark's title.
+  const placed: number[] = [];
+  const labelY = (cx: number) => {
+    const row = placed.filter(px => Math.abs(px - cx) < 26).length;
+    placed.push(cx);
+    return 9 + row * 9;
+  };
   return (
     <>
       <svg width="100%" height={H + 14} viewBox={`0 0 ${W} ${H + 14}`} preserveAspectRatio="none" aria-label="skill by issuance cohort" style={{ marginTop: 6 }}>
@@ -445,11 +467,12 @@ function Cohorts({ points, changes, error, weekly }: {
         })}
         {changes.map(ch => {
           const cx = xOf(ch.at);
-          if (cx < 0 || cx > W) return null;
+          if (cx == null || cx < 0 || cx > W) return null;
+          const ly = labelY(cx);
           return (
             <g key={ch.at}>
               <line x1={cx} x2={cx} y1={2} y2={H - 2} stroke="var(--amber)" strokeWidth={1} strokeDasharray="2 2" />
-              <text x={cx + 2} y={9} fontSize={7} fill="var(--amber)" fontFamily="var(--f-mono)">{ch.pr}<title>{`${ch.at} · ${ch.note}`}</title></text>
+              <text x={cx + 2} y={ly} fontSize={7} fill="var(--amber)" fontFamily="var(--f-mono)">{ch.pr}<title>{`${ch.at} · ${ch.note}`}</title></text>
             </g>
           );
         })}
