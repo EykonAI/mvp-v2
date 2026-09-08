@@ -37,8 +37,15 @@ interface TrackData {
   issued: number; resolved: number; void: number; open: number; calibrating: boolean;
   headline: Headline | null; integrity: Integrity; reliability: Bin[];
   history: Array<{ week: string; brier: number; n: number }>;
+  cohorts?: Cohort[];
   families: Family[];
 }
+interface Cohort {
+  day: string; issued: number; n: number; open: number; complete: boolean;
+  sum_brier: number; sum_y: number; sum_absdev: number;
+  brier: number | null; base_rate: number | null; sharpness: number | null; skill: number | null;
+}
+interface Change { at: string; pr: string; note: string }
 interface ObservableFamily {
   key: string; source: string; verdict: 'admit' | 'exclude'; reason: string;
   events: number | null; base_rate: number | null; measured_n?: number | null; issuing?: boolean;
@@ -46,6 +53,7 @@ interface ObservableFamily {
 interface Payload {
   tracks: TrackData[]; min_sample: number;
   observable_families: ObservableFamily[]; generated_at?: string; error?: string;
+  changes?: Change[]; cohorts_error?: string | null;
 }
 
 export default function CalibrationWorkspace() {
@@ -186,6 +194,11 @@ export default function CalibrationWorkspace() {
         <div style={{ marginTop: 12, border: '1px solid var(--rule-soft)', background: 'var(--bg-panel)', padding: 12 }}>
           <Head>⑤ Brier by resolution week</Head>
           <History points={track.history} />
+        </div>
+
+        <div style={{ marginTop: 12, border: '1px solid var(--rule-soft)', background: 'var(--bg-panel)', padding: 12 }}>
+          <Head>⑤b Skill by issuance cohort</Head>
+          <Cohorts points={track.cohorts ?? []} changes={data.changes ?? []} error={data.cohorts_error ?? null} weekly={track.key === 'house'} />
         </div>
       </section>
 
@@ -361,6 +374,110 @@ function Tag({ children }: { children: React.ReactNode }) {
       {children}
     </span>
   );
+}
+
+/**
+ * Skill by ISSUANCE cohort — the only view in which a change of forecaster is
+ * visible. The headline is cumulative and carries every early cohort forever;
+ * "Brier by resolution week" mixes claims issued under different forecasters.
+ *
+ * Two honesty rules, both from this ledger's own history:
+ *   · a cohort is COMPARABLE only once every claim in it has passed its
+ *     deadline. The claims that resolve first are the ones that reappeared
+ *     first (#401 censoring): on 2026-09-08 the first 43 of 6,607 claims from
+ *     one cohort read +0.296 while the rest had not had time to fail.
+ *     Incomplete cohorts are drawn hollow and labelled, never as a bar to
+ *     compare against.
+ *   · a cohort with sharpness 0.000 is the flat 0.5 prior — the forecaster
+ *     said nothing. Drawn grey and labelled, so the trajectory reads as
+ *     "no forecaster → forecaster", not as a lucky week.
+ *
+ * Sums are re-bucketed here (days → ISO weeks for the house track, which
+ * issues weekly), so the derived numbers are exact, not averages of averages.
+ */
+function Cohorts({ points, changes, error, weekly }: {
+  points: Cohort[]; changes: Change[]; error: string | null; weekly: boolean;
+}) {
+  if (error) {
+    return (
+      <p style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--amber)', padding: '10px 0' }}>
+        cohort view unavailable — {error}
+      </p>
+    );
+  }
+  const bucketed = weekly ? bucketWeeks(points) : points;
+  const shown = bucketed.filter(c => c.issued > 0);
+  if (shown.length < 2) {
+    return (
+      <p style={{ fontFamily: 'var(--f-mono)', fontSize: 10, color: 'var(--ink-faint)', padding: '10px 0' }}>
+        {shown.length === 0 ? 'No cohorts in the last 120 days.' : 'One cohort — a trajectory needs at least two.'}
+      </p>
+    );
+  }
+  const W = 660, H = 92, PAD = 10;
+  const step = W / shown.length;
+  const skills = shown.map(c => c.skill ?? 0);
+  const lo = Math.min(-0.5, ...skills), hi = Math.max(0.25, ...skills);
+  const y = (v: number) => PAD + ((hi - v) / (hi - lo)) * (H - PAD * 2);
+  const zero = y(0);
+  const firstDay = Date.parse(`${shown[0].day}T00:00:00Z`);
+  const lastDay = Date.parse(`${shown[shown.length - 1].day}T00:00:00Z`) + 86_400_000 * (weekly ? 7 : 1);
+  const xOf = (iso: string) => ((Date.parse(iso) - firstDay) / (lastDay - firstDay)) * W;
+  return (
+    <>
+      <svg width="100%" height={H + 14} viewBox={`0 0 ${W} ${H + 14}`} preserveAspectRatio="none" aria-label="skill by issuance cohort" style={{ marginTop: 6 }}>
+        <line x1={0} x2={W} y1={zero} y2={zero} stroke="var(--rule-strong)" strokeWidth={1} strokeDasharray="3 3" />
+        {shown.map((c, i) => {
+          const flat = (c.sharpness ?? 1) < 0.005;
+          const s = c.skill ?? 0;
+          const top = Math.min(y(s), zero), h = Math.max(1, Math.abs(y(s) - zero));
+          const x = i * step + step * 0.15, bw = step * 0.7;
+          const fill = !c.complete ? 'none' : flat ? 'var(--ink-ghost)' : s < 0 ? 'var(--coral)' : 'var(--green)';
+          const title = `${c.day}${weekly ? ' week' : ''} · issued ${c.issued} · resolved ${c.n}${c.complete ? '' : ` · open ${c.open} — not comparable`} · skill ${c.skill == null ? '—' : c.skill.toFixed(3)} · sharpness ${c.sharpness == null ? '—' : c.sharpness.toFixed(3)}${flat ? ' (flat prior)' : ''}`;
+          return (
+            <g key={c.day}>
+              <rect x={x} y={top} width={bw} height={h} fill={fill} stroke={!c.complete ? 'var(--ink-faint)' : 'none'} strokeDasharray={!c.complete ? '2 2' : undefined} opacity={c.complete ? 0.9 : 0.7}>
+                <title>{title}</title>
+              </rect>
+              <text x={x + bw / 2} y={H + 10} fontSize={7} fill="var(--ink-faint)" textAnchor="middle" fontFamily="var(--f-mono)">{c.day.slice(5)}</text>
+            </g>
+          );
+        })}
+        {changes.map(ch => {
+          const cx = xOf(ch.at);
+          if (cx < 0 || cx > W) return null;
+          return (
+            <g key={ch.at}>
+              <line x1={cx} x2={cx} y1={2} y2={H - 2} stroke="var(--amber)" strokeWidth={1} strokeDasharray="2 2" />
+              <text x={cx + 2} y={9} fontSize={7} fill="var(--amber)" fontFamily="var(--f-mono)">{ch.pr}<title>{`${ch.at} · ${ch.note}`}</title></text>
+            </g>
+          );
+        })}
+      </svg>
+      <p style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--ink-faint)', margin: 0, lineHeight: 1.6 }}>
+        skill = 1 − Brier ÷ base·(1−base), by {weekly ? 'issuance week' : 'issuance day'} · complete cohorts solid · open cohorts hollow (not comparable) · grey = flat 0.5 prior (sharpness 0) · amber marks = forecaster changes
+      </p>
+    </>
+  );
+}
+
+function bucketWeeks(points: Cohort[]): Cohort[] {
+  const by = new Map<string, Cohort>();
+  for (const c of points) {
+    const d = new Date(`${c.day}T00:00:00Z`);
+    const dow = (d.getUTCDay() + 6) % 7;                 // Monday = 0
+    const monday = new Date(d.getTime() - dow * 86_400_000).toISOString().slice(0, 10);
+    const acc = by.get(monday) ?? { day: monday, issued: 0, n: 0, open: 0, complete: true, sum_brier: 0, sum_y: 0, sum_absdev: 0, brier: null, base_rate: null, sharpness: null, skill: null };
+    acc.issued += c.issued; acc.n += c.n; acc.open += c.open; acc.complete = acc.complete && c.complete;
+    acc.sum_brier += Number(c.sum_brier); acc.sum_y += Number(c.sum_y); acc.sum_absdev += Number(c.sum_absdev);
+    by.set(monday, acc);
+  }
+  return [...by.values()].sort((a, b) => a.day.localeCompare(b.day)).map(a => {
+    if (a.n === 0) return a;
+    const brier = a.sum_brier / a.n, base = a.sum_y / a.n, sharp = a.sum_absdev / a.n;
+    const denom = base * (1 - base);
+    return { ...a, brier, base_rate: base, sharpness: sharp, skill: denom > 0.001 ? 1 - brier / denom : null };
+  });
 }
 
 function Head({ children }: { children: React.ReactNode }) {

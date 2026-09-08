@@ -137,8 +137,28 @@ export async function GET(_req: NextRequest) {
       /* additive — the panel falls back to "base —" */
     }
 
+    // Skill by ISSUANCE cohort (mig 137): the only view in which a change of
+    // forecaster is visible. Additive — if the probe fails, the panel says so
+    // and the rest of the page renders.
+    let cohorts: Record<string, unknown[]> = {};
+    let changes: unknown[] = [];
+    let cohortsError: string | null = null;
+    try {
+      const { data: co, error: coErr } = await supabase.rpc('calibration_cohorts', { p_days: 120 });
+      if (coErr) cohortsError = coErr.message;
+      else {
+        const c = (co ?? {}) as { tracks?: Record<string, unknown[]>; changes?: unknown[] };
+        cohorts = c.tracks ?? {};
+        changes = c.changes ?? [];
+      }
+    } catch (e) {
+      cohortsError = e instanceof Error ? e.message : String(e);
+    }
+
     return NextResponse.json({
-      tracks,
+      tracks: tracks.map(tr => ({ ...tr, cohorts: cohorts[tr.key] ?? [] })),
+      cohorts_error: cohortsError,
+      changes,
       min_sample: MIN_SAMPLE,
       observable_families: FAMILIES.map(f => ({
         ...f,
