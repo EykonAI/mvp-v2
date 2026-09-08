@@ -37,16 +37,19 @@ export const resolveAisChokepoint: Resolver = async (row, supabase) => {
   const windowStart = new Date(resolvesAtMs - RESOLVE_WINDOW_DAYS * 24 * 3600 * 1000);
   const windowEnd = new Date(resolvesAtMs);
 
-  const { data: obs, error } = await supabase
-    .from('ais_chokepoint_observations')
-    .select('period, vessel_count')
-    .eq('chokepoint', parsed.slug)
-    .gte('period', ymd(windowStart))
-    .lte('period', ymd(windowEnd))
-    .order('period', { ascending: true });
+  // Covered rows only (mig 148): a snapshot below 0.35 of the strait's
+  // trailing 14-day median is partial coverage, not traffic, and is neither
+  // averaged nor counted toward the five-day minimum. It stays on the record.
+  const { data: obs, error } = await supabase.rpc('chokepoint_covered_observations', {
+    p_slug: parsed.slug,
+    p_from: ymd(windowStart),
+    p_to: ymd(windowEnd),
+  });
 
   if (error) return null;
-  const rows = obs ?? [];
+  const all = (obs ?? []) as Array<{ period: string; vessel_count: number; covered: boolean }>;
+  const rows = all.filter((r) => r.covered);
+  const thin = all.length - rows.length;
   if (rows.length < MIN_RESOLUTION_OBSERVATIONS) {
     // The #482 rule for a real-time instrument. The chokepoint snapshot cron
     // publishes one row per strait per day and NEVER backfills: once it has
@@ -68,7 +71,7 @@ export const resolveAisChokepoint: Resolver = async (row, supabase) => {
       return {
         observed: 0,
         source_url: 'https://eykon.ai/intel/calibration',
-        void_reason: `coverage_gap: ${rows.length}/${MIN_RESOLUTION_OBSERVATIONS} daily chokepoint observations for ${parsed.slug} in ${ymd(windowStart)}..${ymd(windowEnd)}; snapshots are not backfilled (newest ${clock}) — window cannot be judged`,
+        void_reason: `coverage_gap: ${rows.length}/${MIN_RESOLUTION_OBSERVATIONS} covered daily chokepoint observations for ${parsed.slug} in ${ymd(windowStart)}..${ymd(windowEnd)}${thin > 0 ? ` (${thin} thin snapshot${thin === 1 ? '' : 's'} excluded)` : ''}; snapshots are not backfilled (newest ${clock}) — window cannot be judged`,
       };
     }
     // Instrument has not moved past the window: the missing days may still
