@@ -237,7 +237,7 @@ function Health({ m }: { m: Monitor }) {
           badge={alertBadge(A, 'integrity')}
           err={err}
           v={`${hashPct}%`}
-          s={`hash on ${nf(issuedAll - missingAll)} / ${nf(issuedAll)} rows · sealed ${integ.map(([t, v]) => `${t} ${nf(v.sealed)}/${nf(v.issued)}`).join(' · ')}`}
+          s={`hash-bound at issue ${nf(issuedAll - missingAll)} / ${nf(issuedAll)} rows · commit-reveal (creator calls only) ${integ.filter(([t]) => t === 'creator').map(([, v]) => `${nf(v.sealed)}/${nf(v.issued)}`).join('') || 'no creator calls yet'}`}
           why={integ.map(([t, v]) => `${t} ${nf(v.issued)} = ${nf(v.scored)} scored + ${nf(v.void)} void + ${nf(v.pending)} pending ${v.reconciles ? '✓' : '✗'}`).join(' · ') || '—'}
         />
       </div>

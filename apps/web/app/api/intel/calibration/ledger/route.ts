@@ -107,7 +107,7 @@ export async function GET(_req: NextRequest) {
         calibrating: resolved < MIN_SAMPLE,
         headline: t?.headline ?? null,
         integrity: t?.integrity ?? {
-          issued: 0, sealed: 0, sealed_pct: null, resolved_total: 0, median_lead_days: null,
+          issued: 0, sealed: 0, sealed_pct: null, hashed: 0, hashed_pct: null, resolved_total: 0, median_lead_days: null,
         },
         reliability: t?.reliability ?? [],
         history: t?.history ?? [],
