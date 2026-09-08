@@ -32,6 +32,7 @@ export interface LedgerAlertReport {
   escalated: string[];
   re_alerted: string[];
   cleared: string[];
+  watch?: { checked: number; proven: number; newly_seen: { id: number; text: string; evidence: Record<string, unknown> }[] } | null;
   errors: string[];
 }
 
@@ -124,6 +125,22 @@ export async function evaluateAndRecordLedgerAlerts(supabase: SupabaseClient, no
     if (error) report.errors.push(`state clear ${id}: ${error.message}`);
     await record(ghost, 'cleared', notified);
     report.cleared.push(id);
+  }
+
+  // Watch items proven by SQL (mig 147): run every unproven predicate, say
+  // what a row just proved. Fail-soft like everything else here.
+  try {
+    const { data: wc, error: wcErr } = await supabase.rpc('ledger_watch_check');
+    if (wcErr) report.errors.push(`watch check: ${wcErr.message}`);
+    else {
+      const w = wc as { checked: number; proven: number; newly_seen: { id: number; text: string; evidence: Record<string, unknown> }[] } | null;
+      report.watch = w;
+      for (const item of w?.newly_seen ?? []) {
+        await post(`[SEEN] Calibration ledger watch · ${item.text}\nproof: ${JSON.stringify(item.evidence)}\n${PAGE}`);
+      }
+    }
+  } catch (e) {
+    report.errors.push(`watch check: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   report.open = alerts.length;
