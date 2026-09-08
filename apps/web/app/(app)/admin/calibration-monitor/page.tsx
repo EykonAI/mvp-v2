@@ -270,11 +270,17 @@ function Health({ m }: { m: Monitor }) {
           <ul className="watch" style={{ marginTop: 8 }}>
             {A.map((a) => (
               <li key={a.id}>
-                <Badge sev={a.severity} label={a.severity === 'ok' ? 'CLEAR' : LABEL[a.severity]} title={`${a.id} · ${a.rule} · evaluated ${dt(a.evaluated_at)}`} /> <span className="dim">{a.id}</span> {a.text}
+                <Badge sev={a.severity} label={a.severity === 'ok' ? 'CLEAR' : LABEL[a.severity]} title={`${a.id} · ${a.rule} · evaluated ${dt(a.evaluated_at)}${a.since ? ` · firing since ${dt(a.since)}` : ''}`} /> <span className="dim">{a.id}</span> {a.text}
+                {a.since && <span className="dim"> · firing since {dt(a.since)} ({((Date.parse(m.generated_at) - Date.parse(a.since)) / 3_600_000).toFixed(1)} h)</span>}
               </li>
             ))}
           </ul>
-          <div className="why">Rules are code, not prose (lib/admin/calibration-monitor.ts · evaluateAlerts): hover a badge for the rule and its evaluation time.</div>
+          <div className="why">
+            Rules are code, not prose (lib/admin/calibration-monitor.ts · evaluateAlerts): hover a badge for the rule and its evaluation time.
+            {m.alertState.error
+              ? <> Transitions unavailable: {m.alertState.error}.</>
+              : <> “Firing since” comes from the hourly evaluator (evaluate-ledger-alerts, mig 141), which also posts fired / escalated / cleared to Discord; this page never writes it.{(m.alertState.data ?? []).length === 0 ? ' No open alert recorded yet — the evaluator has not ticked since migration 141.' : ''}</>}
+          </div>
         </Card>
       </div>
     </>
@@ -524,6 +530,7 @@ export default async function CalibrationMonitorPage({ searchParams }: { searchP
   if (d0) seen.push({ at: d0.judged_at, text: `Night-lights detection judged ${d0.night}: ${d0.events} events in ${d0.duration_ms ?? '—'} ms (nightlights_detect_runs).` });
   if (h?.blackmarble_last_run) seen.push({ at: h.blackmarble_last_run.ran_at, text: `Black Marble worker: night ${h.blackmarble_last_run.night} · ${h.blackmarble_last_run.tiles_processed}/${h.blackmarble_last_run.tiles_expected} tiles · ${nf(h.blackmarble_last_run.facilities_written)} facilities · ok=${String(h.blackmarble_last_run.ok)} (blackmarble_ingest_runs).` });
   if (h?.boxes_computed_at) seen.push({ at: h.boxes_computed_at, text: `AIS box liveness recomputed: ${(h.boxes ?? []).filter((b) => b.silent_hours !== null && b.silent_hours <= 24).length} of ${(h.boxes ?? []).length} boxes heard within 24 h (ais_box_liveness).` });
+  for (const e of m.alertEvents.data ?? []) seen.push({ at: e.at, text: `Alert ${e.transition.toUpperCase()} · ${e.alert_id} (${e.severity}${e.notified ? ', Discord posted' : ''}) — ${e.text} (ledger_alert_events).` });
   seen.sort((a, b) => (a.at < b.at ? 1 : -1));
 
   const basisLabel = f.basis === 'issued' ? 'issuance date' : 'resolution date';
