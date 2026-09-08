@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { issueEiaWeekly } from '@/lib/predictions/issue-eia-weekly';
+import { createServerSupabase } from '@/lib/supabase-server';
+import { recordIssuanceRun } from '@/lib/predictions/run-records';
+
+// Outcomes that are the issuer declining, not failing: the record counts
+// them under `declined`; anything else the issuer reports as not-ok is an
+// error the admin monitor must show.
+const BENIGN = new Set(['already_issued', 'no_baseline_observation']);
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,6 +31,19 @@ async function handle(req: NextRequest) {
 
   const result = await issueEiaWeekly();
   const status = result.ok ? 200 : 500;
+
+  // Run record (mig 138): a row iff this tick ran. Weekly issuers were the
+  // two the monitor could not see; a Monday that never fires now shows as a
+  // stale record rather than as nothing.
+  const reason = result.skipped_reason ?? null;
+  await recordIssuanceRun(createServerSupabase(), {
+    source: 'eia',
+    issued: result.ok && !reason ? 1 : 0,
+    already_present: reason === 'already_issued' ? 1 : 0,
+    declined: reason && reason !== 'already_issued' && BENIGN.has(reason) ? { [reason]: 1 } : {},
+    error: !result.ok && reason && !BENIGN.has(reason) ? reason : null,
+  });
+
   return NextResponse.json(result, { status });
 }
 
