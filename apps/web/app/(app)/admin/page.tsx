@@ -117,6 +117,12 @@ const ADMIN_SECTIONS: AdminGroup[] = [
         glyph: '📡',
         desc: 'Live feed freshness (AIS · GDELT · ADS-B) + FIRMS shard liveness — is fresh data actually landing, and can a stale shard still be repaired.',
       },
+      {
+        href: '/admin/calibration-monitor',
+        title: 'Calibration monitor',
+        glyph: '◎',
+        desc: 'Is the ledger functioning and how skilled is it — per track, per family, per period. Pipeline health, due queue, data clocks, cohorts, gates, alerts.',
+      },
     ],
   },
 ];

@@ -5,6 +5,7 @@ import {
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
+import { recordIssuanceRun } from '@/lib/predictions/run-records';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -464,6 +465,11 @@ async function handle(req: NextRequest) {
   }
 
   const ok = errors.length === 0;
+
+  await recordIssuanceRun(supabase, {
+    source: 'blackmarble', issued: nlIssued, already_present: nlSkipped,
+    declined: nlDeclined, error: nlError,
+  });
 
   return NextResponse.json(
     {
