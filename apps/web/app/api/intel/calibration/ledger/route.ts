@@ -115,14 +115,38 @@ export async function GET(_req: NextRequest) {
       };
     });
 
+    // The measured base rates come from the same plan RPCs the issuers use
+    // (migs 127 and 128), so this panel and the claims it explains cannot
+    // disagree. A family with no plan, or a plan that is not eligible, stays
+    // honestly "base —". Additive: a failed plan probe leaves the dash rather
+    // than failing the page.
+    const plans: Record<string, { base_rate: number | null; eligible: boolean; n: number | null }> = {};
+    try {
+      const [{ data: fp }, { data: bp }] = await Promise.all([
+        supabase.rpc('firms_recovery_plan'),
+        supabase.rpc('blackmarble_claim_plan'),
+      ]);
+      const ffam = (fp as { family?: { base_rate?: number; eligible?: boolean; n?: number } } | null)?.family;
+      if (ffam) plans.went_dark = { base_rate: ffam.base_rate ?? null, eligible: !!ffam.eligible, n: ffam.n ?? null };
+      const bfams = (bp as { families?: Record<string, { base_rate?: number; eligible?: boolean; n?: number }> } | null)?.families ?? {};
+      for (const key of ['first_light', 'went_dark_lights'] as const) {
+        const fam = bfams[key];
+        if (fam) plans[key] = { base_rate: fam.base_rate ?? null, eligible: !!fam.eligible, n: fam.n ?? null };
+      }
+    } catch {
+      /* additive — the panel falls back to "base —" */
+    }
+
     return NextResponse.json({
       tracks,
       min_sample: MIN_SAMPLE,
       observable_families: FAMILIES.map(f => ({
         ...f,
         events: familyCounts[f.key] ?? null,
-        // Measured, or honestly absent. Never a placeholder.
-        base_rate: null as number | null,
+        // Measured (from the family's own issuance plan), or honestly absent.
+        base_rate: plans[f.key]?.eligible ? plans[f.key].base_rate : (null as number | null),
+        measured_n: plans[f.key]?.n ?? null,
+        issuing: plans[f.key]?.eligible ?? false,
       })),
       generated_at: new Date().toISOString(),
     });

@@ -836,74 +836,28 @@ async function queryCalibration(input: Record<string, any>): Promise<string> {
     const feature = input.feature as string | undefined;
     const track = input.track as string | undefined;
     const windowDays = Number(input.window_days ?? 30);
-    const since = new Date(Date.now() - windowDays * 24 * 3600_000).toISOString();
 
-    let q = supabase
-      .from('prediction_outcomes')
-      .select('brier, log_loss, observed_at, predictions_register!inner(feature, track)')
-      .gte('observed_at', since)
-      .limit(5000);
-    if (feature) q = q.eq('predictions_register.feature', feature);
-    if (track) q = q.eq('predictions_register.track', track);
-    const { data, error } = await q;
+    // ─── Aggregated in SQL, never fetched and averaged here ───────
+    //
+    // This tool used to pull prediction_outcomes rows with `.limit(5000)`
+    // and no ORDER BY, then average in JS. On 2026-09-08 it told every
+    // agent that called it the machine track was resolved 5,000 / Brier
+    // 0.263 — against 46,936 / 0.195. A LIMIT is a window too (#469, mig
+    // 124), and this was the surface that fix never reached. Migration 136
+    // does the arithmetic in the database over the whole window.
+    const { data, error } = await supabase.rpc('calibration_window_stats', {
+      p_days: Number.isFinite(windowDays) && windowDays > 0 ? windowDays : 30,
+      p_track: track ?? null,
+      p_feature: feature ?? null,
+    });
     if (error) throw new Error(error.message);
 
-    // ─── Scored means scored ──────────────────────────────────────
-    //
-    // A resolved row whose brier is NULL has NOT been scored — it is
-    // unresolved, voided, or the scorer has not run. It is NOT a
-    // perfect prediction.
-    //
-    // The previous implementation did `Number(r.brier)` and kept
-    // anything Number.isFinite. Number(null) is 0 and 0 is finite, so
-    // every unscored row entered the mean AS A PERFECT SCORE and
-    // inflated the denominator. On 2026-09-06 that reported Brier
-    // 0.019 over "n=488" when the truth was 0.244 over n=38 — 450
-    // unscored machine rows counted as zeros. The platform's own first
-    // directive is that absence of an observation is not a result;
-    // this scored it as the best possible one, on the single number
-    // that is eYKON's differentiation, over MCP, to other agents.
-    const scoredNum = (v: unknown): number | null => {
-      if (v === null || v === undefined || v === '') return null;
-      const n = Number(v);
-      return Number.isFinite(n) ? n : null;
-    };
-    const mean = (xs: number[]): number | null =>
-      xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
-
-    // ─── Tracks never blend ───────────────────────────────────────
-    //
-    // §8.3: machine (sensor observables), house (eYKON's own
-    // forecasts) and creator are three separate records and averaging
-    // them is meaningless. The old code returned ONE number across all
-    // of them, so a dense machine track buried the house score that
-    // the reader actually asked for. There is deliberately no blended
-    // figure here — a missing number is better than a misleading one.
-    const byTrack = new Map<string, { resolved: number; briers: number[]; logs: number[] }>();
-    for (const row of (data ?? []) as any[]) {
-      const reg = Array.isArray(row.predictions_register)
-        ? row.predictions_register[0]
-        : row.predictions_register;
-      const t = (reg?.track as string) ?? 'unknown';
-      const acc = byTrack.get(t) ?? { resolved: 0, briers: [], logs: [] };
-      acc.resolved += 1;
-      const b = scoredNum(row.brier);
-      if (b !== null) acc.briers.push(b);
-      const l = scoredNum(row.log_loss);
-      if (l !== null) acc.logs.push(l);
-      byTrack.set(t, acc);
-    }
-
-    const tracks: Record<string, unknown> = {};
-    for (const [name, a] of byTrack) {
-      tracks[name] = {
-        resolved: a.resolved,
-        scored: a.briers.length,
-        unscored: a.resolved - a.briers.length,
-        avg_brier: mean(a.briers),
-        avg_log_loss: mean(a.logs),
-      };
-    }
+    // Shape unchanged for existing callers — resolved / scored / unscored /
+    // avg_brier / avg_log_loss — plus base_rate and skill, because a Brier
+    // without its base rate is a number without a meaning (skill is the
+    // relative Brier skill score against the track's own base rate; negative
+    // means worse than always saying the base rate, not "wrong").
+    const tracks = (data ?? {}) as Record<string, unknown>;
 
     return JSON.stringify({
       feature: feature ?? 'all',
@@ -913,9 +867,10 @@ async function queryCalibration(input: Record<string, any>): Promise<string> {
       note:
         'Tracks never blend — machine, house and creator are separate records and a ' +
         'combined average is meaningless. "scored" is the real n: rows counted in the ' +
-        'average. "unscored" are resolved rows with no Brier yet (unresolved, voided, or ' +
-        'not yet scored) and are EXCLUDED, never treated as zero. A Brier over a handful ' +
-        'of scored rows carries no weight — read scored before quoting any figure.',
+        'average. "unscored" are resolved rows with no Brier (voided — we did not look) ' +
+        'and are EXCLUDED, never treated as zero. skill is relative to the track\'s own ' +
+        'base rate over the same window. A Brier over a handful of scored rows carries ' +
+        'no weight — read scored before quoting any figure.',
     });
   } catch (err: any) {
     return JSON.stringify({ error: err.message, note: 'Predictions register is likely warming up.' });

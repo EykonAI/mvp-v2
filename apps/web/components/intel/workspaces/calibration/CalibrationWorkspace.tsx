@@ -41,7 +41,7 @@ interface TrackData {
 }
 interface ObservableFamily {
   key: string; source: string; verdict: 'admit' | 'exclude'; reason: string;
-  events: number | null; base_rate: number | null;
+  events: number | null; base_rate: number | null; measured_n?: number | null; issuing?: boolean;
 }
 interface Payload {
   tracks: TrackData[]; min_sample: number;
@@ -149,7 +149,7 @@ export default function CalibrationWorkspace() {
                   <Tag>excluded</Tag>
                 ) : (
                   <span style={{ color: 'var(--ink-faint)', fontSize: 9, whiteSpace: 'nowrap' }}>
-                    {f.base_rate == null ? 'base —' : `base ${f.base_rate}`} · {f.events ?? '—'}
+                    {f.base_rate == null ? 'base —' : `base ${f.base_rate}${f.measured_n ? ` (n=${f.measured_n})` : ''}${f.issuing ? ' · issuing' : ''}`} · {f.events ?? '—'}
                   </span>
                 )}
               </div>
