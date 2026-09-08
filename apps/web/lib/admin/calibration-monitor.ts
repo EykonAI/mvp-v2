@@ -48,11 +48,24 @@ const CLOCK_LAG = { firms: { doc: 1, cadence: 0 }, blackmarble: { doc: 9, cadenc
 //   lib/predictions/issue-blackmarble.ts    source 'blackmarble'    feature 'nightlights_first_light_persistence' | 'nightlights_recovery'
 // The family LIST itself is derived from the register at request time; this
 // table only says which plan RPC explains which feature.
-export const ISSUER_SOURCES = ['ais-darkgap', 'firms-recovery', 'blackmarble'] as const;
-// Railway schedules as set by the founder (compute-shadow-fleet-scores hourly,
-// detect-firms-significance hourly, detect-nightlights-significance daily
-// after the 10:05 UTC pg_cron judgement). Used only to age the last run row.
-const ISSUER_SCHEDULE_HOURS: Record<(typeof ISSUER_SOURCES)[number], number> = { 'ais-darkgap': 1, 'firms-recovery': 1, blackmarble: 24 };
+//   app/api/cron/issue-eia-weekly            source 'eia'            feature 'eia_weekly_inventory'   (Mondays 09:00 UTC)
+//   app/api/cron/issue-chokepoint-weekly     source 'ais'            feature 'ais_chokepoint_weekly'  (Mondays 09:00 UTC)
+export const ISSUER_SOURCES = ['ais-darkgap', 'firms-recovery', 'blackmarble', 'eia', 'ais'] as const;
+type IssuerSource = (typeof ISSUER_SOURCES)[number];
+// Railway schedules as set by the founder, and the ages at which a missing
+// run row is a warning / a fault. Hourly issuers: 2 h / 4 h. Daily (after the
+// 10:05 UTC judgement): 2 d / 4 d. Weekly (Mondays 09:00 UTC): a week and a
+// day / two weeks — a Monday that never fired is visible by Tuesday.
+// `silent_h` is the window in which an eligible family must have issued
+// something for issuance-silent to stay quiet — a weekly issuer is not silent
+// on a Thursday.
+const ISSUER_CADENCE: Record<IssuerSource, { schedule: string; warn_h: number; crit_h: number; silent_h: number }> = {
+  'ais-darkgap':    { schedule: 'hourly',              warn_h: 2,   crit_h: 4,   silent_h: 24 },
+  'firms-recovery': { schedule: 'hourly',              warn_h: 2,   crit_h: 4,   silent_h: 24 },
+  blackmarble:      { schedule: 'daily ~10:24 UTC',    warn_h: 48,  crit_h: 96,  silent_h: 48 },
+  eia:              { schedule: 'Mondays 09:00 UTC',   warn_h: 192, crit_h: 336, silent_h: 192 },
+  ais:              { schedule: 'Mondays 09:00 UTC',   warn_h: 192, crit_h: 336, silent_h: 192 },
+};
 
 export interface Filters {
   period: Period;
@@ -376,25 +389,26 @@ export function evaluateAlerts(m: Pick<Monitor, 'health' | 'cron' | 'plans' | 'f
   }
 
   // issuance-silent · plans + issuance_runs · amber
-  const issued24 = new Map((h.issuance_24h ?? []).map((i) => [i.source, i.issued]));
   const lastRun = new Map((h.issuance_runs ?? []).map((r) => [r.source, r]));
   for (const fam of m.families) {
-    if (!fam.source || !ISSUER_SOURCES.includes(fam.source as (typeof ISSUER_SOURCES)[number])) continue;
+    if (!fam.source || !(ISSUER_SOURCES as readonly string[]).includes(fam.source)) continue;
+    const cadence = ISSUER_CADENCE[fam.source as IssuerSource];
     const run = lastRun.get(fam.source);
     const candidates = run ? (run.already_present ?? 0) + Object.values(run.declined ?? {}).reduce((s, v) => s + (Number(v) || 0), 0) + run.issued : 0;
-    if (fam.plan?.eligible && (issued24.get(fam.source) ?? 0) === 0 && run && candidates > 0) {
-      add(`issuance-silent:${fam.feature}`, 'warn', `${fam.feature} is eligible but issued 0 in 24 h while its last tick saw ${candidates} candidates (declined ${JSON.stringify(run.declined ?? {})}).`, 'eligible family issued 0 in 24 h with candidates > 0');
+    const sinceIssuedH = hoursSince(fam.newest, now);
+    if (fam.plan?.eligible && sinceIssuedH !== null && sinceIssuedH > cadence.silent_h && run && candidates > 0) {
+      add(`issuance-silent:${fam.feature}`, 'warn', `${fam.feature} is eligible but has issued nothing for ${(sinceIssuedH / 24).toFixed(1)} d (window ${cadence.silent_h} h for a ${cadence.schedule} issuer) while its last tick saw ${candidates} candidates (declined ${JSON.stringify(run.declined ?? {})}).`, `eligible family issued nothing in ${cadence.silent_h} h with candidates > 0`);
     }
   }
   // issuance-stale · issuance_runs · amber at 2× the schedule, red at 4× — a tick
   // that dies before its issuing block writes no row, so age is the only signal
   for (const src of ISSUER_SOURCES) {
     const run = lastRun.get(src);
-    const scheduleH = ISSUER_SCHEDULE_HOURS[src];
+    const cadence = ISSUER_CADENCE[src];
     const age = hoursSince(run?.ran_at, now);
-    if (!run) add(`issuance-stale:${src}`, 'info', `${src}: no issuance run record yet — the first issuing tick after migration 138 writes one.`, 'issuance_runs has no row for this source');
-    else if (age !== null && age > scheduleH * 4) add(`issuance-stale:${src}`, 'crit', `${src} issuer silent ${age.toFixed(1)} h (schedule every ${scheduleH} h) — the tick is dying before it issues, or the cron is off.`, 'now − last run > 4× schedule');
-    else if (age !== null && age > scheduleH * 2) add(`issuance-stale:${src}`, 'warn', `${src} issuer silent ${age.toFixed(1)} h (schedule every ${scheduleH} h).`, 'now − last run > 2× schedule');
+    if (!run) add(`issuance-stale:${src}`, 'info', `${src}: no issuance run record yet — the first tick (${cadence.schedule}) after its run-record release writes one.`, 'issuance_runs has no row for this source');
+    else if (age !== null && age > cadence.crit_h) add(`issuance-stale:${src}`, 'crit', `${src} issuer silent ${(age / 24).toFixed(1)} d (${cadence.schedule}) — the tick is dying before it issues, or the cron is off.`, `now − last run > ${cadence.crit_h} h`);
+    else if (age !== null && age > cadence.warn_h) add(`issuance-stale:${src}`, 'warn', `${src} issuer silent ${age.toFixed(1)} h (${cadence.schedule}).`, `now − last run > ${cadence.warn_h} h`);
   }
   // issuance-error · issuance_runs · red
   for (const r of h.issuance_runs ?? []) {

@@ -4,6 +4,12 @@ import {
   issueChokepointWeekly,
   type IssueChokepointWeeklyResult,
 } from '@/lib/predictions/issue-chokepoint-weekly';
+import { createServerSupabase } from '@/lib/supabase-server';
+import { recordIssuanceRun } from '@/lib/predictions/run-records';
+
+// Declining is not failing: a strait without a fresh baseline is expected.
+// Anything else a strait reports as not-ok is an error the monitor must show.
+const BENIGN = new Set(['already_issued', 'insufficient_baseline']);
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -45,6 +51,24 @@ async function handle(req: NextRequest) {
   const issued = results.filter((r) => r.ok && !r.skipped_reason).length;
   const already = results.filter((r) => r.skipped_reason === 'already_issued').length;
   const skipped = results.filter((r) => !r.ok).length;
+
+  // Run record (mig 138): a row iff this tick ran — declined by reason,
+  // errors named by strait.
+  const declined: Record<string, number> = {};
+  const errors: string[] = [];
+  for (const r of results) {
+    if (!r.skipped_reason || r.skipped_reason === 'already_issued') continue;
+    if (BENIGN.has(r.skipped_reason)) declined[r.skipped_reason] = (declined[r.skipped_reason] ?? 0) + 1;
+    else errors.push(`${r.slug}: ${r.skipped_reason}`);
+  }
+  await recordIssuanceRun(createServerSupabase(), {
+    source: 'ais',
+    issued,
+    already_present: already,
+    declined,
+    error: errors.length ? errors.join(' · ') : null,
+  });
+
   return NextResponse.json({ ok: true, issued, already, skipped, results });
 }
 
