@@ -24,7 +24,7 @@ interface Headline {
   brier: number | null; skill: number | null; base_rate: number | null; sharpness: number | null;
 }
 interface Integrity {
-  issued: number; sealed: number; sealed_pct: number | null;
+  issued: number; sealed: number; sealed_pct: number | null; hashed?: number; hashed_pct?: number | null;
   resolved_total: number; median_lead_days: number | null;
 }
 interface Bin { bin: number; predicted: number; observed: number | null; n: number }
@@ -121,19 +121,38 @@ export default function CalibrationWorkspace() {
         <div style={{ marginTop: 16 }}>
           <Head>② Integrity</Head>
           <div className="mt-[8px]">
-            <KV
-              k="commit-reveal"
-              v={`${track.integrity.sealed} / ${track.integrity.issued}`}
-              warn={track.integrity.sealed === 0 && track.integrity.issued > 0}
-            />
+            {track.key === 'creator' ? (
+              <KV
+                k="commit-reveal"
+                v={`${track.integrity.sealed} / ${track.integrity.issued}`}
+                warn={track.integrity.sealed === 0 && track.integrity.issued > 0}
+              />
+            ) : (
+              <KV
+                k="hash-bound at issue"
+                v={`${track.integrity.hashed ?? '—'} / ${track.integrity.issued}`}
+                warn={track.integrity.hashed != null && track.integrity.hashed < track.integrity.issued}
+              />
+            )}
             <KV k="resolved" v={String(track.integrity.resolved_total)} />
             <KV k="void (no look)" v={String(track.void)} />
             <KV k="median lead" v={track.integrity.median_lead_days == null ? '—' : `${track.integrity.median_lead_days} d`} />
           </div>
-          {track.integrity.sealed === 0 && track.integrity.issued > 0 && (
+          {track.key === 'creator' && track.integrity.sealed === 0 && track.integrity.issued > 0 && (
             <p style={{ marginTop: 6, fontFamily: 'var(--f-mono)', fontSize: 9, lineHeight: 1.5, color: 'var(--amber)' }}>
-              no claim in this track carries a commit hash — these rows were registered before sealing was enforced, and
+              no call in this track carries a commit hash — these rows were registered before sealing was enforced, and
               cannot be presented as tamper-evident
+            </p>
+          )}
+          {track.key !== 'creator' && track.integrity.hashed != null && track.integrity.hashed < track.integrity.issued && (
+            <p style={{ marginTop: 6, fontFamily: 'var(--f-mono)', fontSize: 9, lineHeight: 1.5, color: 'var(--amber)' }}>
+              {track.integrity.issued - track.integrity.hashed} claims in this track carry no issuance hash and cannot be
+              presented as tamper-evident
+            </p>
+          )}
+          {track.key !== 'creator' && (
+            <p style={{ marginTop: 6, fontFamily: 'var(--f-mono)', fontSize: 9, lineHeight: 1.5, color: 'var(--ink-faint)' }}>
+              published at issue; the hash binds the issuance fields (commit-reveal applies to creator calls only)
             </p>
           )}
           <p style={{ marginTop: 6, fontFamily: 'var(--f-mono)', fontSize: 9, lineHeight: 1.5, color: 'var(--ink-faint)' }}>
