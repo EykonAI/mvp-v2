@@ -428,17 +428,35 @@ async function handle(req: NextRequest) {
           .limit(plan.daily_cap * 3);
         if (candErr) { nlError = candErr.message; continue; }
 
-        const events = (cand ?? []) as NlEvent[];
+        const all = (cand ?? []) as NlEvent[];
+        // ISSUE ONLY ON UNPUBLISHED WINDOWS (2026-09-09). NASA delivers nights
+        // in batches — five at once on 09-08 — and the cutoff above admits any
+        // event inside one horizon of the data clock. Measured on the 241
+        // claims issued so far: 184 were issued with 1–5 of their 7 window
+        // nights already on disk. The forecast never reads those nights (it is
+        // the cell rate at the flagged night), so nothing leaked into the
+        // number; but a claim worded "will still be emitting in 7 days" must
+        // be issued before its window starts publishing — the issuance side of
+        // the data-clock rule (#482). Rule: the flagged night IS the data
+        // clock. Older events are declined with their reason, never silently.
+        const clock = String(plan.data_clock);
+        const events = all.filter(e => e.period >= clock);
+        if (all.length > events.length) {
+          nlDeclined[`${et}: window already publishing (flagged night older than data clock ${clock})`] = all.length - events.length;
+        }
         const seen = new Set<string>();
         const observables = events.map(nlObservable);
+        let seenErr: string | null = null;
         for (let i = 0; i < observables.length; i += 200) {
-          const { data: have } = await supabase
+          const { data: have, error: haveErr } = await supabase
             .from('predictions_register')
             .select('target_observable')
             .eq('source', 'blackmarble')
             .in('target_observable', observables.slice(i, i + 200));
+          if (haveErr) { seenErr = haveErr.message; break; }   // never read a failed check as "nothing exists" (#506)
           for (const r of (have ?? []) as Array<{ target_observable: string }>) seen.add(r.target_observable);
         }
+        if (seenErr) { nlError = `register check: ${seenErr}`; continue; }
 
         const fresh = events.filter(e => !seen.has(nlObservable(e)));
         nlSkipped += events.length - fresh.length;
@@ -483,7 +501,7 @@ async function handle(req: NextRequest) {
       // Detection is pg_cron's (mig 134). judged/unjudged come from
       // nightlights_detect_runs, which holds a row iff a night was judged.
       detection: {
-        source: 'pg_cron detect-nightlights (mig 134), daily 10:05 UTC',
+        source: 'pg_cron detect-nightlights (mig 134), 10:05 and 22:05 UTC (mig 151)',
         judged: days.filter((d) => judged.has(d)),
         unjudged,
         // The rule this route expects the job to apply. The values live in
