@@ -96,10 +96,13 @@ export default function CalibrationWorkspace() {
 
   const cohortSeries = track?.key === 'house' ? bucketWeeks(track?.cohorts ?? []) : (track?.cohorts ?? []);
 
+  // FULLY RESOLVED, not merely past deadline. mig 137's `complete` means every
+  // deadline has passed; the scorer then judges 500 claims per hourly tick, so
+  // a large cohort is "complete" for hours while most of it is still unscored
+  // (the 09-06 cohort: 8,243 claims due 22:00–23:01 UTC, ~17 ticks to score).
+  // Quote a cohort only when nothing in it is still open.
   const lastComplete = [...cohortSeries]
-
-    .filter(c => c.complete && c.n >= data.min_sample && c.skill != null)
-
+    .filter(c => c.complete && c.open === 0 && c.n >= data.min_sample && c.skill != null)
     .sort((a, b) => (a.day < b.day ? 1 : -1))[0] ?? null;
 
   const w30 = track?.window_30d ?? null;
@@ -250,7 +253,7 @@ export default function CalibrationWorkspace() {
           <Tile label="Resolution" value={`${track.resolved} / ${track.resolved + track.void}`} sub={`${track.void} void · ${track.open} open`} />
         </div>
         <p style={{ marginTop: 6, fontFamily: 'var(--f-mono)', fontSize: 9, lineHeight: 1.5, color: 'var(--ink-faint)' }}>
-          headline = last complete cohort (every claim issued that {track.key === 'house' ? 'week' : 'day'} is past its deadline) · all-time carries every early cohort forever and is kept as history · skill = 1 − Brier ÷ base·(1−base) · n&lt;{data.min_sample} is not quoted
+          headline = last complete cohort (every claim issued that {track.key === 'house' ? 'week' : 'day'} is past its deadline and judged) · all-time carries every early cohort forever and is kept as history · skill = 1 − Brier ÷ base·(1−base) · n&lt;{data.min_sample} is not quoted
         </p>
 
         <div style={{ marginTop: 12, border: '1px solid var(--rule-soft)', background: 'var(--bg-panel)', padding: 12 }}>
