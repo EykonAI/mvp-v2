@@ -315,6 +315,44 @@ function Health({ m }: { m: Monitor }) {
             </details>
           )}
           {m.darkgapCells.error && <div className="why">dark_contact_cell_report probe failed: {m.darkgapCells.error}</div>}
+          {m.chokepointDaily.data && (
+            <details style={{ marginTop: 8 }}>
+              <summary className="dim">
+                Daily chokepoint question · admission instrument (mig 152) · {m.chokepointDaily.data.admissible ? 'ADMISSIBLE' : 'not admissible yet'} · pooled {nf(m.chokepointDaily.data.pooled?.n ?? 0)} evaluable days since {m.chokepointDaily.data.since}
+                {m.chokepointDaily.data.pooled?.skill != null && <> · skill {sg(m.chokepointDaily.data.pooled.skill)} (halves {sg(m.chokepointDaily.data.pooled.skill_half_1)} / {sg(m.chokepointDaily.data.pooled.skill_half_2)})</>}
+              </summary>
+              <div style={{ overflowX: 'auto', marginTop: 6 }}>
+                <table>
+                  <thead>
+                    <tr><th>strait</th><th className="num">covered rows since {m.chokepointDaily.data.since}</th><th className="num">evaluable</th><th className="num">base</th><th className="num">skill · persistence</th><th className="num">skill · running base</th><th className="num">half 1 / half 2</th><th>admitted</th></tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(m.chokepointDaily.data.covered).sort(([a], [b]) => a.localeCompare(b)).map(([slug, c]) => {
+                      const st = m.chokepointDaily.data!.straits[slug];
+                      return (
+                        <tr key={slug}>
+                          <td>{slug}</td>
+                          <td className="num">{nf(c.rows)} · {c.first} → {c.last}</td>
+                          <td className="num">{nf(st?.n ?? 0)}</td>
+                          <td className="num">{f3(st?.base)}</td>
+                          <td className={`num ${(st?.skill ?? 0) < 0 ? 'neg' : ''}`}>{sg(st?.skill)}</td>
+                          <td className="num">{sg(st?.skill_running_base)}</td>
+                          <td className="num">{sg(st?.skill_half_1)} / {sg(st?.skill_half_2)}</td>
+                          <td>{st ? <Badge sev={st.admitted ? 'ok' : 'muted'} label={st.admitted ? 'YES' : 'NOT YET'} /> : <Badge sev="muted" label="NO DATA" />}</td>
+                        </tr>
+                      );
+                    })}
+                    {Object.keys(m.chokepointDaily.data.covered).length === 0 && <tr><td colSpan={8} className="dim">no covered snapshot since {m.chokepointDaily.data.since}</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+              <div className="why">
+                {m.chokepointDaily.data.rule}. Question: {m.chokepointDaily.data.question}. Model: {m.chokepointDaily.data.model}.
+                Measured 2026-09-09 on the full history the same forecast read +0.046 pooled but failed the stability test — a trailing-45-day gate anti-selected (−0.03 / −1.07 when ON) because the 08-24 AIS coverage step change lifted every strait&apos;s counts. Only post-step days count here; the watch item in ⑥ flips to SEEN on this rule, and only then is a daily family built.
+              </div>
+            </details>
+          )}
+          {m.chokepointDaily.error && <div className="why">chokepoint_daily_walkforward probe failed: {m.chokepointDaily.error}</div>}
           <div className="why">
             {Object.entries(m.plans).filter(([, p]) => p.error).map(([k, p]) => `${k} plan probe failed: ${p.error}`).join(' · ') || 'Base rates and quotas come from the same plan RPCs the issuers use (migs 125–129), so this table and the claims it explains cannot disagree.'}
             {m.plans.blackmarble.data?.computed_at && <> Night-lights record computed {dt(m.plans.blackmarble.data.computed_at)} in {nf(m.plans.blackmarble.data.compute_ms)} ms on data clock {m.plans.blackmarble.data.computed_on ?? '—'} (cache {m.plans.blackmarble.data.cache}{m.plans.blackmarble.data.stale ? ' · STALE' : ''}); quota and clock live.</>}
