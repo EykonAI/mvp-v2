@@ -1,6 +1,6 @@
 import { loadFamilyCalibration, priorFor, applyRecalibration, calibrationContext } from './calibration';
 
-/** Shape of eia_draw_plan() (migration 129). */
+/** Shape of eia_draw_plan() (migration 129, extended by migration 154). */
 interface EiaDrawPlan {
   n: number;
   base_rate: number;
@@ -8,7 +8,22 @@ interface EiaDrawPlan {
   as_of: string | null;
   current_cell: string | null;
   forecast: number;
-  cells: Record<string, { n: number; rate: number }>;
+  cells: Record<string, { n: number; k?: number; rate: number; parent?: string }>;
+  // Migration 154 — absent until it is applied. The issuer must not depend
+  // on any of these; it records them when they are there.
+  model_version?: string;
+  floor_kbbl?: number;
+  current_parent_cell?: string | null;
+  parent_forecast?: number | null;
+  current_features?: {
+    d1: number;
+    run: string;
+    low: number;
+    level_kbbl: number;
+    cell_n: number;
+    cell_k: number;
+  } | null;
+  parent_cells?: Record<string, { n: number; k: number; rate: number }>;
 }
 import { createServerSupabase } from '@/lib/supabase-server';
 import { EIA_CUSHING_CRUDE_STOCKS } from '@/lib/eia/client';
@@ -88,14 +103,25 @@ export async function issueEiaWeekly(opts: { now?: Date } = {}): Promise<IssueEi
   // 0.5 only when there is too little history to estimate a rate.
   const draw = weekOverWeekDrawRate(history ?? []);
 
-  // THE FORECAST IS NOW A DIRECTION, NOT A RATE (mig 129). The old model
+  // THE FORECAST IS A DIRECTION, NOT A RATE (mig 129). The old model
   // predicted a blended week-over-week draw RATE, and a rate is a level — it
   // cannot turn when the series turns, which is exactly how §8.3 caught it
   // running 0.500 -> 0.573 -> 0.688 while the observed rate ran 1.000 ->
   // 0.500 -> 0.000. Cushing is autocorrelated: last week's direction plus
-  // whether the last three weeks agree separates the outcome from 0.263 to
-  // 0.657. Walk-forward over 199 weeks, expanding window and no lookahead,
-  // that is skill +0.0584 against -0.0065 for the rate model.
+  // whether the last three weeks agree separates the outcome. Walk-forward
+  // over 199 weeks, expanding window and no lookahead, mig 129 measured
+  // +0.0572 against -0.0065 for the rate model.
+  //
+  // MIG 154 ADDS ONE FEATURE, measured the same way: whether the baseline
+  // print sits below the 22,000 kbbl operational floor. Drawing into tank
+  // bottoms is self-limiting — below the floor the next week drew 0.344 of
+  // the time against 0.545 above — and it lifts the walk-forward to +0.0854,
+  // positive in both halves (+0.127 / +0.043 where mig 129 was +0.110 /
+  // +0.004). The evidence is thin (32 scored weeks below the floor) and the
+  // plan says so under `evidence`; the feature values are recorded on every
+  // claim so the live record can confirm or refute it. Mig 154 also reads
+  // the next claim's cell from the newest print's own direction — mig 129
+  // read the week before it, one week stale.
   const { data: planData, error: planErr } = await supabase.rpc('eia_draw_plan');
   const plan = planErr ? null : (planData as EiaDrawPlan | null);
 
@@ -146,11 +172,25 @@ export async function issueEiaWeekly(opts: { now?: Date } = {}): Promise<IssueEi
         ...calibrationContext(cal, 'eia_weekly_inventory'),
         // What the streak model saw and decided. Recorded so a reader can
         // check the forecast against the cell it came from.
-        forecast_model: plan?.eligible ? 'streak_direction' : 'legacy_draw_rate',
+        forecast_model: plan?.eligible
+          ? plan.model_version === 'v2-floor'
+            ? 'streak_direction_floor'
+            : 'streak_direction'
+          : 'legacy_draw_rate',
+        forecast_model_version: plan?.model_version ?? (plan ? 'v1' : null),
         forecast_cell: plan?.current_cell ?? null,
         forecast_cell_rate: plan?.forecast ?? null,
+        forecast_cell_n: plan?.current_features?.cell_n ?? null,
         forecast_cells_n: plan?.n ?? null,
         forecast_series_as_of: plan?.as_of ?? null,
+        // The feature values the cell was built from (mig 154), so a reader
+        // can recompute the cell from the prints and catch a stale one — the
+        // failure mig 154 fixed in mig 129's plan. The parent cell and its
+        // rate are what mig 129 would have said, kept for the comparison.
+        forecast_features: plan?.current_features ?? null,
+        forecast_floor_kbbl: plan?.floor_kbbl ?? null,
+        forecast_parent_cell: plan?.current_parent_cell ?? null,
+        forecast_parent_rate: plan?.parent_forecast ?? null,
         forecast_anchor: draw?.anchor ?? null,
         forecast_anchor_transitions: draw?.anchor_transitions ?? 0,
         // Both inputs are recorded so a reader can see WHY the forecast
