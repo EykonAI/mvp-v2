@@ -141,6 +141,11 @@ export function buildNlClaimRow(ev: NlEvent, plan: NlPlan, now: Date): Record<st
       forecast_family_n: fam.n,
       selection_rule: plan.rule,
       data_clock: plan.data_clock,
+      // How many of the window's nights the instrument had already published
+      // when this claim was issued. The issuer refuses anything above 0 since
+      // 2026-09-09; recorded so a reader can check the rule held, not trust it.
+      published_nights_at_issue: Math.max(0, Math.min(plan.horizon_days,
+        Math.round((Date.parse(`${plan.data_clock}T00:00:00Z`) - Date.parse(`${ev.period}T00:00:00Z`)) / 86_400_000))),
       note: 'confident_clear nights only; radiance is not power state; VOID when no clear night falls in the window',
     },
     predicted_distribution: { mean: p, type: 'point' },
