@@ -299,8 +299,8 @@ GRANT  EXECUTE ON FUNCTION public.eia_draw_plan(text, numeric, integer) TO servi
 -- The change, on the public record (mig 137). Idempotent on the PR number,
 -- not on the timestamp: now() differs on every run.
 INSERT INTO public.ledger_change_log (at, pr, note)
-SELECT now(), '#PR_NUMBER', 'EIA draw forecast: direction × streak × below-22,000-kbbl floor (walk-forward +0.085 vs +0.057); next-claim cell read from the newest print (mig 129 read the week before)'
-WHERE NOT EXISTS (SELECT 1 FROM public.ledger_change_log WHERE pr = '#PR_NUMBER');
+SELECT now(), '#512', 'EIA draw forecast: direction × streak × below-22,000-kbbl floor (walk-forward +0.085 vs +0.057); next-claim cell read from the newest print (mig 129 read the week before)'
+WHERE NOT EXISTS (SELECT 1 FROM public.ledger_change_log WHERE pr = '#512');
 
 COMMIT;
 
