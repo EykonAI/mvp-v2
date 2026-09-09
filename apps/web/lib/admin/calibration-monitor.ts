@@ -199,6 +199,15 @@ export interface DarkgapCellReport {
   boxes: Record<string, DarkgapCellBox>;
   cells: DarkgapCellRow[];
 }
+/** chokepoint_daily_walkforward() (mig 152): the admission instrument for a daily house chokepoint family. */
+export interface ChokepointDailyStrait { n: number; first_day: string | null; last_day: string | null; base: number | null; skill: number | null; skill_running_base: number | null; skill_half_1: number | null; skill_half_2: number | null; admitted: boolean | null }
+export interface ChokepointDailyReport {
+  as_of: string; since: string; question: string; model: string; rule: string;
+  covered: Record<string, { rows: number; first: string; last: string }>;
+  pooled: { n: number; base: number | null; skill: number | null; skill_running_base: number | null; skill_half_1: number | null; skill_half_2: number | null } | null;
+  straits: Record<string, ChokepointDailyStrait>;
+  admissible: boolean;
+}
 export interface FirmsPlan {
   horizon_days: number; family: { n: number; base_rate: number; eligible: boolean; band_lo: number; band_hi: number };
   daily_cap: number; issued_today: number; remaining: number; rule: string;
@@ -236,6 +245,7 @@ export const WATCH_PROOF_KINDS = {
   nights_judged_after_ingest: { label: 'nights judged after their newest ingest',   params: ['nights'] },
   issuance_run_exists:        { label: 'an issuer has recorded a tick',             params: ['source'] },
   alert_cleared:              { label: 'an alert has cleared',                      params: ['alert_id'] },
+  chokepoint_daily_admissible: { label: 'the daily chokepoint question is admissible (walk-forward positive and stable, mig 152)', params: ['min_pooled', 'min_strait'] },
   scorer_voided:              { label: 'a scorer tick voided claims',               params: ['min_voided'] },
 } as const;
 export type WatchProofKind = keyof typeof WATCH_PROOF_KINDS;
@@ -257,6 +267,7 @@ export function sanitizeProof(input: unknown): Record<string, unknown> | null {
     case 'nights_judged_after_ingest': { const raw = Array.isArray(o.nights) ? o.nights : String(o.nights ?? '').split(','); const nights = raw.map((v) => String(v).trim()).filter((v) => DAY_RE.test(v)); if (!nights.length) return null; out.nights = nights; break; }
     case 'alert_cleared': { const a = str('alert_id'); if (!a) return null; out.alert_id = a; break; }
     case 'scorer_voided': { out.min_voided = int('min_voided', 1); break; }
+    case 'chokepoint_daily_admissible': { out.min_pooled = int('min_pooled', 90); out.min_strait = int('min_strait', 20); break; }
   }
   return out;
 }
@@ -293,6 +304,8 @@ export interface Monitor {
   alertEvents: Probe<AlertEvent[]>;
   /** mig 149: the cell forecast's evidence, per box and per cell (n ≥ 200). */
   darkgapCells: Probe<DarkgapCellReport>;
+  /** mig 152: the daily chokepoint question's admission instrument (walk-forward, split-half). */
+  chokepointDaily: Probe<ChokepointDailyReport>;
   families: FamilyView[];
   agreement: Agreement[];
   alerts: Alert[];
@@ -546,7 +559,7 @@ export async function loadMonitor(f: Filters, now: Date = new Date()): Promise<M
   const stats = (from: string, to: string, basis: Basis, track: string | null, feature: string | null) =>
     probe<WindowStats>(() => supabase.rpc('calibration_family_stats', { p_from: from, p_to: to, p_basis: basis, p_track: track, p_feature: feature }));
 
-  const [inputs, window, m7, m30, m90, mAll, ledger, cohorts, boxCohorts, watch, alertState, alertEvents, darkgapCells] = await Promise.all([
+  const [inputs, window, m7, m30, m90, mAll, ledger, cohorts, boxCohorts, watch, alertState, alertEvents, darkgapCells, chokepointDaily] = await Promise.all([
     probeAlertInputs(supabase),
     stats(f.from, f.to, f.basis, f.track === 'all' ? null : f.track, f.family === 'all' ? null : f.family),
     stats(ago(7), toIso, 'resolved', null, null),
@@ -563,6 +576,8 @@ export async function loadMonitor(f: Filters, now: Date = new Date()): Promise<M
     probe<AlertEvent[]>(() => supabase.from('ledger_alert_events').select('id, alert_id, transition, severity, text, at, notified').order('at', { ascending: false }).limit(8)),
     // mig 149: leave-one-out evidence for the dark-contact cell forecast (admin reader)
     probe<DarkgapCellReport>(() => supabase.rpc('dark_contact_cell_report', { p_min_n: 200 })),
+    // mig 152: the daily chokepoint admission instrument (admin reader)
+    probe<ChokepointDailyReport>(() => supabase.rpc('chokepoint_daily_walkforward')),
   ]);
   const { health, cron, plans, families } = inputs;
 
@@ -583,7 +598,7 @@ export async function loadMonitor(f: Filters, now: Date = new Date()): Promise<M
   return {
     generated_at: now.toISOString(),
     filters: f,
-    health, cron, plans, window, darkgapCells,
+    health, cron, plans, window, darkgapCells, chokepointDaily,
     matrix: { '7': m7, '30': m30, '90': m90, all: mAll },
     ledger, cohorts, boxCohorts, watch, alertState, alertEvents, families, agreement, alerts,
   };
