@@ -110,6 +110,7 @@ export async function POST(req: NextRequest) {
     const { data, error } = await supabase
       .from('vessel_cadence')
       .select('mmsi, median_interval_h')
+      .order('mmsi', { ascending: true })   // pages are disjoint only when ordered
       .range(from, from + PAGE - 1);
     if (error) {
       return NextResponse.json({ ok: false, error: `vessel_cadence: ${error.message}` }, { status: 500 });
@@ -162,6 +163,7 @@ export async function POST(req: NextRequest) {
       .from('entities')
       .select('canonical_name, metadata')
       .eq('entity_type', 'vessel')
+      .order('id', { ascending: true })     // pages are disjoint only when ordered
       .range(from, from + PAGE - 1);
     if (error) break; // OFAC enrichment is additive — score without it rather than fail the tick
     if (!data || data.length === 0) break;
@@ -352,11 +354,21 @@ export async function POST(req: NextRequest) {
       .from('dark_contact_events')
       .select('id, mmsi, gap_started_at, deadline_at, box_slug')
       .eq('status', 'open')
+      .order('id', { ascending: true })     // pages are disjoint only when ordered
       .range(from, from + PAGE - 1);
     if (error) return NextResponse.json({ ok: false, error: `dark_contact_events: ${error.message}` }, { status: 500 });
     if (!data || data.length === 0) break;
     openEvents.push(...data);
     if (data.length < PAGE) break;
+  }
+  // One row per event whatever the pages returned (see the emission loop for
+  // why unordered pages overlapped and what that did to the register).
+  {
+    const seen = new Set<string>();
+    for (let i = openEvents.length - 1; i >= 0; i--) {
+      const id = String(openEvents[i].id);
+      if (seen.has(id)) openEvents.splice(i, 1); else seen.add(id);
+    }
   }
 
   if (openEvents.length > 0) {
