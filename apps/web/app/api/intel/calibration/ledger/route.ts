@@ -48,6 +48,9 @@ const FAMILIES = [
   { key: 'surge', source: 'nightlights', verdict: 'exclude' as const, reason: 'radiance variance, not a state change' },
 ];
 
+/** calibration_window_stats() per-track object (mig 136). */
+type Window30 = { resolved: number; scored: number; unscored: number; void: number; avg_brier: number | null; avg_log_loss: number | null; base_rate: number | null; skill: number | null };
+
 type TrackAgg = {
   issued: number;
   resolved: number;
@@ -155,8 +158,20 @@ export async function GET(_req: NextRequest) {
       cohortsError = e instanceof Error ? e.message : String(e);
     }
 
+    // Trailing 30-day window per track (mig 136) — the same figures the MCP
+    // tool reports. The page quotes it beside the last complete cohort; the
+    // all-time headline stays as history. Additive: a failed probe leaves the
+    // tile at "—" rather than failing the page.
+    let window30: Record<string, Window30> = {};
+    try {
+      const { data: w, error: wErr } = await supabase.rpc('calibration_window_stats', { p_days: 30 });
+      if (!wErr && w) window30 = w as Record<string, Window30>;
+    } catch {
+      /* additive */
+    }
+
     return NextResponse.json({
-      tracks: tracks.map(tr => ({ ...tr, cohorts: cohorts[tr.key] ?? [] })),
+      tracks: tracks.map(tr => ({ ...tr, cohorts: cohorts[tr.key] ?? [], window_30d: window30[tr.key] ?? null })),
       cohorts_error: cohortsError,
       changes,
       min_sample: MIN_SAMPLE,

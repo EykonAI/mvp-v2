@@ -38,7 +38,13 @@ interface TrackData {
   headline: Headline | null; integrity: Integrity; reliability: Bin[];
   history: Array<{ week: string; brier: number; n: number }>;
   cohorts?: Cohort[];
+  /** trailing 30-day window (calibration_window_stats, mig 136) */
+  window_30d?: Window30 | null;
   families: Family[];
+}
+interface Window30 {
+  resolved: number; scored: number; unscored: number; void: number;
+  avg_brier: number | null; avg_log_loss: number | null; base_rate: number | null; skill: number | null;
 }
 interface Cohort {
   day: string; issued: number; n: number; open: number; complete: boolean;
@@ -81,6 +87,24 @@ export default function CalibrationWorkspace() {
   }
 
   const track = data.tracks.find(t => t.key === selected) ?? data.tracks[0];
+
+  // The quoted cohort: newest COMPLETE cohort with n ≥ min_sample (house
+
+  // cohorts are bucketed to ISO weeks, as ⑤b draws them). Open cohorts are
+
+  // never quoted — the claims that resolve first are the reappearances (#401).
+
+  const cohortSeries = track?.key === 'house' ? bucketWeeks(track?.cohorts ?? []) : (track?.cohorts ?? []);
+
+  const lastComplete = [...cohortSeries]
+
+    .filter(c => c.complete && c.n >= data.min_sample && c.skill != null)
+
+    .sort((a, b) => (a.day < b.day ? 1 : -1))[0] ?? null;
+
+  const w30 = track?.window_30d ?? null;
+
+  const w30ok = !!w30 && w30.scored >= data.min_sample && w30.skill != null;
 
   return (
     <div
@@ -191,14 +215,42 @@ export default function CalibrationWorkspace() {
       {/* ── MIDDLE ── */}
       <section style={{ background: 'var(--bg-navy)', padding: 16 }}>
         <div className="grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-          {/* The window is part of the number. The global strip reports a
-              30-day mean; this page reports all-time. Both are correct and
-              they differ — unlabelled, they read as a contradiction. */}
-          <Tile label={`Brier · ${track.label.toLowerCase()}`} value={fmt(track.headline?.brier)} sub={`all resolved · n=${track.resolved}`} calibrating={track.calibrating} />
-          <Tile label="Skill vs base rate" value={fmtSigned(track.headline?.skill)} sub={track.headline?.base_rate == null ? 'no base rate yet' : `base rate ${track.headline.base_rate}`} calibrating={track.calibrating} accent />
+          {/* The window is part of the number, so every tile names its
+              window. The HEADLINE is the last complete cohort — the claims
+              issued on one day (one week for the house), all past their
+              deadline — beside the trailing 30 days. All-time is kept as
+              history: it carries every early cohort forever (the machine
+              track's first 38,000 claims ran on a flat prior), so it cannot
+              show a forecaster change the day it lands. Never an open
+              cohort (#401). */}
+          <Tile
+            label="Skill · last complete cohort"
+            value={lastComplete ? fmtSigned(lastComplete.skill) : '—'}
+            sub={lastComplete
+              ? `issued ${lastComplete.day}${track.key === 'house' ? ' (week)' : ''} · n=${lastComplete.n} · Brier ${fmt(lastComplete.brier)} · base ${fmt(lastComplete.base_rate)}`
+              : `no complete cohort with n≥${data.min_sample} yet`}
+            calibrating={track.calibrating}
+            accent
+          />
+          <Tile
+            label="Skill · trailing 30 days"
+            value={w30ok && w30 ? fmtSigned(w30.skill) : '—'}
+            sub={w30ok && w30
+              ? `resolved in the last 30 d · n=${w30.scored} · Brier ${fmt(w30.avg_brier)} · base ${fmt(w30.base_rate)}`
+              : `fewer than ${data.min_sample} resolved in 30 d`}
+            calibrating={track.calibrating}
+          />
+          <Tile
+            label="Skill · all-time (history)"
+            value={fmtSigned(track.headline?.skill)}
+            sub={`Brier ${fmt(track.headline?.brier)} · n=${track.resolved} · base ${fmt(track.headline?.base_rate)} · sharpness ${fmt(track.headline?.sharpness)}`}
+            calibrating={track.calibrating}
+          />
           <Tile label="Resolution" value={`${track.resolved} / ${track.resolved + track.void}`} sub={`${track.void} void · ${track.open} open`} />
-          <Tile label="Sharpness" value={fmt(track.headline?.sharpness)} sub="avg distance from 0.5" calibrating={track.calibrating} />
         </div>
+        <p style={{ marginTop: 6, fontFamily: 'var(--f-mono)', fontSize: 9, lineHeight: 1.5, color: 'var(--ink-faint)' }}>
+          headline = last complete cohort (every claim issued that {track.key === 'house' ? 'week' : 'day'} is past its deadline) · all-time carries every early cohort forever and is kept as history · skill = 1 − Brier ÷ base·(1−base) · n&lt;{data.min_sample} is not quoted
+        </p>
 
         <div style={{ marginTop: 12, border: '1px solid var(--rule-soft)', background: 'var(--bg-panel)', padding: 12 }}>
           <div className="flex items-center" style={{ justifyContent: 'space-between' }}>
