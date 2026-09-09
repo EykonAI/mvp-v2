@@ -110,6 +110,7 @@ export async function POST(req: NextRequest) {
     const { data, error } = await supabase
       .from('vessel_cadence')
       .select('mmsi, median_interval_h')
+      .order('mmsi', { ascending: true })   // pages are disjoint only when ordered
       .range(from, from + PAGE - 1);
     if (error) {
       return NextResponse.json({ ok: false, error: `vessel_cadence: ${error.message}` }, { status: 500 });
@@ -162,6 +163,7 @@ export async function POST(req: NextRequest) {
       .from('entities')
       .select('canonical_name, metadata')
       .eq('entity_type', 'vessel')
+      .order('id', { ascending: true })     // pages are disjoint only when ordered
       .range(from, from + PAGE - 1);
     if (error) break; // OFAC enrichment is additive — score without it rather than fail the tick
     if (!data || data.length === 0) break;
@@ -352,11 +354,21 @@ export async function POST(req: NextRequest) {
       .from('dark_contact_events')
       .select('id, mmsi, gap_started_at, deadline_at, box_slug')
       .eq('status', 'open')
+      .order('id', { ascending: true })     // pages are disjoint only when ordered
       .range(from, from + PAGE - 1);
     if (error) return NextResponse.json({ ok: false, error: `dark_contact_events: ${error.message}` }, { status: 500 });
     if (!data || data.length === 0) break;
     openEvents.push(...data);
     if (data.length < PAGE) break;
+  }
+  // One row per event whatever the pages returned (see the emission loop for
+  // why unordered pages overlapped and what that did to the register).
+  {
+    const seen = new Set<string>();
+    for (let i = openEvents.length - 1; i >= 0; i--) {
+      const id = String(openEvents[i].id);
+      if (seen.has(id)) openEvents.splice(i, 1); else seen.add(id);
+    }
   }
 
   if (openEvents.length > 0) {
@@ -509,13 +521,23 @@ export async function POST(req: NextRequest) {
     const cellVersion = String(plan.rule?.cell_version ?? 'v2');
     claimsForecastVersion = cellVersion;
 
-    const openForClaims: any[] = [];
+    // PAGING IS ORDERED AND DEDUPED. Without an ORDER BY, consecutive
+    // .range() pages over a relation are not disjoint — the planner is free
+    // to return rows in a different order per request, and this tick's own
+    // closes/opens shuffle the heap between pages. Overlapping pages put the
+    // same open event into openForClaims twice, and the register check below
+    // only knows about PREVIOUS ticks, so both copies were inserted: 8,932
+    // duplicated observables in the machine record by 2026-09-09 10:10 UTC
+    // (3,632 of them already scored twice). Stable order + dedupe by id.
+    const openById = new Map<string, any>();
     for (let from = 0; ; from += PAGE) {
       // The view (mig 149) is open events + cell_key computed in SQL by the
       // same function the plan uses — the key is never re-derived here.
       const { data, error: openErr } = await supabase
         .from('dark_contact_open_for_claims')
         .select('id, mmsi, name, flag, box_slug, last_speed_kn, cadence_hours, silence_ratio_at_open, confidence_at_open, gap_started_at, opened_at, deadline_at, cell_key')
+        .order('opened_at', { ascending: true })
+        .order('id', { ascending: true })
         .range(from, from + PAGE - 1);
       if (openErr) {
         // A read that fails must not look like "no open events" — the run
@@ -524,29 +546,49 @@ export async function POST(req: NextRequest) {
         break;
       }
       if (!data || data.length === 0) break;
-      openForClaims.push(...data);
+      for (const row of data) openById.set(String(row.id), row);
       if (data.length < PAGE) break;
     }
+    const openForClaims: any[] = [...openById.values()];
 
     if (openForClaims.length > 0) {
       // Which observables already have claims? Checked in chunks so the
       // issuance is idempotent across ticks and across parallel deploys.
       const existing = new Set<string>();
       const observables = openForClaims.map(e => darkContactObservable(e));
+      let existingCheckError: string | null = null;
       for (let i = 0; i < observables.length; i += 200) {
-        const { data } = await supabase
+        const { data, error: exErr } = await supabase
           .from('predictions_register')
           .select('target_observable')
           .eq('source', 'ais-darkgap')
           .in('target_observable', observables.slice(i, i + 200));
+        if (exErr) {
+          // A failed idempotency read must never be read as "nothing exists":
+          // that would re-issue every claim in the chunk. Abort this tick's
+          // emission and say so in the run record.
+          existingCheckError = `register check: ${exErr.message}`;
+          break;
+        }
         for (const r of (data ?? []) as any[]) existing.add(r.target_observable);
+      }
+      if (existingCheckError) {
+        claimsRuleError = existingCheckError;
+        openForClaims.length = 0;
       }
 
       // THE SELECTION RULE, applied. Eligible boxes only; within a box, the
       // most suspicious contacts first, up to that box's remaining daily
       // quota. Everything declined is counted by reason so the tick reports
       // what it refused as well as what it issued.
-      const candidates = openForClaims.filter(e => !existing.has(darkContactObservable(e)));
+      // One candidate per observable, whatever the pages returned.
+      const seenObservable = new Set<string>();
+      const candidates = openForClaims.filter(e => {
+        const key = darkContactObservable(e);
+        if (existing.has(key) || seenObservable.has(key)) return false;
+        seenObservable.add(key);
+        return true;
+      });
       const declined: Record<string, number> = {};
       const byBox = new Map<string, typeof candidates>();
       for (const e of candidates) {
