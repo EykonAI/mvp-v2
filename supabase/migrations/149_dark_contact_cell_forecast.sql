@@ -288,7 +288,7 @@ COMMENT ON FUNCTION public.dark_contact_cell_report(integer, numeric) IS
 -- The cohort view (mig 137) marks the day the forecaster changed. Apply and
 -- merge happen on the same day; the PR number is the merge that deployed it.
 INSERT INTO public.ledger_change_log (at, pr, note) VALUES
-  (now(), '#TBD', 'dark-contact forecast = the cell''s rate (flag × speed band × name known), shrunk to the box rate; selection rule unchanged')
+  (now(), '#505', 'dark-contact forecast = the cell''s rate (flag × speed band × name known), shrunk to the box rate; selection rule unchanged')
 ON CONFLICT (at) DO NOTHING;
 
 -- ── Grants: service role only, by role name (mig 139 lesson) ───────────────
