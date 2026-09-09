@@ -50,6 +50,21 @@ import { computePredictionHash } from './hash';
  * unstated selection rule is the first thing a sceptic attacks — and because
  * "we issue a claim for everything" was producing ~6,700 a day, 64% of them
  * in the one box where the answer is 85% predictable.
+ *
+ * THE FORECAST, v2 (mig 149). The box rate is the prior; the number on the
+ * claim is the CELL's rate — flag × speed band at last fix × name known —
+ * shrunk to the box rate with weight α = 20: (k_cell + α·r_box)/(n_cell + α).
+ * Measured before it was built: out of time (fitted on events opened before
+ * 2026-08-29, scored on 08-29 → 09-01, n = 19,749) the box rate scores Brier
+ * 0.1285 and the cell forecast 0.1197; leave-one-out inside each box the cell
+ * adds +0.03 (europe-med) to +0.18 (malacca) of skill where the box rate adds
+ * 0.000 by construction. Gating cells on n or on a LOO test LOSES skill (the
+ * shrinkage is the gate), so every claim gets its cell forecast; a cell the
+ * plan has never seen (n = 0) falls back to the box rate, which is what the
+ * formula gives at n = 0. The cell key is computed in SQL
+ * (dark_contact_cell_key, read through dark_contact_open_for_claims) and is
+ * never re-derived here, so code and plan cannot disagree on a band edge.
+ * Selection (mig 125) is unchanged: only the number changes.
  */
 
 export interface DarkContactEventForClaim {
@@ -64,6 +79,10 @@ export interface DarkContactEventForClaim {
   gap_started_at: string;
   opened_at: string;
   deadline_at: string;
+  /** Speed at the last fix, kn — one of the three cell dimensions (mig 149). */
+  last_speed_kn?: number | null;
+  /** flag/speed band/name-known key from dark_contact_cell_key(), via the view (mig 149). */
+  cell_key?: string | null;
 }
 
 export function darkContactObservable(ev: { mmsi: string; gap_started_at: string }): string {
@@ -85,6 +104,20 @@ export interface SelectionRule {
   band_hi: number;
   min_n: number;
   daily_cap_per_box: number;
+  // mig 149: how the number on the claim is formed (selection itself is unchanged)
+  forecast?: string;
+  cell_version?: string;
+  cell_alpha?: number;
+}
+
+/** The plan's record for the claim's cell (mig 149): its counts and shrunk rate. */
+export interface CellForecast {
+  key: string;
+  k: number;
+  n: number;
+  rate: number;
+  alpha: number;
+  version: string;
 }
 
 export function buildDarkContactClaimRow(
@@ -92,15 +125,19 @@ export function buildDarkContactClaimRow(
   baseRate: { p: number; k: number; n: number },
   now: Date,
   rule?: SelectionRule,
+  cell?: CellForecast | null,
 ): Record<string, unknown> {
   const targetObservable = darkContactObservable(ev);
   const statement = darkContactStatement(ev);
+  // The number on the claim: the cell's shrunk rate when the plan has one for
+  // this event's cell, else the box rate (identical to the formula at n = 0).
+  const p = cell ? cell.rate : baseRate.p;
   const hash = computePredictionHash({
     statement,
     targetObservable,
     resolvesAt: ev.deadline_at,
     issuedAt: now,
-    predictedMean: baseRate.p,
+    predictedMean: p,
   });
   return {
     feature: 'ais_dark_contact_reappearance',
@@ -110,18 +147,28 @@ export function buildDarkContactClaimRow(
       cadence_hours: ev.cadence_hours,
       silence_ratio_at_open: ev.silence_ratio_at_open,
       board_confidence_at_open: ev.confidence_at_open,
-      forecast_basis:
-        baseRate.n === 0
+      forecast_basis: cell
+        ? 'cell_rate_shrunk_to_box_rate_completed_cohorts_only'
+        : baseRate.n === 0
           ? 'flat_prior_no_completed_cohorts_yet'
           : 'laplace_shrunk_base_rate_completed_cohorts_only',
       forecast_base_rate_k: baseRate.k,
       forecast_base_rate_n: baseRate.n,
-      // The forecast is this BOX's own rate, not a global one. Skill is
-      // discrimination: one number for every claim scores zero by
-      // construction, however accurate that number is. Measured
-      // out-of-sample on 23,468 events, swapping the global rate for the
-      // per-box rate moved Brier 0.1410 -> 0.1322 and skill -0.084 -> -0.017.
-      forecast_scope: 'box',
+      // Skill is discrimination: one number for every claim scores zero by
+      // construction, however accurate that number is. Mig 125 moved from a
+      // global rate to the box's (Brier 0.1410 -> 0.1322 on 23,468 events);
+      // mig 149 moves from the box's to the cell's (0.1285 -> 0.1197 out of
+      // time on 19,749). Recorded ON the claim so realised skill can be read
+      // per cell, and so a reader can see which number was used and why.
+      forecast_scope: cell ? 'cell' : 'box',
+      forecast_version: cell ? cell.version : 'v1',
+      forecast_box_rate: baseRate.p,
+      cell_key: ev.cell_key ?? null,
+      forecast_cell: cell?.key ?? null,
+      forecast_cell_k: cell?.k ?? null,
+      forecast_cell_n: cell?.n ?? null,
+      forecast_cell_alpha: cell?.alpha ?? null,
+      last_speed_kn: ev.last_speed_kn ?? null,
       // The rule that admitted this claim, recorded ON the claim so a reader
       // can check what got into the register and why (mig 125).
       selection_rule: rule
@@ -131,7 +178,7 @@ export function buildDarkContactClaimRow(
       // recorded as context, deliberately NOT used as the forecast.
       note: 'observable = re-observation by eYKON coverage, instrument-view wording; VOID on coverage_lost',
     },
-    predicted_distribution: { mean: baseRate.p, type: 'point' },
+    predicted_distribution: { mean: p, type: 'point' },
     target_observable: targetObservable,
     target_window_hours: 72,
     issued_at: now.toISOString(),

@@ -183,7 +183,22 @@ export interface Health {
 export interface CronJob { schedule: string; active: boolean; runs: { status: string; start: string; secs: number | null; message: string | null }[] }
 
 export interface PlanBox { k: number; n: number; rate: number; eligible: boolean; reason: string | null; issued_today: number; remaining: number }
-export interface DarkgapPlan { rule: { band_lo: number; band_hi: number; min_n: number; daily_cap_per_box: number }; boxes: Record<string, PlanBox> }
+export interface DarkgapPlan {
+  rule: { band_lo: number; band_hi: number; min_n: number; daily_cap_per_box: number; forecast?: string; cell_version?: string; cell_alpha?: number };
+  boxes: Record<string, PlanBox>;
+  // mig 149: per-cell shrunk rates keyed `<box>|<flag/speed/name>` and a per-box summary
+  cells?: Record<string, { k: number; n: number; rate: number }>;
+  cell_summary?: Record<string, { cells: number; cells_200: number; rows: number }>;
+}
+/** dark_contact_cell_report() (mig 149): leave-one-out evidence for the cell forecast. */
+export interface DarkgapCellBox { n: number; base: number; brier_box: number; brier_cell: number; bss_box: number | null; bss_cell: number | null; sharpness_cell: number; cells: number; cells_min_n: number }
+export interface DarkgapCellRow { box_slug: string; cell: string; n: number; rate: number; forecast: number; brier_box: number; brier_cell: number }
+export interface DarkgapCellReport {
+  as_of: string; method: string; alpha: number; min_n: number;
+  pooled: { n: number; base: number; brier_box: number; brier_cell: number; bss_box: number | null; bss_cell: number | null; sharpness_cell: number } | null;
+  boxes: Record<string, DarkgapCellBox>;
+  cells: DarkgapCellRow[];
+}
 export interface FirmsPlan {
   horizon_days: number; family: { n: number; base_rate: number; eligible: boolean; band_lo: number; band_hi: number };
   daily_cap: number; issued_today: number; remaining: number; rule: string;
@@ -276,6 +291,8 @@ export interface Monitor {
   watch: Probe<WatchItem[]>;
   alertState: Probe<AlertState[]>;
   alertEvents: Probe<AlertEvent[]>;
+  /** mig 149: the cell forecast's evidence, per box and per cell (n ≥ 200). */
+  darkgapCells: Probe<DarkgapCellReport>;
   families: FamilyView[];
   agreement: Agreement[];
   alerts: Alert[];
@@ -305,13 +322,20 @@ function planFor(row: FamilyRow, plans: Monitor['plans']): FamilyPlan | null {
       const boxes = Object.values(dg.boxes);
       const elig = boxes.filter((b) => b.eligible);
       const rates = elig.map((b) => b.rate).sort((a, b) => a - b);
+      // mig 149: the number on each claim is its cell's shrunk rate; the box
+      // rate stays the prior and the eligibility test. Say so on the card.
+      const cs = Object.values(dg.cell_summary ?? {});
+      const cellsTotal = cs.reduce((s, c) => s + (c.cells ?? 0), 0);
+      const cells200 = cs.reduce((s, c) => s + (c.cells_200 ?? 0), 0);
+      const cellNote = dg.rule.cell_version ? ` · forecast ${dg.rule.cell_version}: cell rate (flag × speed × name) shrunk to box, α=${dg.rule.cell_alpha ?? 20}, ${cellsTotal} cells (${cells200} with n≥200)` : '';
       return {
         base_rate: null, n: Math.max(0, ...boxes.map((b) => b.n)), eligible: elig.length > 0,
         band: `${dg.rule.band_lo}–${dg.rule.band_hi} per box`,
         issued_today: boxes.reduce((s, b) => s + (b.issued_today ?? 0), 0),
         cap: elig.length * dg.rule.daily_cap_per_box,
-        reason: rates.length ? `rates ${rates[0].toFixed(3)}–${rates[rates.length - 1].toFixed(3)} over ${elig.length}/${boxes.length} eligible boxes` : 'no eligible box',
-        state: elig.length ? `${elig.length} boxes issuing` : 'no box eligible', source_rpc: 'dark_contact_issuance_plan() · mig 125',
+        reason: (rates.length ? `rates ${rates[0].toFixed(3)}–${rates[rates.length - 1].toFixed(3)} over ${elig.length}/${boxes.length} eligible boxes` : 'no eligible box') + cellNote,
+        state: elig.length ? `${elig.length} boxes issuing${dg.rule.cell_version ? ` · cell ${dg.rule.cell_version}` : ''}` : 'no box eligible',
+        source_rpc: dg.rule.cell_version ? 'dark_contact_issuance_plan() · migs 125 + 149' : 'dark_contact_issuance_plan() · mig 125',
       };
     }
     case 'firms_went_dark_recovery':
@@ -522,7 +546,7 @@ export async function loadMonitor(f: Filters, now: Date = new Date()): Promise<M
   const stats = (from: string, to: string, basis: Basis, track: string | null, feature: string | null) =>
     probe<WindowStats>(() => supabase.rpc('calibration_family_stats', { p_from: from, p_to: to, p_basis: basis, p_track: track, p_feature: feature }));
 
-  const [inputs, window, m7, m30, m90, mAll, ledger, cohorts, boxCohorts, watch, alertState, alertEvents] = await Promise.all([
+  const [inputs, window, m7, m30, m90, mAll, ledger, cohorts, boxCohorts, watch, alertState, alertEvents, darkgapCells] = await Promise.all([
     probeAlertInputs(supabase),
     stats(f.from, f.to, f.basis, f.track === 'all' ? null : f.track, f.family === 'all' ? null : f.family),
     stats(ago(7), toIso, 'resolved', null, null),
@@ -537,6 +561,8 @@ export async function loadMonitor(f: Filters, now: Date = new Date()): Promise<M
     ),
     probe<AlertState[]>(() => supabase.from('ledger_alert_state').select('alert_id, severity, text, rule, first_fired_at, last_seen_at, last_notified_at')),
     probe<AlertEvent[]>(() => supabase.from('ledger_alert_events').select('id, alert_id, transition, severity, text, at, notified').order('at', { ascending: false }).limit(8)),
+    // mig 149: leave-one-out evidence for the dark-contact cell forecast (admin reader)
+    probe<DarkgapCellReport>(() => supabase.rpc('dark_contact_cell_report', { p_min_n: 200 })),
   ]);
   const { health, cron, plans, families } = inputs;
 
@@ -557,7 +583,7 @@ export async function loadMonitor(f: Filters, now: Date = new Date()): Promise<M
   return {
     generated_at: now.toISOString(),
     filters: f,
-    health, cron, plans, window,
+    health, cron, plans, window, darkgapCells,
     matrix: { '7': m7, '30': m30, '90': m90, all: mAll },
     ledger, cohorts, boxCohorts, watch, alertState, alertEvents, families, agreement, alerts,
   };
