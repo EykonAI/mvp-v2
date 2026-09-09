@@ -264,6 +264,57 @@ function Health({ m }: { m: Monitor }) {
               </tbody>
             </table>
           </div>
+          {m.darkgapCells.data && (
+            <details style={{ marginTop: 8 }}>
+              <summary className="dim">
+                Dark-contact cells · forecast = (k + α·box) / (n + α), α = {nf(m.darkgapCells.data.alpha)} · leave-one-out on {nf(m.darkgapCells.data.pooled?.n)} completed events:
+                Brier {f3(m.darkgapCells.data.pooled?.brier_box)} → {f3(m.darkgapCells.data.pooled?.brier_cell)} · {m.darkgapCells.data.cells.length} cells with n ≥ {nf(m.darkgapCells.data.min_n)}
+              </summary>
+              <div style={{ overflowX: 'auto', marginTop: 6 }}>
+                <table>
+                  <thead>
+                    <tr><th>box</th><th className="num">n</th><th className="num">base</th><th className="num">Brier box → cell</th><th className="num">skill box → cell</th><th className="num">sharpness</th><th className="num">cells ≥{nf(m.darkgapCells.data.min_n)} / all</th></tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(m.darkgapCells.data.boxes).sort((a, b) => b[1].n - a[1].n).map(([box, b]) => (
+                      <tr key={box}>
+                        <td>{box}</td>
+                        <td className="num">{nf(b.n)}</td>
+                        <td className="num">{f3(b.base)}</td>
+                        <td className="num">{f3(b.brier_box)} → {f3(b.brier_cell)}</td>
+                        <td className={`num ${(b.bss_cell ?? 0) < 0 ? 'neg' : ''}`}>{sg(b.bss_box)} → {sg(b.bss_cell)}</td>
+                        <td className="num">{f3(b.sharpness_cell)}</td>
+                        <td className="num">{nf(b.cells_min_n)} / {nf(b.cells)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <table style={{ marginTop: 6 }}>
+                  <thead>
+                    <tr><th>box</th><th>cell · flag / speed band / name</th><th className="num">n</th><th className="num">rate</th><th className="num">forecast</th><th className="num">Brier box → cell</th></tr>
+                  </thead>
+                  <tbody>
+                    {m.darkgapCells.data.cells.map((c) => (
+                      <tr key={`${c.box_slug}|${c.cell}`}>
+                        <td>{c.box_slug}</td>
+                        <td>{c.cell}</td>
+                        <td className="num">{nf(c.n)}</td>
+                        <td className="num">{f3(c.rate)}</td>
+                        <td className="num">{f3(c.forecast)}</td>
+                        <td className={`num ${c.brier_cell > c.brier_box ? 'neg' : ''}`}>{f3(c.brier_box)} → {f3(c.brier_cell)}</td>
+                      </tr>
+                    ))}
+                    {m.darkgapCells.data.cells.length === 0 && <tr><td colSpan={6} className="dim">no cell has reached n ≥ {nf(m.darkgapCells.data.min_n)} yet</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+              <div className="why">
+                Skill here is against each box&apos;s own base rate, so the box forecast reads 0.000 by construction; the cell column is what conditioning adds inside the box (mig 149).
+                Out of time — rates fitted on events opened before 2026-08-29, scored on 08-29 → 09-01 — the cell forecast moved Brier 0.1285 → 0.1197. Speed bands: s0 &lt; 0.5 kn · s1 &lt; 5 · s2 &lt; 12 · s3 ≥ 12; n1 = name known.
+              </div>
+            </details>
+          )}
+          {m.darkgapCells.error && <div className="why">dark_contact_cell_report probe failed: {m.darkgapCells.error}</div>}
           <div className="why">
             {Object.entries(m.plans).filter(([, p]) => p.error).map(([k, p]) => `${k} plan probe failed: ${p.error}`).join(' · ') || 'Base rates and quotas come from the same plan RPCs the issuers use (migs 125–129), so this table and the claims it explains cannot disagree.'}
             {m.plans.blackmarble.data?.computed_at && <> Night-lights record computed {dt(m.plans.blackmarble.data.computed_at)} in {nf(m.plans.blackmarble.data.compute_ms)} ms on data clock {m.plans.blackmarble.data.computed_on ?? '—'} (cache {m.plans.blackmarble.data.cache}{m.plans.blackmarble.data.stale ? ' · STALE' : ''}); quota and clock live.</>}

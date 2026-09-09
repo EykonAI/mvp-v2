@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { scoreVessel, computeRealFeatures } from '@/lib/intel/shadowFleet';
 import { boxForPosition, boxState, BOX_DEAD_AFTER_H, type BoxLiveness } from '@/lib/intel/aisCoverage';
-import { buildDarkContactClaimRow, darkContactObservable, type SelectionRule } from '@/lib/predictions/issue-dark-contact';
+import { buildDarkContactClaimRow, darkContactObservable, type CellForecast, type SelectionRule } from '@/lib/predictions/issue-dark-contact';
 import { recordIssuanceRun } from '@/lib/predictions/run-records';
 
 export const dynamic = 'force-dynamic';
@@ -470,6 +470,9 @@ export async function POST(req: NextRequest) {
   let claimsSkipped = 0;
   let claimsDeclined: Record<string, number> = {};
   let claimsRuleError: string | null = null;
+  // mig 149: claims whose number came from their cell (vs the box fallback)
+  let claimsCellForecast = 0;
+  let claimsForecastVersion: string | null = null;
   {
     // COMPLETED COHORTS ONLY — the censoring fix. Counting all resolved
     // events biases the rate upward while the family is young: before the
@@ -495,18 +498,31 @@ export async function POST(req: NextRequest) {
       claimsSkipped = -1;
       claimsRuleError = planErr.message;
     }
-    const plan = (planData ?? { rule: null, boxes: {} }) as {
+    const plan = (planData ?? { rule: null, boxes: {}, cells: {} }) as {
       rule: SelectionRule | null;
       boxes: Record<string, { rate: number; k: number; n: number; eligible: boolean; reason: string | null; remaining: number }>;
+      // mig 149: per-cell shrunk rates keyed `<box>|<cell_key>`; absent = the
+      // plan has never seen the cell, and the box rate is the forecast.
+      cells?: Record<string, { k: number; n: number; rate: number }>;
     };
+    const cellAlpha = Number(plan.rule?.cell_alpha ?? 20);
+    const cellVersion = String(plan.rule?.cell_version ?? 'v2');
+    claimsForecastVersion = cellVersion;
 
     const openForClaims: any[] = [];
     for (let from = 0; ; from += PAGE) {
-      const { data } = await supabase
-        .from('dark_contact_events')
-        .select('id, mmsi, name, flag, box_slug, cadence_hours, silence_ratio_at_open, confidence_at_open, gap_started_at, opened_at, deadline_at')
-        .eq('status', 'open')
+      // The view (mig 149) is open events + cell_key computed in SQL by the
+      // same function the plan uses — the key is never re-derived here.
+      const { data, error: openErr } = await supabase
+        .from('dark_contact_open_for_claims')
+        .select('id, mmsi, name, flag, box_slug, last_speed_kn, cadence_hours, silence_ratio_at_open, confidence_at_open, gap_started_at, opened_at, deadline_at, cell_key')
         .range(from, from + PAGE - 1);
+      if (openErr) {
+        // A read that fails must not look like "no open events" — the run
+        // record carries the error so a missing view is visible, not silent.
+        claimsRuleError = `open events: ${openErr.message}`;
+        break;
+      }
       if (!data || data.length === 0) break;
       openForClaims.push(...data);
       if (data.length < PAGE) break;
@@ -555,7 +571,15 @@ export async function POST(req: NextRequest) {
         if (list.length > quota) declined['over daily cap'] = (declined['over daily cap'] ?? 0) + (list.length - quota);
         for (const e of list.slice(0, quota)) {
           const b = plan.boxes[box];
-          toInsert.push(buildDarkContactClaimRow(e, { p: b.rate, k: b.k, n: b.n }, now, plan.rule ?? undefined));
+          // mig 149: the cell's shrunk rate is the number on the claim; a cell
+          // the plan has never seen falls back to the box rate (= the formula
+          // at n = 0). Recorded on the claim either way.
+          const c = e.cell_key ? plan.cells?.[`${box}|${e.cell_key}`] : undefined;
+          const cell: CellForecast | null = c && e.cell_key
+            ? { key: e.cell_key, k: c.k, n: c.n, rate: c.rate, alpha: cellAlpha, version: cellVersion }
+            : null;
+          if (cell) claimsCellForecast += 1;
+          toInsert.push(buildDarkContactClaimRow(e, { p: b.rate, k: b.k, n: b.n }, now, plan.rule ?? undefined, cell));
         }
       }
       claimsSkipped = openForClaims.length - toInsert.length;
@@ -620,6 +644,8 @@ export async function POST(req: NextRequest) {
     events_close_error: evCloseError,
     events_open_total: openEvents.length - evReappeared - evStillDark - evVoided + evOpened,
     claims_issued: claimsIssued,
+    claims_cell_forecast: claimsCellForecast,
+    forecast_version: claimsForecastVersion,
     claims_already_present: claimsSkipped,
     // What the rule REFUSED, by reason. A selection rule you cannot audit is
     // the same problem as no selection rule.
