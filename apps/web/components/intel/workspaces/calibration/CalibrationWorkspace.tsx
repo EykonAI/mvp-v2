@@ -96,10 +96,13 @@ export default function CalibrationWorkspace() {
 
   const cohortSeries = track?.key === 'house' ? bucketWeeks(track?.cohorts ?? []) : (track?.cohorts ?? []);
 
+  // FULLY RESOLVED, not merely past deadline. mig 137's `complete` means every
+  // deadline has passed; the scorer then judges 500 claims per hourly tick, so
+  // a large cohort is "complete" for hours while most of it is still unscored
+  // (the 09-06 cohort: 8,243 claims due 22:00–23:01 UTC, ~17 ticks to score).
+  // Quote a cohort only when nothing in it is still open.
   const lastComplete = [...cohortSeries]
-
-    .filter(c => c.complete && c.n >= data.min_sample && c.skill != null)
-
+    .filter(c => c.complete && c.open === 0 && c.n >= data.min_sample && c.skill != null)
     .sort((a, b) => (a.day < b.day ? 1 : -1))[0] ?? null;
 
   const w30 = track?.window_30d ?? null;
@@ -250,7 +253,7 @@ export default function CalibrationWorkspace() {
           <Tile label="Resolution" value={`${track.resolved} / ${track.resolved + track.void}`} sub={`${track.void} void · ${track.open} open`} />
         </div>
         <p style={{ marginTop: 6, fontFamily: 'var(--f-mono)', fontSize: 9, lineHeight: 1.5, color: 'var(--ink-faint)' }}>
-          headline = last complete cohort (every claim issued that {track.key === 'house' ? 'week' : 'day'} is past its deadline) · all-time carries every early cohort forever and is kept as history · skill = 1 − Brier ÷ base·(1−base) · n&lt;{data.min_sample} is not quoted
+          headline = last complete cohort (every claim issued that {track.key === 'house' ? 'week' : 'day'} is past its deadline and judged) · all-time carries every early cohort forever and is kept as history · skill = 1 − Brier ÷ base·(1−base) · n&lt;{data.min_sample} is not quoted
         </p>
 
         <div style={{ marginTop: 12, border: '1px solid var(--rule-soft)', background: 'var(--bg-panel)', padding: 12 }}>
@@ -526,11 +529,15 @@ function Cohorts({ points, changes, error, weekly }: {
           const s = c.skill ?? 0;
           const top = Math.min(y(s), zero), h = Math.max(1, Math.abs(y(s) - zero));
           const x = i * step + step * 0.15, bw = step * 0.7;
-          const fill = !c.complete ? 'none' : flat ? 'var(--ink-ghost)' : s < 0 ? 'var(--coral)' : 'var(--green)';
-          const title = `${c.day}${weekly ? ' week' : ''} · issued ${c.issued} · resolved ${c.n}${c.complete ? '' : ` · open ${c.open} — not comparable`} · skill ${c.skill == null ? '—' : c.skill.toFixed(3)} · sharpness ${c.sharpness == null ? '—' : c.sharpness.toFixed(3)}${flat ? ' (flat prior)' : ''}`;
+          // Solid only when every claim is past its deadline AND judged: the
+          // scorer works 500 claims per hourly tick, so a big cohort is
+          // "complete" for hours while most of it is unscored (#513).
+          const done = c.complete && c.open === 0;
+          const fill = !done ? 'none' : flat ? 'var(--ink-ghost)' : s < 0 ? 'var(--coral)' : 'var(--green)';
+          const title = `${c.day}${weekly ? ' week' : ''} · issued ${c.issued} · resolved ${c.n}${done ? '' : c.complete ? ` · judging ${c.n}/${c.issued} — not yet comparable` : ` · open ${c.open} — not comparable`} · skill ${c.skill == null ? '—' : c.skill.toFixed(3)} · sharpness ${c.sharpness == null ? '—' : c.sharpness.toFixed(3)}${flat ? ' (flat prior)' : ''}`;
           return (
             <g key={c.day}>
-              <rect x={x} y={top} width={bw} height={h} fill={fill} stroke={!c.complete ? 'var(--ink-faint)' : 'none'} strokeDasharray={!c.complete ? '2 2' : undefined} opacity={c.complete ? 0.9 : 0.7}>
+              <rect x={x} y={top} width={bw} height={h} fill={fill} stroke={!done ? 'var(--ink-faint)' : 'none'} strokeDasharray={!done ? '2 2' : undefined} opacity={done ? 0.9 : 0.7}>
                 <title>{title}</title>
               </rect>
               <text x={x + bw / 2} y={H + 10} fontSize={7} fill="var(--ink-faint)" textAnchor="middle" fontFamily="var(--f-mono)">{c.day.slice(5)}</text>
@@ -550,7 +557,7 @@ function Cohorts({ points, changes, error, weekly }: {
         })}
       </svg>
       <p style={{ fontFamily: 'var(--f-mono)', fontSize: 9, color: 'var(--ink-faint)', margin: 0, lineHeight: 1.6 }}>
-        skill = 1 − Brier ÷ base·(1−base), by {weekly ? 'issuance week' : 'issuance day'} · complete cohorts solid · open cohorts hollow (not comparable) · grey = flat 0.5 prior (sharpness 0) · amber marks = forecaster changes
+        skill = 1 − Brier ÷ base·(1−base), by {weekly ? 'issuance week' : 'issuance day'} · judged cohorts solid · open or still-judging cohorts hollow (not comparable) · grey = flat 0.5 prior (sharpness 0) · amber marks = forecaster changes
       </p>
     </>
   );

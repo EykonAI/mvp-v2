@@ -468,7 +468,7 @@ function CohortPanel({ m }: { m: Monitor }) {
   const track = f.track === 'all' ? 'machine' : f.track;
   const series: Cohort[] = m.cohorts.data?.tracks?.[track] ?? [];
   const changes = m.cohorts.data?.changes ?? [];
-  const skills = series.filter((c) => c.complete && c.skill != null).map((c) => c.skill as number);
+  const skills = series.filter((c) => c.complete && c.open === 0 && c.skill != null).map((c) => c.skill as number);
   const min = Math.min(-0.42, ...skills), max = Math.max(0.05, ...skills);
   const range = max - min || 1;
   const days = series.map((c) => c.day);
@@ -484,10 +484,12 @@ function CohortPanel({ m }: { m: Monitor }) {
             <div className="bars">
               {series.map((c) => {
                 const flat = (c.sharpness ?? 0) < 0.005;
-                const h = !c.complete ? 28 : c.skill == null ? 4 : Math.max(4, Math.round(((c.skill - min) / range) * 110));
+                // solid only when past deadline AND judged (#513): the scorer works 500 claims per tick
+                const done = c.complete && c.open === 0;
+                const h = !done ? 28 : c.skill == null ? 4 : Math.max(4, Math.round(((c.skill - min) / range) * 110));
                 return (
-                  <div key={c.day} className={`bar${flat ? ' flat' : ''}${c.complete ? '' : ' open'}`} title={`${c.day} · issued ${c.issued} · scored ${c.n} · open ${c.open} · brier ${f3(c.brier)} · base ${f3(c.base_rate)} · sharpness ${f3(c.sharpness)}${c.complete ? '' : ' · cohort still open — not comparable'}`}>
-                    <span className="mark" style={{ fontSize: 9, color: !c.complete ? 'var(--ink-faint)' : (c.skill ?? 0) > -0.05 ? 'var(--green)' : 'var(--ink-dim)' }}>{c.complete ? sg(c.skill) : `open ${nf(c.n)}/${nf(c.issued)}`}</span>
+                  <div key={c.day} className={`bar${flat ? ' flat' : ''}${done ? '' : ' open'}`} title={`${c.day} · issued ${c.issued} · scored ${c.n} · open ${c.open} · brier ${f3(c.brier)} · base ${f3(c.base_rate)} · sharpness ${f3(c.sharpness)}${done ? '' : c.complete ? ' · deadlines passed, still judging — not yet comparable' : ' · cohort still open — not comparable'}`}>
+                    <span className="mark" style={{ fontSize: 9, color: !done ? 'var(--ink-faint)' : (c.skill ?? 0) > -0.05 ? 'var(--green)' : 'var(--ink-dim)' }}>{done ? sg(c.skill) : `${c.complete ? 'judging' : 'open'} ${nf(c.n)}/${nf(c.issued)}`}</span>
                     <i style={{ height: h }} />
                     <b>{md(c.day)}</b>
                   </div>
@@ -522,7 +524,8 @@ function CohortPanel({ m }: { m: Monitor }) {
                   {boxDays.map((d) => {
                     const x = byKey.get(`${b}|${d}`);
                     if (!x) return <td key={d} className="num dim">—</td>;
-                    if (!x.complete) return <td key={d} className="num dim" title={`issued ${x.issued} · scored ${x.n} · void ${x.void}`}>open {x.n}/{x.issued}</td>;
+                    const doneBox = x.complete && x.n + (x.void ?? 0) >= x.issued;
+                    if (!doneBox) return <td key={d} className="num dim" title={`issued ${x.issued} · scored ${x.n} · void ${x.void}`}>{x.complete ? 'judging' : 'open'} {x.n}/{x.issued}</td>;
                     if (x.n < MIN_QUOTABLE_N) return <td key={d} className="num dim" title={`issued ${x.issued} · void ${x.void} · brier ${f3(x.brier)}`}>n&lt;10 ({x.n})</td>;
                     return <td key={d} className={`num ${(x.skill ?? 0) < 0 ? 'neg' : 'pos'}`} title={`issued ${x.issued} · scored ${x.n} · void ${x.void} · brier ${f3(x.brier)} · base ${f3(x.base_rate)}`}>{sg(x.skill)} ({x.n})</td>;
                   })}
