@@ -19,6 +19,12 @@
 // from the groundedness audit in the Consolidated Brief §14 (verified
 // 2026-08-19). They do not know whether AIS died this morning.
 //
+// Two dates ride on every envelope and they must never be confused:
+// `as_of` is the READ time (the moment this result was produced) and
+// `groundedness_audited_on` is the date these declarations were last
+// verified. They used to be one field, which made a constant look
+// like a clock.
+//
 // That limitation is stated in the payload itself rather than hidden,
 // and the honest upgrade is to drive `freshness` from the live
 // feed-liveness records (migration 089 / the /start honesty board)
@@ -45,8 +51,11 @@ export interface ToolProvenance {
   caveats: string[];
 }
 
-/** Verified date of the groundedness audit these declarations come from. */
-export const PROVENANCE_AS_OF = '2026-08-19';
+/**
+ * Date the groundedness audit behind these declarations was verified
+ * (Consolidated Brief §14). NOT the read time — that is `as_of`.
+ */
+export const GROUNDEDNESS_AUDITED_ON = '2026-08-19';
 
 const COUNT_SITES =
   'Counts rows, not sites: the facility registry stores one row per generating unit, so several rows can share one physical location.';
@@ -172,7 +181,10 @@ export const TOOL_PROVENANCE: Record<string, ToolProvenance> = {
 };
 
 export interface Envelope {
+  /** When this result was read: ISO 8601, server clock. */
   as_of: string;
+  /** Date the grounding and caveats below were last verified. */
+  groundedness_audited_on: string;
   grounding: Grounding;
   source: string;
   caveats: string[];
@@ -181,23 +193,26 @@ export interface Envelope {
 }
 
 export function envelopeFor(toolName: string): Envelope {
+  const as_of = new Date().toISOString();
   const p = TOOL_PROVENANCE[toolName];
   if (!p) {
     return {
-      as_of: PROVENANCE_AS_OF,
+      as_of,
+      groundedness_audited_on: GROUNDEDNESS_AUDITED_ON,
       grounding: 'not_characterised',
       source: 'unknown',
       caveats: [
         'This tool has no provenance declaration. Absence of a caveat here is NOT a statement that the data is sound — it means nobody has characterised it.',
       ],
-      note: `Static declaration from the groundedness audit of ${PROVENANCE_AS_OF}. It does not reflect current feed liveness.`,
+      note: `as_of is when this result was read. Grounding and caveats are a static declaration from the groundedness audit of ${GROUNDEDNESS_AUDITED_ON}; they do not reflect current feed liveness.`,
     };
   }
   return {
-    as_of: PROVENANCE_AS_OF,
+    as_of,
+    groundedness_audited_on: GROUNDEDNESS_AUDITED_ON,
     grounding: p.grounding,
     source: p.source,
     caveats: p.caveats,
-    note: `Static declaration from the groundedness audit of ${PROVENANCE_AS_OF}. It does not reflect current feed liveness — a feed can be down while this still reads "live".`,
+    note: `as_of is when this result was read. Grounding and caveats are a static declaration from the groundedness audit of ${GROUNDEDNESS_AUDITED_ON}; they do not reflect current feed liveness — a feed can be down while this still reads "live".`,
   };
 }

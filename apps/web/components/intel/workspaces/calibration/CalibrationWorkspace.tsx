@@ -159,7 +159,7 @@ export default function CalibrationWorkspace() {
               />
             )}
             <KV k="resolved" v={String(track.integrity.resolved_total)} />
-            <KV k="void (no look)" v={String(track.void)} />
+            <KV k="void (excluded · reason on the row)" v={String(track.void)} />
             <KV k="median lead" v={track.integrity.median_lead_days == null ? '—' : `${track.integrity.median_lead_days} d`} />
           </div>
           {track.key === 'creator' && track.integrity.sealed === 0 && track.integrity.issued > 0 && (
@@ -180,7 +180,8 @@ export default function CalibrationWorkspace() {
             </p>
           )}
           <p style={{ marginTop: 6, fontFamily: 'var(--f-mono)', fontSize: 9, lineHeight: 1.5, color: 'var(--ink-faint)' }}>
-            voids are excluded from scoring, never counted as wins
+            voids are excluded from scoring, never counted as wins · each carries its reason (no look, coverage gap,
+            duplicate issuance)
           </p>
         </div>
 
