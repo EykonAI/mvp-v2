@@ -327,7 +327,15 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
     input_schema: {
       type: 'object' as const,
       properties: {
-        theatre_slug: { type: 'string', description: 'red-sea, hormuz, black-sea, taiwan-strait, gulf-of-guinea' },
+        theatre_slug: {
+          type: 'string',
+          // An ENUM, not prose. This read 'red-sea, hormuz, black-sea,
+          // taiwan-strait, gulf-of-guinea' and had omitted malacca since it
+          // was added in #334 — so the model was told there were five
+          // theatres and could not ask about the sixth. An enum is checked
+          // client-side; a description is only a suggestion.
+          enum: ['black-sea', 'gulf-of-guinea', 'hormuz', 'malacca', 'red-sea', 'taiwan-strait'],
+        },
         limit: { type: 'number' },
       },
       required: [],
@@ -391,7 +399,11 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
     input_schema: {
       type: 'object' as const,
       properties: {
-        theatre_slug: { type: 'string' },
+        theatre_slug: {
+          type: 'string',
+          description: 'One of the six theatres eYKON computes posture for.',
+          enum: ['black-sea', 'gulf-of-guinea', 'hormuz', 'malacca', 'red-sea', 'taiwan-strait'],
+        },
         top_k: { type: 'number', description: 'Default 3' },
         event_type: { type: 'string' },
       },
@@ -400,7 +412,7 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'run_chokepoint_scenario',
-    description: 'Run a chokepoint closure scenario (same model as the Chokepoint Simulator). Returns the persisted scenario_run.',
+    description: 'Run a chokepoint closure scenario (same model as the Chokepoint Simulator). Returns a computed projection; nothing is persisted on this path. A MODEL, not an observation.',
     input_schema: {
       type: 'object' as const,
       properties: {

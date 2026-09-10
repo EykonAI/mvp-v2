@@ -52,9 +52,21 @@ async function queryVessels(input: Record<string, any>): Promise<string> {
     `${APP_URL()}/api/vessels?latmin=${lat_min}&latmax=${lat_max}&lonmin=${lon_min}&lonmax=${lon_max}`,
   );
   const data = await res.json();
-  const vessels = (data.data || data || []).slice(0, 50);
+  const all = data.data || data || [];
+  const MAX = 50;
+  const vessels = all.slice(0, MAX);
+  // `count` used to be vessels.length — i.e. the page size. Asked how many
+  // vessels were in a box holding 620, this tool answered 50, and an agent
+  // has no way to tell a cap from a census. The upstream route already
+  // knows the real total; it was being discarded one line later.
   return JSON.stringify({
     count: vessels.length,
+    total_in_box: all.length,
+    truncated: all.length > MAX,
+    truncation_note:
+      all.length > MAX
+        ? `Showing ${MAX} of ${all.length}. count is the page size; total_in_box is the answer to "how many".`
+        : undefined,
     vessels: vessels.map((v: any) => ({
       name: v.NAME || v.name || 'Unknown',
       mmsi: v.MMSI || v.mmsi,
