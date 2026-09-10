@@ -48,6 +48,8 @@ interface Window30 {
 }
 interface Cohort {
   day: string; issued: number; n: number; open: number; complete: boolean;
+  /** mig 155: voided claims, so live = issued − void and open = issued − n − void */
+  void?: number;
   sum_brier: number; sum_y: number; sum_absdev: number;
   brier: number | null; base_rate: number | null; sharpness: number | null; skill: number | null;
 }
@@ -534,7 +536,7 @@ function Cohorts({ points, changes, error, weekly }: {
           // "complete" for hours while most of it is unscored (#513).
           const done = c.complete && c.open === 0;
           const fill = !done ? 'none' : flat ? 'var(--ink-ghost)' : s < 0 ? 'var(--coral)' : 'var(--green)';
-          const title = `${c.day}${weekly ? ' week' : ''} · issued ${c.issued} · resolved ${c.n}${done ? '' : c.complete ? ` · judging ${c.n}/${c.issued} — not yet comparable` : ` · open ${c.open} — not comparable`} · skill ${c.skill == null ? '—' : c.skill.toFixed(3)} · sharpness ${c.sharpness == null ? '—' : c.sharpness.toFixed(3)}${flat ? ' (flat prior)' : ''}`;
+          const title = `${c.day}${weekly ? ' week' : ''} · issued ${c.issued} · resolved ${c.n}${done ? '' : c.complete ? ` · judging ${c.n}/${c.issued - (c.void ?? 0)} — not yet comparable` : ` · open ${c.open} — not comparable`} · skill ${c.skill == null ? '—' : c.skill.toFixed(3)} · sharpness ${c.sharpness == null ? '—' : c.sharpness.toFixed(3)}${flat ? ' (flat prior)' : ''}`;
           return (
             <g key={c.day}>
               <rect x={x} y={top} width={bw} height={h} fill={fill} stroke={!done ? 'var(--ink-faint)' : 'none'} strokeDasharray={!done ? '2 2' : undefined} opacity={done ? 0.9 : 0.7}>
@@ -570,7 +572,7 @@ function bucketWeeks(points: Cohort[]): Cohort[] {
     const dow = (d.getUTCDay() + 6) % 7;                 // Monday = 0
     const monday = new Date(d.getTime() - dow * 86_400_000).toISOString().slice(0, 10);
     const acc = by.get(monday) ?? { day: monday, issued: 0, n: 0, open: 0, complete: true, sum_brier: 0, sum_y: 0, sum_absdev: 0, brier: null, base_rate: null, sharpness: null, skill: null };
-    acc.issued += c.issued; acc.n += c.n; acc.open += c.open; acc.complete = acc.complete && c.complete;
+    acc.issued += c.issued; acc.n += c.n; acc.open += c.open; acc.void = (acc.void ?? 0) + (c.void ?? 0); acc.complete = acc.complete && c.complete;
     acc.sum_brier += Number(c.sum_brier); acc.sum_y += Number(c.sum_y); acc.sum_absdev += Number(c.sum_absdev);
     by.set(monday, acc);
   }

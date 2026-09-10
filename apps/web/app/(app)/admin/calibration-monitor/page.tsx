@@ -489,7 +489,7 @@ function CohortPanel({ m }: { m: Monitor }) {
                 const h = !done ? 28 : c.skill == null ? 4 : Math.max(4, Math.round(((c.skill - min) / range) * 110));
                 return (
                   <div key={c.day} className={`bar${flat ? ' flat' : ''}${done ? '' : ' open'}`} title={`${c.day} · issued ${c.issued} · scored ${c.n} · open ${c.open} · brier ${f3(c.brier)} · base ${f3(c.base_rate)} · sharpness ${f3(c.sharpness)}${done ? '' : c.complete ? ' · deadlines passed, still judging — not yet comparable' : ' · cohort still open — not comparable'}`}>
-                    <span className="mark" style={{ fontSize: 9, color: !done ? 'var(--ink-faint)' : (c.skill ?? 0) > -0.05 ? 'var(--green)' : 'var(--ink-dim)' }}>{done ? sg(c.skill) : `${c.complete ? 'judging' : 'open'} ${nf(c.n)}/${nf(c.issued)}`}</span>
+                    <span className="mark" style={{ fontSize: 9, color: !done ? 'var(--ink-faint)' : (c.skill ?? 0) > -0.05 ? 'var(--green)' : 'var(--ink-dim)' }}>{done ? sg(c.skill) : `${c.complete ? 'judging' : 'open'} ${nf(c.n)}/${nf(c.issued - (c.void ?? 0))}`}</span>
                     <i style={{ height: h }} />
                     <b>{md(c.day)}</b>
                   </div>

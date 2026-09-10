@@ -137,7 +137,7 @@ export interface FamilyStats extends TrackStats { track: string; feature: string
 export interface WindowStats { basis: Basis; from: string; to: string; tracks: Record<string, TrackStats>; families: FamilyStats[] }
 
 export interface Cohort {
-  day: string; issued: number; n: number; open: number; complete: boolean;
+  day: string; issued: number; n: number; open: number; void?: number; complete: boolean;
   brier: number | null; base_rate: number | null; sharpness: number | null; skill: number | null;
 }
 export interface BoxCohort extends Cohort { box: string; void: number }
