@@ -847,7 +847,7 @@ async function queryCalibration(input: Record<string, any>): Promise<string> {
     const supabase = createServerSupabase();
     const feature = input.feature as string | undefined;
     const track = input.track as string | undefined;
-    const windowDays = Number(input.window_days ?? 30);
+    const windowDays = Number(input.window_days ?? 90);
 
     // ─── Aggregated in SQL, never fetched and averaged here ───────
     //
@@ -858,7 +858,7 @@ async function queryCalibration(input: Record<string, any>): Promise<string> {
     // 124), and this was the surface that fix never reached. Migration 136
     // does the arithmetic in the database over the whole window.
     const { data, error } = await supabase.rpc('calibration_window_stats', {
-      p_days: Number.isFinite(windowDays) && windowDays > 0 ? windowDays : 30,
+      p_days: Number.isFinite(windowDays) && windowDays > 0 ? windowDays : 90,
       p_track: track ?? null,
       p_feature: feature ?? null,
     });
@@ -882,7 +882,9 @@ async function queryCalibration(input: Record<string, any>): Promise<string> {
         'average. "unscored" are resolved rows with no Brier (voided — we did not look) ' +
         'and are EXCLUDED, never treated as zero. skill is relative to the track\'s own ' +
         'base rate over the same window. A Brier over a handful of scored rows carries ' +
-        'no weight — read scored before quoting any figure.',
+        'no weight — read scored before quoting any figure. pct_scored_last_7d is '
+        + 'how much of this window is really the last week: near 100 on a long window '
+        + 'means the window did not bind and the figure describes recent rows only.',
     });
   } catch (err: any) {
     return JSON.stringify({ error: err.message, note: 'Predictions register is likely warming up.' });

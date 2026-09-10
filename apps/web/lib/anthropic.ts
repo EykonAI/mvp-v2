@@ -388,7 +388,16 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
       properties: {
         feature: { type: 'string', description: 'posture_shift | conflict_escalation | trade_flow | energy_stress' },
         track: { type: 'string', description: 'house | machine | creator. Omit to get every track, reported separately.' },
-        window_days: { type: 'number', description: '7 | 30 | 90 (default 30)' },
+        window_days: {
+          type: 'number',
+          description:
+            '7 | 30 | 90 (default 90). 90 is the shortest window where the house track '
+            + 'carries evidence — n=42 at 90d against 12 at 30d and 6 at 7d — and skill is '
+            + 'measured against the track\'s own base rate INSIDE the window, so a short '
+            + 'window computes its yardstick from the same few rows. Check pct_scored_last_7d '
+            + 'in the reply: near 100 means the window did not bind.',
+          enum: [7, 30, 90],
+        },
       },
       required: [],
     },
