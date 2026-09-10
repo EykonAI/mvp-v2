@@ -131,7 +131,18 @@ const nextConfig = {
     '@deck.gl/react',
   ],
   async headers() {
-    return [{ source: '/:path*', headers: securityHeaders }];
+    return [
+      { source: '/:path*', headers: securityHeaders },
+      // The MCP Registry's domain-ownership proof. It is a bare token file
+      // with no extension, so Next's static handler types it
+      // application/octet-stream; say text/plain explicitly rather than rely
+      // on a verifier being relaxed about it. Public by design — the file
+      // holds the PUBLIC half of the signing pair.
+      {
+        source: '/.well-known/mcp-registry-auth',
+        headers: [{ key: 'Content-Type', value: 'text/plain; charset=utf-8' }],
+      },
+    ];
   },
   webpack: (config) => {
     // Fix maplibre-gl worker — alias only the JS entry, not the CSS
