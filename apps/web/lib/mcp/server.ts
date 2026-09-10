@@ -107,9 +107,18 @@ export function buildMcpServer(caller: ApiCaller | null): Server {
       description: t.description ?? '',
       inputSchema: t.input_schema as Record<string, unknown>,
       annotations: {
-        // Every tool on this surface reads. run_* are simulations over
-        // stored inputs and persist a scenario row, but mutate no
-        // source data and destroy nothing.
+        // Every tool on this surface reads, and readOnlyHint is load-
+        // bearing: clients use it to decide what may run WITHOUT asking
+        // the user, so a writer labelled read-only gets executed silently.
+        // Re-checked tool by tool on 2026-09-10 rather than assumed. The
+        // run_* pair are the ones worth stating: run_chokepoint_scenario
+        // calls simulateChokepoint(), a pure function with no database
+        // access at all, and run_sanctions_wargame calls runWargame(),
+        // which only SELECTs from entities and fleet_kinship_edges. The
+        // scenario_runs INSERT lives in the /api/intel/* routes, which
+        // this path does not touch — it calls the lib functions directly.
+        // The comment here previously said run_* "persist a scenario row",
+        // which was true of the web route and never of this one.
         readOnlyHint: true,
         destructiveHint: false,
         idempotentHint: true,

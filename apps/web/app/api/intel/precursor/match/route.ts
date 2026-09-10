@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import precursor from '@/lib/fixtures/precursor_library.json';
+import { THEATRE_SLUGS, resolveTheatreSlug } from '@/lib/theatres';
 import posture from '@/lib/fixtures/posture_seed.json';
 
 export const dynamic = 'force-dynamic';
@@ -91,7 +92,36 @@ async function buildLiveCurrent(
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const theatreSlug: string = body.theatre_slug ?? 'black-sea';
+    let theatreSlug: string = body.theatre_slug ?? 'black-sea';
+
+    // An unrecognised theatre used to fall all the way through to a
+    // synthetic sine wave (see the `else` branch below) and come back as
+    // cosine similarities to sixteen decimal places, with the caller's
+    // invented slug echoed alongside them. Two different nonsense slugs
+    // therefore produced byte-identical "matches" — the giveaway that the
+    // number described the fixture, not the theatre. Refuse instead: a
+    // question about a theatre we do not compute has no answer, and
+    // saying so is cheaper than being caught inventing one.
+    // The model naturally writes "Strait of Hormuz" or "Red Sea" where the
+    // stored slug is "hormuz" / "red-sea" — the same mismatch documented at
+    // queryRegimeShiftsTool. Normalise before judging, so the refusal below
+    // fires on genuine nonsense and not on a human spelling of a real place.
+    const resolved = resolveTheatreSlug(theatreSlug);
+    if (resolved) theatreSlug = resolved;
+
+    if (!resolved) {
+      return NextResponse.json(
+        {
+          error: `Unknown theatre_slug "${theatreSlug}".`,
+          valid_theatre_slugs: THEATRE_SLUGS,
+          note:
+            'eYKON computes posture for these theatres only. No similarity is ' +
+            'returned for anything else, because there is no current vector to ' +
+            'compare against.',
+        },
+        { status: 400 },
+      );
+    }
     const topK = Math.min(10, Math.max(1, Number(body.top_k ?? 3)));
     const eventType: string | null = body.event_type ?? null;
 

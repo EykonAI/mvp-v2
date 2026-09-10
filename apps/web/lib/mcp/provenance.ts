@@ -93,11 +93,23 @@ export const TOOL_PROVENANCE: Record<string, ToolProvenance> = {
     ],
   },
   query_vessels: {
-    grounding: 'live_thin',
-    source: 'AIS, free tier',
+    grounding: 'live',
+    source: 'AIS',
     caveats: [
-      'CHOKEPOINT-ONLY on the free tier. This is not global vessel coverage and must not be presented as such.',
-      'The feed was fully down for at least ten days in August 2026 on a provider quota.',
+      // Was 'CHOKEPOINT-ONLY on the free tier. This is not global vessel
+      // coverage.' That stopped being true on 2026-08-24, when ingest
+      // stepped up roughly 120x to four broad boxes plus six chokepoints.
+      // The line survived because these caveats are a STATIC declaration
+      // from the 2026-08-19 audit — five days before the change — so the
+      // envelope went on denying coverage the payload was visibly
+      // returning: a North Sea query came back with vessels off Stavanger,
+      // Peterhead and the German Bight under a caveat saying chokepoints
+      // only. A caveat contradicted by the rows beside it is worse than no
+      // caveat: it teaches a reader to discount the honest ones too.
+      // Re-measured against production 2026-09-10: 186,789 vessels,
+      // 33,726 refreshed in 24h, spanning -90..89.9 lat / -180..179.9 lon.
+      'GLOBAL IN EXTENT, PARTIAL IN DENSITY. ~33.7k vessels refresh in any 24h against a world AIS fleet several times that — a box can be genuinely covered and still be missing ships. Absence of a vessel is not absence of a vessel.',
+      'The feed was fully down for at least ten days in August 2026 on a provider quota, and ingest stepped up sharply on 2026-08-24 — a count compared across that date measures our pipeline, not the world.',
       'vessel_positions is a CURRENT-STATE snapshot keyed per MMSI — one row per vessel, not a position history.',
       INGEST_SENSITIVE,
     ],
