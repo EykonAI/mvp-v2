@@ -9,7 +9,9 @@
 --
 -- Synthetic rows use mmsi PR2GUARD* and days in the year 2000 — outside the
 -- derivation span, so no real day is pruned or rewritten. Assertion 9
--- re-derives one real day (today − 2) twice inside the transaction: ~20–25 s.
+-- re-derives one real day (today − 2) twice inside the transaction, and
+-- assertion 11 a third time through derive_port_calls_due: ~60–75 s in all,
+-- every statement well inside the 120 s timeout. All of it rolls back.
 -- ═══════════════════════════════════════════════════════════════════════════
 
 BEGIN;
@@ -30,6 +32,7 @@ BEGIN
       ('function',   'public.port_call_first_day()'),
       ('function',   'public.derive_port_call_day(date)'),
       ('function',   'public.rebuild_port_calls(date,date)'),
+      ('function',   'public.port_call_due_days()'),
       ('function',   'public.derive_port_calls_due(integer,integer)'),
       ('function',   'public.port_call_window_coverage(integer)'),
       ('function',   'public.oil_port_call_candidates(integer,numeric)'),
@@ -55,7 +58,7 @@ BEGIN
   IF cardinality(v_missing) > 0 THEN
     RAISE EXCEPTION 'FAIL 0 · missing: %', array_to_string(v_missing, ', ');
   END IF;
-  RAISE NOTICE 'PASS 0 · every PR-2 object exists (2 tables, view, 7 functions, indexes, constraints, 2 active cron jobs)';
+  RAISE NOTICE 'PASS 0 · every PR-2 object exists (2 tables, view, 8 functions, indexes, constraints, 2 active cron jobs)';
 END $$;
 
 -- ─── 1 · Retention can never go below the 14-day floor ────────────────────
@@ -422,6 +425,62 @@ BEGIN
     RAISE EXCEPTION 'FAIL 10 · a repeated rollup wrote: %', v_res;
   END IF;
   RAISE NOTICE 'PASS 10 · atoms 1 h apart roll into one episode (2 days, 19 samples, arrival and departure observed); a first-seen-already-there episode is arrival_observed = false';
+END $$;
+
+-- ─── 11 · A recent day whose raw history grew after it was derived is
+--         re-derived (late_rows) ahead of the backlog; a pruned day never is
+DO $$
+DECLARE
+  v_day  date := (now() AT TIME ZONE 'UTC')::date - 2;   -- derived by assertion 9
+  v_n    integer;
+  v_why  text;
+  v_res  jsonb;
+BEGIN
+  -- Every recent derived day scanned exactly what the raw history holds …
+  UPDATE public.port_call_derivation_runs r
+     SET samples_scanned = c.n
+    FROM (SELECT (h.recorded_at AT TIME ZONE 'UTC')::date AS d, count(*)::integer AS n
+            FROM public.ais_position_history h
+           WHERE h.recorded_at >= (((now() AT TIME ZONE 'UTC')::date - 5)::timestamp AT TIME ZONE 'UTC')
+             AND h.recorded_at <  (((now() AT TIME ZONE 'UTC')::date)::timestamp AT TIME ZONE 'UTC')
+           GROUP BY 1) c
+   WHERE r.day = c.d AND r.status = 'derived' AND r.raw_pruned_at IS NULL;
+  -- … except v_day, derived before its last row landed (the sampler back-dates
+  -- snapshot fixes up to ~3 days: 6,764 rows for 09-03 → 09-05 on 09-06).
+  UPDATE public.port_call_derivation_runs
+     SET samples_scanned = samples_scanned - 1
+   WHERE day = v_day AND status = 'derived' AND raw_pruned_at IS NULL AND samples_scanned > 1;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'FAIL 11 · precondition: % is not a derived, unpruned day with samples', v_day;
+  END IF;
+
+  SELECT d.reason INTO v_why FROM public.port_call_due_days() d WHERE d.day = v_day;
+  IF v_why IS DISTINCT FROM 'late_rows' THEN
+    RAISE EXCEPTION 'FAIL 11 · % holds more raw rows than it scanned but reads % instead of late_rows',
+      v_day, COALESCE(v_why, 'not due');
+  END IF;
+
+  -- The pg_cron entry point takes it first: yesterday is recorded (assertion 7),
+  -- and the backlog (2026-07-06 is missing since assertion 6) waits behind it.
+  v_res := public.derive_port_calls_due(1);
+  IF v_res->'days'->0->>'day' IS DISTINCT FROM v_day::text
+     OR v_res->'days'->0->>'reason' IS DISTINCT FROM 'late_rows'
+     OR v_res->'days'->0->>'status' IS DISTINCT FROM 'derived' THEN
+    RAISE EXCEPTION 'FAIL 11 · derive_port_calls_due(1) did not re-derive the late day % first: %', v_day, v_res->'days';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.port_call_due_days() d WHERE d.day = v_day) THEN
+    RAISE EXCEPTION 'FAIL 11 · % is still due after its re-derivation', v_day;
+  END IF;
+
+  -- A pruned day is never due again, whatever its counts say.
+  UPDATE public.port_call_derivation_runs
+     SET samples_scanned = samples_scanned - 1, raw_pruned_at = now()
+   WHERE day = v_day;
+  IF EXISTS (SELECT 1 FROM public.port_call_due_days() d WHERE d.day = v_day) THEN
+    RAISE EXCEPTION 'FAIL 11 · a pruned day is listed as due';
+  END IF;
+  RAISE NOTICE 'PASS 11 · % with more raw rows than its run record scanned is due (late_rows) and re-derived first by derive_port_calls_due; once pruned it is never due', v_day;
 END $$;
 
 ROLLBACK;

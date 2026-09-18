@@ -31,8 +31,20 @@
 --     2026-07-05 → now, never pruned. UTC days with zero samples: 07-21,
 --     08-06 → 08-16 (the AIS outage), 08-20, 08-21.
 --   · Vessel-port-days per day, 09-04 → 09-17: 11,338 … 13,645 (max/min 1.20).
---   · Rows sampled after 00:17 UTC of the next day, for days 09-10 → 09-16:
---     0 of 3,336,632 — deriving day D at 00:17 on D+1 sees the whole day.
+--   · Rows sampled after 00:17 UTC of the next day (sampled_at vs recorded_at):
+--     none on most days (0 of 3,336,632 for 09-10 → 09-16), so on an ordinary
+--     day deriving D at 00:17 on D+1 sees the whole day. NOT on every day: the
+--     sampler stamps each row with the snapshot's updated_at, which can be up
+--     to ~3 days old, so a vessel newly added to vessel_profiles (or a sampler
+--     run that slipped) lands back-dated rows in days already over. Post-step
+--     days with late rows: 08-29 (37), 08-30 (606, sampled 08-31 21:00),
+--     08-31 (287), 09-03 (193), 09-04 (3,285), 09-05 (3,286) — the last three
+--     all sampled at 2026-09-06 22:00 UTC, 1,015 of them slow within 3 km of
+--     a port — plus single stragglers sampled at 01:xx on 09-07, 09-08 and
+--     09-18. Hence the third due reason below (late_rows): a recent day
+--     re-derives when its raw history holds more rows than its run record
+--     scanned, instead of reading "derived" over rows it never saw (and the
+--     14-day prune later deleting them unseen).
 --
 -- WHAT THIS FILE CREATES
 --   port_call_first_day()        the sampler's first day (2026-07-05), pinned.
@@ -54,11 +66,15 @@
 --                                (derived_by = 'v2_day') for the islands touching
 --                                [from − 1, to + 1]. Idempotent: a re-run writes
 --                                nothing.
+--   port_call_due_days()         the ordered due list: missing (no run
+--                                record), failed, and late_rows (one of the
+--                                last 5 completed days whose raw rows now
+--                                outnumber the run record's samples_scanned).
 --   derive_port_calls_due(int,int) the pg_cron entry point, pattern of mig 140's
---                                nightlights_detect_due: derives up to N days
---                                that have no run record (or failed) — the
---                                most recent completed day first, then the
---                                backlog oldest-first — and starts no new day
+--                                nightlights_detect_due: derives up to N due
+--                                days — yesterday's first derivation, then
+--                                late_rows re-derivations, then the backlog
+--                                oldest-first — and starts no new day
 --                                after a 60 s budget (a post-step day is
 --                                ~15–20 s; the call must end inside 120 s or
 --                                every day in it rolls back). A missed night
@@ -608,7 +624,69 @@ $$;
 COMMENT ON FUNCTION public.derive_port_call_day(date) IS
   'Derives one completed UTC day of port-call atoms from ais_position_history, then rebuilds the episodes touching it. ~15–20 s for a post-2026-08-24 day: pg_cron or the SQL Editor only, never over the API (mig 162). Refuses a day whose raw history was pruned.';
 
--- ─── 7 · The pg_cron entry point ──────────────────────────────────────────
+-- ─── 7 · What is due ──────────────────────────────────────────────────────
+-- A completed UTC day is due for one of three reasons:
+--   missing    no run record — never attempted;
+--   failed     attempted and errored;
+--   late_rows  recorded derived or samples_absent, one of the last 5
+--              completed days, not pruned, and ais_position_history now
+--              holds MORE rows for it than the run record scanned. The
+--              sampler copies each vessel's current snapshot, whose fix can
+--              be ~3 days old, so fleet growth back-dates rows into days
+--              already derived (6,764 rows for 09-03 → 09-05 arrived at
+--              2026-09-06 22:00 UTC; max lag seen 3 d 00:02). Re-derivation
+--              is a replacement, so the day heals instead of reading
+--              "derived" over rows it never saw; its rebuild also refreshes
+--              the previous day's departure evidence. 5 days covers the
+--              ~3-day snapshot age with a day to spare; no day that young is
+--              ever pruned (retention floor 14 days, mig 163).
+-- Order: yesterday's first derivation, then late_rows, then the backlog
+-- oldest-first. Cost: one index-only count over 5 days (2.4 s measured,
+-- EXPLAIN ANALYZE 2026-09-18) — twice per derive_port_calls_due call.
+CREATE OR REPLACE FUNCTION public.port_call_due_days()
+RETURNS TABLE (ord integer, day date, reason text)
+LANGUAGE sql
+STABLE
+SET search_path = public, pg_temp
+AS $$
+  WITH span AS (
+    SELECT gs::date AS d
+      FROM generate_series(public.port_call_first_day()::timestamp,
+                           ((now() AT TIME ZONE 'UTC')::date - 1)::timestamp,
+                           interval '1 day') gs
+  ),
+  recent_raw AS (
+    SELECT (h.recorded_at AT TIME ZONE 'UTC')::date AS d, count(*) AS n
+      FROM public.ais_position_history h
+     WHERE h.recorded_at >= (((now() AT TIME ZONE 'UTC')::date - 5)::timestamp AT TIME ZONE 'UTC')
+       AND h.recorded_at <  (((now() AT TIME ZONE 'UTC')::date)::timestamp AT TIME ZONE 'UTC')
+     GROUP BY 1
+  ),
+  due AS (
+    SELECT s.d,
+           CASE WHEN r.day IS NULL       THEN 'missing'
+                WHEN r.status = 'failed' THEN 'failed'
+                ELSE 'late_rows' END AS why
+      FROM span s
+      LEFT JOIN public.port_call_derivation_runs r ON r.day = s.d
+      LEFT JOIN recent_raw rr ON rr.d = s.d
+     WHERE r.day IS NULL
+        OR r.status = 'failed'
+        OR (r.raw_pruned_at IS NULL AND rr.n > r.samples_scanned)
+  )
+  SELECT (row_number() OVER (
+            ORDER BY (du.d = (now() AT TIME ZONE 'UTC')::date - 1 AND du.why <> 'late_rows') DESC,
+                     (du.why = 'late_rows') DESC,
+                     du.d ASC))::integer,
+         du.d,
+         du.why
+    FROM due du;
+$$;
+
+COMMENT ON FUNCTION public.port_call_due_days() IS
+  'The port-call derivation''s due list (mig 162), ordered by ord: missing (no run record), failed, late_rows (one of the last 5 completed days whose ais_position_history rows now outnumber the run record''s samples_scanned — fleet growth back-dates snapshot fixes up to ~3 days). Read by derive_port_calls_due().';
+
+-- ─── 8 · The pg_cron entry point ──────────────────────────────────────────
 CREATE OR REPLACE FUNCTION public.derive_port_calls_due(
   p_max_days  integer DEFAULT 3,
   p_budget_ms integer DEFAULT 60000
@@ -618,13 +696,14 @@ LANGUAGE plpgsql
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_yesterday  date := (now() AT TIME ZONE 'UTC')::date - 1;
   v_t0         timestamptz := clock_timestamp();
   v_day        date;
+  v_reason     text;
   v_res        jsonb;
   v_err        text;
   v_out        jsonb := '[]'::jsonb;
   v_remaining  integer;
+  v_late       integer;
   v_budgeted   boolean := false;
 BEGIN
   IF p_max_days IS NULL OR p_max_days < 1 OR p_max_days > 10 THEN
@@ -638,13 +717,12 @@ BEGIN
     RETURN jsonb_build_object('skipped', 'another port-call derivation holds the lock');
   END IF;
 
-  FOR v_day IN
-    SELECT s.day
-      FROM (SELECT gs::date AS day
-              FROM generate_series(port_call_first_day()::timestamp, v_yesterday::timestamp, interval '1 day') gs) s
-      LEFT JOIN port_call_derivation_runs r ON r.day = s.day
-     WHERE r.day IS NULL OR r.status = 'failed'
-     ORDER BY (s.day = v_yesterday) DESC, s.day ASC
+  -- The due list (section 7): yesterday's first derivation, then late_rows
+  -- re-derivations, then the backlog oldest-first.
+  FOR v_day, v_reason IN
+    SELECT d.day, d.reason
+      FROM port_call_due_days() d
+     ORDER BY d.ord
      LIMIT p_max_days
   LOOP
     -- Time budget: a post-2026-08-24 day takes ~15–20 s, and the whole call
@@ -666,31 +744,36 @@ BEGIN
         WHERE r.status = 'failed';            -- never downgrade a derived day
       v_res := jsonb_build_object('day', v_day, 'status', 'failed', 'error', v_err);
     END;
-    v_out := v_out || jsonb_build_array(v_res);
+    v_out := v_out || jsonb_build_array(v_res || jsonb_build_object('reason', v_reason));
   END LOOP;
 
-  SELECT count(*)::integer INTO v_remaining
-    FROM generate_series(port_call_first_day()::timestamp, v_yesterday::timestamp, interval '1 day') gs
-    LEFT JOIN port_call_derivation_runs r ON r.day = gs::date
-   WHERE r.day IS NULL OR r.status = 'failed';
+  SELECT count(*)::integer,
+         (count(*) FILTER (WHERE d.reason = 'late_rows'))::integer
+    INTO v_remaining, v_late
+    FROM port_call_due_days() d;
 
-  RETURN jsonb_build_object('days', v_out, 'still_due', v_remaining, 'stopped_on_budget', v_budgeted,
+  RETURN jsonb_build_object('days', v_out, 'still_due', v_remaining, 'still_late', v_late,
+                            'stopped_on_budget', v_budgeted,
                             'duration_ms', (extract(epoch FROM clock_timestamp() - v_t0) * 1000)::integer);
 END;
 $$;
 
 COMMENT ON FUNCTION public.derive_port_calls_due(integer, integer) IS
-  'pg_cron entry point (job derive-port-calls, 00:17 and 12:17 UTC). Derives up to N completed UTC days with no run record or a failed one — yesterday first, then the backlog oldest-first — each in its own subtransaction, recording failures; starts no new day after p_budget_ms (default 60 s) so the call stays inside the 120 s statement_timeout. Also the founder''s backfill: SELECT public.derive_port_calls_due(5); repeated. Never over the API (mig 162).';
+  'pg_cron entry point (job derive-port-calls, 00:17 and 12:17 UTC). Derives up to N days from port_call_due_days() — yesterday''s first derivation, then late_rows re-derivations (a recent day whose raw history grew after it was derived), then the backlog oldest-first — each in its own subtransaction, recording failures; starts no new day after p_budget_ms (default 60 s) so the call stays inside the 120 s statement_timeout. still_due counts every due day, still_late the late_rows among them. Also the founder''s backfill: SELECT public.derive_port_calls_due(5); repeated. Never over the API (mig 162).';
 
--- ─── 8 · Grants: the writers are service_role only (mig 143 rule) ────────
+-- ─── 9 · Grants: service_role only (mig 143 rule) ─────────────────────────
+-- port_call_due_days() writes nothing, but it counts ~2.4 M raw rows (~2.4 s):
+-- not for anon (3 s statement_timeout) or the API at large.
 REVOKE EXECUTE ON FUNCTION public.derive_port_call_day(date)        FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.rebuild_port_calls(date, date)    FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.port_call_due_days()              FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.derive_port_calls_due(integer, integer) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.derive_port_call_day(date)        TO service_role;
 GRANT  EXECUTE ON FUNCTION public.rebuild_port_calls(date, date)    TO service_role;
+GRANT  EXECUTE ON FUNCTION public.port_call_due_days()              TO service_role;
 GRANT  EXECUTE ON FUNCTION public.derive_port_calls_due(integer, integer) TO service_role;
 
--- ─── 9 · Schedule (unschedule-if-exists, then schedule) ──────────────────
+-- ─── 10 · Schedule (unschedule-if-exists, then schedule) ─────────────────
 SELECT cron.unschedule(jobid) FROM cron.job WHERE jobname = 'derive-port-calls';
 SELECT cron.schedule('derive-port-calls', '17 0,12 * * *',
                      $job$ SELECT public.derive_port_calls_due(3) $job$);
@@ -698,7 +781,7 @@ SELECT cron.schedule('derive-port-calls', '17 0,12 * * *',
 COMMIT;
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- VERIFY — paste these rows back. Every row must read ok = true.
+-- VERIFY — paste these rows back (29 rows). Every row must read ok = true.
 -- ═══════════════════════════════════════════════════════════════════════════
 WITH want_constraints(tbl, conname) AS (
   VALUES ('port_call_derivation_runs', 'port_call_derivation_runs_status_check'),
@@ -717,7 +800,7 @@ want_indexes(idx) AS (
 ),
 want_functions(sig) AS (
   VALUES ('public.derive_port_call_day(date)'), ('public.rebuild_port_calls(date,date)'),
-         ('public.derive_port_calls_due(integer,integer)')
+         ('public.port_call_due_days()'), ('public.derive_port_calls_due(integer,integer)')
 )
 SELECT 'table ' || t AS "check", to_regclass('public.' || t) IS NOT NULL AS ok, NULL::text AS detail
   FROM unnest(ARRAY['port_call_derivation_runs', 'port_call_days']) t
