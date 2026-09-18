@@ -86,6 +86,11 @@ function centroidOf(el) {
   return null;
 }
 
+// country / iso_country / us_state are deliberately NOT in the payload —
+// same rule as app/api/cron/ingest-osm-refineries: migration 158 backfilled
+// them from Natural Earth boundaries, and this upsert (ON CONFLICT (id) DO
+// UPDATE over the columns sent) would wipe that on every run. New rows arrive
+// with them NULL; attribute them with scripts/data/refinery-countries.py.
 function rowFromElement(el) {
   const tags = el.tags || {};
   const c = centroidOf(el);
@@ -114,8 +119,6 @@ function rowFromElement(el) {
     product: pickStr(tags, 'product'),
     capacity_bpd: pickNum(tags, 'capacity:bpd', 'capacity_bpd'),
     start_date: pickStr(tags, 'start_date', 'opening_date'),
-    country: pickStr(tags, 'addr:country', 'is_in:country'),
-    iso_country: pickStr(tags, 'ISO3166-1', 'addr:country_code'),
     city: pickStr(tags, 'addr:city', 'is_in:city'),
     wiki_url,
     source_tags: tags,
