@@ -67,7 +67,7 @@ export function HonestyBoard({ status }: { status: ClosingStatus }) {
               LIVE & DENSE. What is live is the roster the thermal derivation
               wrote on its newest day — the same named query as every other
               watched count. Power figures are generating-unit rows. */}
-          <div className="cs-hrow" style={{ borderBottom: 0 }}><span>Thermal watch roster</span><em>{fmt(status.thermalRefineryRows)} refineries · {fmt(status.thermalPowerUnitRows)} power units</em></div>
+          <div className="cs-hrow" style={{ borderBottom: 0 }}><span>Thermal watch roster</span><em>{fmt(status.thermalRefineryRows)} refineries · {fmt(status.thermalPowerUnitRows)} power units · day of {status.thermalDay ?? '—'}</em></div>
         </div>
         <div className="cs-hcol">
           <div className="cs-hhead cs-ha">▲ DEGRADED — AND WE SAY SO</div>

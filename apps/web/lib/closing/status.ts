@@ -30,6 +30,9 @@ export interface ClosingStatus {
    *  boxes. Live coverage — unlike the 183,051-row registry it replaces. */
   thermalRefineryRows: number | null;
   thermalPowerUnitRows: number | null;
+  /** The derived day those roster rows belong to (YYYY-MM-DD) — shown beside
+   *  them so a stalled derivation reads as stale, not as live. */
+  thermalDay: string | null;
   convergences21d: number | null;
   aisDaysSince: number | null; // 0 = fresh today; null = unknown
   /** Coverage boxes with no fix for >24h: [{label, daysSince}]. null = liveness
@@ -115,6 +118,7 @@ export async function loadClosingStatus(): Promise<ClosingStatus> {
     nightlightsNewestNight: watched.nightlightsNight,
     thermalRefineryRows: watched.thermalRefineryRows,
     thermalPowerUnitRows: watched.thermalPowerUnitRows,
+    thermalDay: watched.thermalDay,
     convergences21d,
     aisDaysSince,
     aisDeadBoxes,

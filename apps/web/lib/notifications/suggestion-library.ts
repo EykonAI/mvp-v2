@@ -773,10 +773,12 @@ export const CROSS_DATA_SUGGESTIONS: Suggestion[] = [
     title: 'Watch one named facility \u2014 edit the name before saving',
     config: {
       rule_type: 'firms_proximity',
-      // Was 'Ryazan', which is not in the refinery registry — the card
-      // resolved to zero monitored facilities, the one outcome the note
-      // above exists to prevent. Kirishi is registered and inside the
-      // Russia/Ukraine box (checked 2026-09-18; rev H PR-10).
+      // Was 'Ryazan', offered as a refinery the registry does not hold: the
+      // substring only reaches power-plant rows (Ryazanskaya GRES, Novo-
+      // Ryazan — 13 on 2026-09-18), so a user asking for the refinery got a
+      // power station. Kirishi Refinery is registered and inside the
+      // Russia/Ukraine box; the substring also reaches the Kirishi GRES
+      // power station beside it (checked 2026-09-18; rev H PR-10).
       facility_name: 'Kirishi',
       radius_km: 5,
       min_detections: 1,

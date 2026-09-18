@@ -136,9 +136,11 @@ export function UseCases({
             stamp="2026-07-23 22:14 UTC"
             points={[
               <>
-                Night-time radiance read nightly at every thermal-watched site
-                {/* The figure appears only once the named query answers —
-                    absent, never a fallback number. */}
+                Night-time radiance sampled nightly across the thermal watch roster
+                {/* Not "at every site": a night can publish partial (09-09
+                    reached 405 of 431 refineries) and the roster is unit
+                    rows, not sites. The figure appears only once the named
+                    query answers — absent, never a fallback number. */}
                 {nightlightsClearReadings != null && (
                   <>
                     {' '}— <b>{nightlightsClearReadings.toLocaleString('en-US')} clear-sky readings</b> on the
