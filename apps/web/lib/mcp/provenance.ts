@@ -63,6 +63,12 @@ export interface ToolProvenance {
   source: string;
   /** Known limits a reader MUST have to interpret the numbers. */
   caveats: string[];
+  /**
+   * Date THIS declaration was verified, when it was written after the
+   * audit. Omitted = GROUNDEDNESS_AUDITED_ON. Without it, an entry added
+   * later would ride out stamped with an audit it was never part of.
+   */
+  audited_on?: string;
 }
 
 /**
@@ -187,6 +193,9 @@ export const TOOL_PROVENANCE: Record<string, ToolProvenance> = {
   query_power_plants: {
     grounding: 'reference_snapshot',
     source: 'Global Energy Monitor — Global Integrated Power Tracker, loaded in bulk from a release file',
+    // Written and checked against production on 2026-09-18 (migration 167),
+    // not part of the 2026-08-19 audit — the envelope must not say it was.
+    audited_on: '2026-09-18',
     caveats: [
       // No date here on purpose: a date in a static declaration is a
       // constant that looks like a clock. The load date and age are read
@@ -249,12 +258,13 @@ export function envelopeFor(toolName: string): Envelope {
       note: `as_of is when this result was read. Grounding and caveats are a static declaration from the groundedness audit of ${GROUNDEDNESS_AUDITED_ON}; they do not reflect current feed liveness.`,
     };
   }
+  const audited = p.audited_on ?? GROUNDEDNESS_AUDITED_ON;
   return {
     as_of,
-    groundedness_audited_on: GROUNDEDNESS_AUDITED_ON,
+    groundedness_audited_on: audited,
     grounding: p.grounding,
     source: p.source,
     caveats: p.caveats,
-    note: `as_of is when this result was read. Grounding and caveats are a static declaration from the groundedness audit of ${GROUNDEDNESS_AUDITED_ON}; they do not reflect current feed liveness — a feed can be down while this still reads "live".`,
+    note: `as_of is when this result was read. Grounding and caveats are a static declaration from the groundedness audit of ${audited}; they do not reflect current feed liveness — a feed can be down while this still reads "live".`,
   };
 }

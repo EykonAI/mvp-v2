@@ -15,7 +15,7 @@
 --     gas_pipelines     3,534        2026-04-29   one load
 --     lng_terminals     1,198        2026-04-29   one load
 --     oil_pipelines     1,417        2026-04-30   one load
---     refineries          634        2026-05-10   two load days (04-30, 05-10)
+--     refineries          634        2026-05-10   633 rows on 04-30, ONE row on 05-10
 --     mines           304,613        2026-05-01   one load (USGS MRDS, frozen upstream at 2011)
 --
 -- WHAT. One view, reference_snapshot_freshness, one row per served registry:
@@ -49,10 +49,12 @@
 --   * A refresh that only updates existing ids in place does not advance it.
 --     A new GEM release adds units, so a real refresh will move it; a no-op
 --     re-run will not, and should not.
---   * A partial insert DOES advance it. PR-11 inserts 13 refineries by OSM id;
---     from that day refineries.loaded_at reads fresh while the other 621 rows
---     keep 2026-04-30 / 05-10. oldest_row_at is exposed beside it so that is
---     visible, not silent.
+--   * A partial insert DOES advance it — already true today: refineries reads
+--     2026-05-10 because of ONE row; the other 633 are from 2026-04-30.
+--     PR-11 inserts 13 refineries by OSM id; from that day
+--     refineries.loaded_at reads fresh while all 634 existing rows keep
+--     their 2026-04-30 / 05-10 stamps. oldest_row_at is exposed beside it
+--     so that is visible, not silent.
 -- Changing ingested_at semantics is out of scope on purpose: the notification
 -- evaluators read ingested_at as "new row since the last run" (lib/notifications/
 -- tools.ts BUCKET_TABLES, evaluator-cheap queryPowerPlants), so stamping every
