@@ -73,14 +73,14 @@ BEGIN
   r_results := r_results || jsonb_build_object('id', 'E1', 'what', 'firms_derive_facility_observations(date, numeric, numeric, jsonb) exists',
                  'ok', v_oid IS NOT NULL, 'detail', coalesce(v_oid::text, 'missing'));
   SELECT prosrc INTO v_src FROM pg_proc WHERE oid = v_oid;
-  r_results := r_results || jsonb_build_object('id', 'E2', 'what', 'its body carries the 166 predicate exactly once, in the power branch of monitored',
-                 'ok', (length(v_src) - length(replace(v_src, 'mig 166 (Reality Check PR-3)', '')))
-                         / length('mig 166 (Reality Check PR-3)') = 1
-                       AND position(E'       AND p.capacity_mw >= p_min_mw\n       -- mig 166 (Reality Check PR-3)' IN v_src) > 0,
+  r_results := r_results || jsonb_build_object('id', 'E2', 'what', 'its body is exactly mig 164''s plus the 166 predicate (md5 c4296bdc…), twin linking intact',
+                 'ok', v_md5 = 'c4296bdc42502ae41f1e364476784099'
+                       AND position('firms_link_twins' IN v_src) > 0,
                  'detail', 'body md5 ' || coalesce(v_md5, 'none')
-                           || CASE v_md5 WHEN '970b5efc72895bbaeb6356d36fa3f896' THEN ' (085 + 166)'
-                                         WHEN 'c4296bdc42502ae41f1e364476784099' THEN ' (164 + 166)'
-                                         ELSE ' (another base + 166: record it)' END);
+                           || CASE v_md5 WHEN 'c4296bdc42502ae41f1e364476784099' THEN ' (164 + 166)'
+                                         WHEN '62b04fa280ef9a63e95ffea3b4618f04' THEN ' (164 only: 166 NOT applied)'
+                                         WHEN 'd3de0425a39ec36875e76106a47f85f5' THEN ' (085: neither 164 nor 166 applied)'
+                                         ELSE ' (another body: re-sync 166)' END);
   r_results := r_results || jsonb_build_object('id', 'E3', 'what', 'no stale 3-arg overload',
                  'ok', to_regprocedure('public.firms_derive_facility_observations(date, numeric, numeric)') IS NULL, 'detail', '');
   v_ok := v_oid IS NOT NULL
@@ -293,6 +293,37 @@ SELECT 'PR-3 guards: all assertions passed (E1–E5, G1–G5); nothing was writt
 --    AND (c.ingest_ran_at AT TIME ZONE 'UTC')::date >= (cut.at AT TIME ZONE 'UTC')::date + 6
 --  ORDER BY c.night, c.facility_type
 --  LIMIT 8;
+
+-- C3b · apply day + ~12 — R-1 after the cut (no dependency on 159). The
+--      VERIFY row's cems_bm_rows_* reads a night that predates the cut; this
+--      is the post-cut check. On the newest complete Black Marble night whose
+--      ingest ran on or after cut day + 6 (the first nights sampled with the
+--      post-cut roster), expect power_rows ≈ 5,046, refinery_rows 431 and
+--      cohort_rows_on_power_plants_id = cohort_units = 582: every CEMS cohort
+--      unit still has its night-lights row, keyed facility_id = power_plants.id.
+--      No row returned = no such night yet; run it again a day later.
+-- WITH cut AS (SELECT min(at) AS at FROM public.ledger_change_log
+--               WHERE note LIKE 'sensor roster: FIRMS and night-lights stop sampling power sites%'),
+-- cohort AS (SELECT p.id
+--              FROM firms_facility_observations o
+--              JOIN power_plants p ON p.id = o.facility_id, cut
+--             WHERE o.facility_type = 'power_plant'
+--               AND o.period = (cut.at AT TIME ZONE 'UTC')::date - 1
+--               AND p.status = 'operating' AND p.fuel_type IN ('coal', 'oil/gas', 'bioenergy')
+--               AND p.country = 'United States'),
+-- n AS (SELECT max(r.night) AS night, max(r.ran_at) AS ran_at
+--         FROM blackmarble_ingest_runs r, cut
+--        WHERE (r.ran_at AT TIME ZONE 'UTC')::date >= (cut.at AT TIME ZONE 'UTC')::date + 6
+--          AND r.tiles_expected > 0 AND r.tiles_processed = r.tiles_expected
+--          AND r.tiles_missing = 0 AND r.facilities_written > 0)
+-- SELECT n.night,
+--        (SELECT count(*) FROM cohort)                                        AS cohort_units,
+--        count(*) FILTER (WHERE b.facility_type = 'power_plant')              AS power_rows,
+--        count(*) FILTER (WHERE b.facility_type = 'refinery')                 AS refinery_rows,
+--        count(*) FILTER (WHERE b.facility_type = 'power_plant'
+--                           AND b.facility_id IN (SELECT id FROM cohort))    AS cohort_rows_on_power_plants_id
+--   FROM n JOIN blackmarble_facility_radiance b ON b.period = n.night
+--  GROUP BY n.night;
 
 -- C4 · apply day + ~21: what happened to machine claims at the sites the cut
 --      removed. Expect `void` or `scored`; `scored` with window_after_cut =

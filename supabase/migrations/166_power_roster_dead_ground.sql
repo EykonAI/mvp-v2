@@ -20,22 +20,31 @@
 --   keep a power unit when its site (gem_location_id) has at least one unit
 --   with status = 'operating', of ANY capacity. Remove the site otherwise.
 -- Refineries: unchanged, all of them. The capacity floor, the geometry
--- test, the region test, the radius, the detection join, the upsert — and
--- whatever mig 164 (PR-12) put in the body — are not touched.
+-- test, the region test, the radius, the detection join, the upsert and
+-- everything mig 164 (PR-12) put in the body — twin linking, canonical
+-- records, twins_excluded — are not touched.
 --
--- HOW — an insertion into the LIVE body, not a rewrite of it
--- This function is replaced by two in-flight migrations: 164 (PR-12, FIRMS
--- twin guard: links twins first, aggregates canonical records, writes
--- twins_excluded) and this one. Apply order is 164 then 166. Rather than
--- carry a copy of 164's body (which is still a draft and may change),
--- §1 reads the live definition (pg_get_functiondef), finds the power
--- branch of `monitored` — the same three lines in mig 085 and in mig 164 —
--- and inserts the 166 predicate after it. It refuses unless that branch
--- occurs exactly once, and after the CREATE OR REPLACE it proves the new
--- body is the old body plus the insertion and nothing else (else the
--- transaction rolls back). Measured 2026-09-18: the insertion into the live
--- (085) body gives md5 970b5efc72895bbaeb6356d36fa3f896; into the PR-12
--- draft's 164 body (5bce85e) it gives c4296bdc42502ae41f1e364476784099.
+-- HOW — mig 164's body, plus one predicate
+-- Mig 164 (PR-12, FIRMS twin guard) replaces this same function and is
+-- applied FIRST. §1 below is 164's body, copied verbatim from
+-- origin/feat/rc-pr12-firms-twin-guard at 2792834 (re-checked at 24659b8,
+-- whose change is comments only; md5(prosrc)
+-- 62b04fa280ef9a63e95ffea3b4618f04, the value 164's own guard and VERIFY
+-- use), with only the 166 predicate inserted after
+-- `AND p.capacity_mw >= p_min_mw` in the power branch of `monitored`.
+-- Diff it against 164: that insertion is the whole change. The result is
+-- md5 c4296bdc42502ae41f1e364476784099.
+--
+-- §0 is the guard. It refuses to replace any body except 164's (first run)
+-- or this file's own (re-run):
+--   • mig 085's body (d3de0425…)  → 164 has not been applied. Apply 164
+--     first; never apply 166 without it (166 would silently undo the twin
+--     guard, and 164 would then refuse to run over 166).
+--   • any other body              → 164 (or something else) changed the
+--     function after 2792834. STOP. Re-sync 166: copy the live body, insert
+--     the same predicate, update both md5s. Never edit the md5 to force it.
+-- After the CREATE OR REPLACE a second check proves the installed body is
+-- exactly c4296bdc…; otherwise the whole transaction rolls back.
 --
 -- NOT CHANGED, on purpose:
 --   • firms_monitored_facilities (the view). The 086 proximity tag/prune and
@@ -65,6 +74,12 @@
 --   and those rows ran an 11.0 % FIRMS detection-day rate over 08-18..09-16,
 --   ABOVE the 9.3 % of the combustion sites every rule keeps. That is live
 --   ground, so this migration keeps it. The rows it does remove ran 2.8 %.
+--   Residual shared by this rule and (a): a GEM location can span a whole
+--   complex, so 49 kept non-operating units in the boxes sit > 5 km from
+--   every operating unit of their location (mostly announced / pre-
+--   construction desert wind and solar phases in Inner Mongolia, up to
+--   179 km away). They are sampled as before; a distance test would be a
+--   new rule, not this one.
 --   Black Marble: 84 → 79 tiles a night, 10,556 → 5,477 rows.
 --   Refineries: 431 of 431 kept (the refinery branch is untouched).
 --   R-1 CEMS cohort (watched ∩ United States ∩ operating ∩ coal / oil/gas /
@@ -93,37 +108,97 @@
 --   mid-series.
 --
 -- DEPENDS ON (apply in number order):
---   • 158–165 applied first, as for every migration in the programme.
---   • 164 (PR-12, FIRMS twin guard) replaces this same function. §1 inserts
---     into whatever body is live, so 166 applies on 164's body (or on 085's
---     if 164 has not landed). Order matters the other way: if 164 were
---     applied AFTER 166, 164's own guard stops it (its body md5 check) — do
---     not force 164 over 166; re-run 166 after 164 instead (§1 re-inserts).
+--   • 164 (PR-12, FIRMS twin guard) — HARD. It must be applied before this
+--     file; §0 raises otherwise. If 164 is revised after 2792834 in a way
+--     that changes its rollup body, §0 stops this file and 166 must be
+--     re-synced onto the new body before it is applied.
+--   • 158–163 and 165 applied first, as for every migration in the
+--     programme (apply order only; no object of theirs is read here).
+--   • PR-10's code merged and deployed first. The cut takes effect when this
+--     file is applied, not when PR-3 merges, and several live pages still
+--     print the pre-cut literal (10,556 facilities) until PR-10 renders the
+--     watched count from the newest rows.
+--   • After this file, re-running 164 stops at 164's §0 and 164's VERIFY
+--     row 14 reads false: both expected (the live body is 164 + 166).
 --   • The census acceptance (supabase/tests/pr3_guards.sql, watch items
 --     C2/C3) reads sensor_night_census, created by 159 (PR-1).
 --
--- Idempotent: a re-run finds the predicate already in place and changes
--- nothing; grants re-asserted; change-log row keyed on the PR. No temp
--- tables, no session state, no data deleted.
+-- Idempotent: a re-run finds this file's own body, replaces it with the
+-- identical body and changes nothing; grants re-asserted; change-log row
+-- keyed on the PR. No temp tables, no session state, no data deleted.
 -- Apply MANUALLY in the Supabase SQL Editor — the whole file — BEFORE merge.
 -- Nothing on Railway: the ingest route's RPC call is unchanged.
 -- ═══════════════════════════════════════════════════════════════════════
 
 BEGIN;
 
--- ─── 1 · Insert the predicate into the live body; change nothing else ──
-DO $patch$
+-- ─── 0 · Refuse to replace any body but 164's (or this file's own) ─────
+DO $guard$
 DECLARE
-  c_sig    constant text := 'public.firms_derive_facility_observations(date, numeric, numeric, jsonb)';
-  -- The power branch of `monitored`, identical in mig 085 and mig 164.
-  -- The predicate goes between c_head and c_tail.
-  c_head   constant text := $h$      FROM power_plants p
+  v_md5 text;
+BEGIN
+  SELECT md5(p.prosrc) INTO v_md5 FROM pg_proc p
+   WHERE p.oid = to_regprocedure('public.firms_derive_facility_observations(date, numeric, numeric, jsonb)');
+
+  IF v_md5 IS NULL THEN
+    RAISE EXCEPTION '166: firms_derive_facility_observations(date, numeric, numeric, jsonb) not found — nothing to change';
+  ELSIF v_md5 = 'd3de0425a39ec36875e76106a47f85f5' THEN
+    RAISE EXCEPTION '166: the live rollup body is still mig 085''s — mig 164 (PR-12, FIRMS twin guard) has not been applied. Apply 164 first, then re-run 166. Do not force.';
+  ELSIF v_md5 NOT IN ('62b04fa280ef9a63e95ffea3b4618f04',    -- mig 164 (PR-12 at 2792834)
+                      'c4296bdc42502ae41f1e364476784099') THEN -- this file (re-run)
+    RAISE EXCEPTION '166: the live rollup body (md5 %) is neither mig 164''s (62b04fa2…) nor 166''s own (c4296bdc…). 164 or another migration changed it after 2792834 — re-sync 166 onto the live body. Do not edit the md5 to force it.', v_md5;
+  END IF;
+  RAISE NOTICE '166: base body md5 % (%) — replacing', v_md5,
+    CASE v_md5 WHEN '62b04fa280ef9a63e95ffea3b4618f04' THEN 'mig 164' ELSE 'mig 166, re-run' END;
+END
+$guard$;
+
+-- ─── 1 · Rollup — mig 164's body plus the 166 predicate ───────────────
+-- Same signature, defaults, region gate, twin linking, canonical-record
+-- aggregation, coverage semantics and return value as mig 164. The only
+-- change is the block marked "mig 166" in the power branch of `monitored`.
+CREATE OR REPLACE FUNCTION public.firms_derive_facility_observations(
+  p_day       date,
+  p_radius_km numeric DEFAULT 5,
+  p_min_mw    numeric DEFAULT 500,
+  p_regions   jsonb   DEFAULT NULL
+) RETURNS int AS $$
+DECLARE
+  v_rows int;
+BEGIN
+  IF p_regions IS NULL OR jsonb_array_length(p_regions) = 0 THEN
+    -- Fail closed AND LOUD. Returning 0 here would be worse than
+    -- useless: the caller reports a successful run that wrote
+    -- nothing, which is the silent-no-op failure mode this whole
+    -- feature exists to prevent. A caller that forgets its regions
+    -- must go red, not green-with-no-data.
+    RAISE EXCEPTION 'firms_derive_facility_observations: p_regions is required (declared coverage cannot be empty)';
+  END IF;
+
+  -- 164 · Link this day's twins BEFORE reading it, in the same
+  -- transaction, so the rollup can never read an unlinked day.
+  PERFORM public.firms_link_twins(p_day, p_day);
+
+  WITH monitored AS (
+    SELECT 'refinery'::text AS facility_type,
+           r.id::text       AS facility_id,
+           r.refinery_name  AS facility_name,
+           r.country,
+           r.geom,
+           r.latitude, r.longitude
+      FROM refineries r
+     WHERE r.geom IS NOT NULL
+    UNION ALL
+    SELECT 'power_plant'::text,
+           p.id::text,
+           p.plant_name,
+           p.country,
+           p.geom,
+           p.latitude, p.longitude
+      FROM power_plants p
      WHERE p.geom IS NOT NULL
        AND p.capacity_mw >= p_min_mw
-$h$;
-  c_tail   constant text := $t$  ),
-  covered AS ($t$;
-  c_insert constant text := $i$       -- mig 166 (Reality Check PR-3): stop sampling dead ground.
+       -- mig 166 (Reality Check PR-3): stop sampling dead ground.
        -- A unit is sampled when its SITE has an operating unit of any
        -- capacity. The key stays power_plants.id (R-1: the CEMS join).
        AND (
@@ -145,61 +220,80 @@ $h$;
                   AND x.facility_id   = p.id::text
                   AND x.period        = p_day)
            )
-$i$;
-  c_marker constant text := 'mig 166 (Reality Check PR-3)';
-  c_note   constant text := 'Mig 166 (Reality Check PR-3): this rollup is the sensor roster of FIRMS and Black Marble (the BM worker samples what FIRMS observed in the last 5 days). Its power branch samples a >= 500 MW unit only when the unit''s site (gem_location_id) has an operating unit of any capacity — dead ground is no longer sampled — and keeps re-deriving a removed site only on a day it already has a row for. Refineries unchanged. Heavy: called per day by /api/cron/ingest-firms.';
-  v_oid    oid;
-  v_old    text;
-  v_def    text;
-  v_new    text;
-  v_n      int;
-  v_cmt    text;
+  ),
+  covered AS (
+    SELECT * FROM monitored m
+     WHERE firms_point_in_regions(m.latitude, m.longitude, p_regions)
+  ),
+  day_detections AS (
+    SELECT f.id, f.frp, f.geom,
+           (f.twin_of IS NOT NULL) AS superseded
+      FROM firms_thermal_anomalies f
+     WHERE f.acq_date = p_day
+       AND f.geom IS NOT NULL
+  ),
+  hits AS (
+    -- 164 · A twin pair counts ONCE, at its later-filed record: the
+    -- superseded half is counted in twins_excluded and nowhere else.
+    SELECT c.facility_type,
+           c.facility_id,
+           COUNT(*) FILTER (WHERE NOT d.superseded)                          AS detection_count,
+           MAX(d.frp) FILTER (WHERE NOT d.superseded)                        AS max_frp,
+           MIN(ST_Distance(c.geom::geography, d.geom::geography))
+             FILTER (WHERE NOT d.superseded) / 1000.0                        AS nearest_km,
+           COUNT(*) FILTER (WHERE d.superseded)                              AS twins_excluded
+      FROM day_detections d
+      JOIN covered c
+        ON ST_DWithin(c.geom::geography, d.geom::geography, p_radius_km * 1000)
+     GROUP BY 1, 2
+  )
+  INSERT INTO firms_facility_observations (
+    facility_type, facility_id, facility_name, country,
+    period, detection_count, max_frp, nearest_km, radius_km, computed_at,
+    twins_excluded
+  )
+  SELECT c.facility_type, c.facility_id, c.facility_name, c.country,
+         p_day,
+         COALESCE(h.detection_count, 0),
+         h.max_frp, h.nearest_km, p_radius_km, now(),
+         COALESCE(h.twins_excluded, 0)
+    FROM covered c
+    LEFT JOIN hits h
+      ON h.facility_type = c.facility_type
+     AND h.facility_id   = c.facility_id
+  ON CONFLICT (facility_type, facility_id, period) DO UPDATE
+    SET detection_count = EXCLUDED.detection_count,
+        max_frp         = EXCLUDED.max_frp,
+        nearest_km      = EXCLUDED.nearest_km,
+        radius_km       = EXCLUDED.radius_km,
+        twins_excluded  = EXCLUDED.twins_excluded,
+        computed_at     = now();
+
+  GET DIAGNOSTICS v_rows = ROW_COUNT;
+  RETURN v_rows;
+END;
+$$ LANGUAGE plpgsql;
+
+-- The installed body must be exactly the one above (a paste that changed
+-- a byte, or a stray edit, rolls the whole file back).
+DO $check$
+DECLARE
+  v_md5 text;
 BEGIN
-  v_oid := to_regprocedure(c_sig);
-  IF v_oid IS NULL THEN
-    RAISE EXCEPTION '166: % not found — nothing to change', c_sig;
+  SELECT md5(p.prosrc) INTO v_md5 FROM pg_proc p
+   WHERE p.oid = to_regprocedure('public.firms_derive_facility_observations(date, numeric, numeric, jsonb)');
+  IF v_md5 IS DISTINCT FROM 'c4296bdc42502ae41f1e364476784099' THEN
+    RAISE EXCEPTION '166: installed body md5 % is not the 164 + 166 body (c4296bdc…) — rolled back', v_md5;
   END IF;
-  SELECT p.prosrc INTO v_old FROM pg_proc p WHERE p.oid = v_oid;
-
-  IF position(c_marker IN v_old) > 0 THEN
-    -- Re-run. The exact predicate must still sit in the power branch.
-    IF position(c_head || c_insert || c_tail IN v_old) = 0 THEN
-      RAISE EXCEPTION '166: the live body carries the 166 marker but not the exact 166 predicate in the power branch (body md5 %). It was edited after 166 — stop; do not force.', md5(v_old);
-    END IF;
-    RAISE NOTICE '166: predicate already in place (body md5 %) — function unchanged', md5(v_old);
-  ELSE
-    v_n := (length(v_old) - length(replace(v_old, c_head || c_tail, ''))) / length(c_head || c_tail);
-    IF v_n <> 1 THEN
-      RAISE EXCEPTION '166: expected the power branch of `monitored` exactly once in the live body, found % (body md5 %). Another migration changed that branch — rebase 166 onto the live body; do not force.', v_n, md5(v_old);
-    END IF;
-
-    v_def := pg_get_functiondef(v_oid);
-    v_n := (length(v_def) - length(replace(v_def, c_head || c_tail, ''))) / length(c_head || c_tail);
-    IF v_n <> 1 THEN
-      RAISE EXCEPTION '166: the power branch occurs % times in the full definition — refusing to patch', v_n;
-    END IF;
-
-    EXECUTE replace(v_def, c_head || c_tail, c_head || c_insert || c_tail);
-
-    SELECT p.prosrc INTO v_new FROM pg_proc p WHERE p.oid = to_regprocedure(c_sig);
-    IF v_new IS DISTINCT FROM replace(v_old, c_head || c_tail, c_head || c_insert || c_tail) THEN
-      RAISE EXCEPTION '166: the new body is not the old body plus the 166 predicate — rolled back';
-    END IF;
-    RAISE NOTICE '166: predicate inserted — base body md5 % (%), new body md5 %',
-      md5(v_old),
-      CASE md5(v_old) WHEN 'd3de0425a39ec36875e76106a47f85f5' THEN 'mig 085'
-                      WHEN '62b04fa280ef9a63e95ffea3b4618f04' THEN 'mig 164, PR-12 draft 5bce85e'
-                      ELSE 'another revision — record it in the PR' END,
-      md5(v_new);
+  IF to_regprocedure('public.firms_derive_facility_observations(date, numeric, numeric)') IS NOT NULL THEN
+    RAISE EXCEPTION '166: a stale 3-argument overload exists (mig 085 dropped it) — rolled back';
   END IF;
-
-  -- Comment: append the 166 note, keep whatever is already there.
-  v_cmt := obj_description(v_oid, 'pg_proc');
-  IF v_cmt IS NULL OR position('Mig 166' IN v_cmt) = 0 THEN
-    EXECUTE format('COMMENT ON FUNCTION %s IS %L', c_sig, concat_ws(' ', v_cmt, c_note));
-  END IF;
+  RAISE NOTICE '166: installed body md5 % (164 + 166)', v_md5;
 END
-$patch$;
+$check$;
+
+COMMENT ON FUNCTION public.firms_derive_facility_observations(date, numeric, numeric, jsonb) IS
+  'Per-facility daily FIRMS rollup (mig 085; twin guard mig 164; roster mig 166). This rollup is the sensor roster of FIRMS and Black Marble (the BM worker samples what FIRMS observed in the last 5 days). Mig 166 (Reality Check PR-3): the power branch samples a >= 500 MW unit only when the unit''s site (gem_location_id) has an operating unit of any capacity — dead ground is no longer sampled — and keeps re-deriving a removed site only on a day it already has a row for. Refineries unchanged. Heavy: called per day by /api/cron/ingest-firms.';
 
 -- ─── 2 · Grants, re-asserted by role name (mig 143 / 139 lesson) ───────
 REVOKE EXECUTE ON FUNCTION public.firms_derive_facility_observations(date, numeric, numeric, jsonb) FROM PUBLIC, anon, authenticated;
@@ -218,22 +312,20 @@ COMMIT;
 -- ═══════════════════════════════════════════════════════════════════════
 -- VERIFY — read-only, ONE row. Run with the file (it is the last statement,
 -- so the SQL Editor shows it) and paste the row back. Expect:
---   predicate_once true · predicate_in_power_branch true ·
---   twin_linking true (164 applied first, as planned; false only if 166 went
---   on 085's body) · body '164 + 166' (or '085 + 166') · anon_exec false ·
+--   body '164 + 166' · twin_linking true · anon_exec false ·
 --   authenticated_exec false · service_role_exec true ·
 --   stale_3arg_overload false · change_log_rows 1 · roster_refinery 431 ·
 --   roster_power 5046 · roster_total 5477 · rows_removed_pct 48.1 ·
 --   refineries_dropped 0 · cems_rows 582 · cems_plants 401 · cems_min_mw 500 ·
 --   cems_in_roster 582 · cems_bm_rows_on_power_plants_id 582
--- body reads 'other: <md5>' if PR-12 revised its function body after
--- 5bce85e — fine as long as the two predicate_* columns are true; paste it.
 -- The roster columns apply the SAME predicate as §1 (a mirror, stated as
 -- such); the behavioural test that calls the function itself is
 -- supabase/tests/pr3_guards.sql (E1–E5, G1–G5). The region boxes mirror
 -- FIRMS_REGIONS (apps/web/lib/firms/client.ts, origin/main 0b0d4b1, 8
 -- boxes); if PR-11 has widened ru-ua east first, roster_power and
--- roster_total move by that box's operating sites.
+-- roster_total move by that box's operating sites. cems_bm_rows_* reads the
+-- newest complete Black Marble night, which at apply time predates the cut;
+-- the post-cut R-1 check is watch item C3b in the guard script.
 -- ═══════════════════════════════════════════════════════════════════════
 WITH fn AS (
   SELECT p.oid, p.prosrc
@@ -282,16 +374,11 @@ bm_night AS (        -- newest complete Black Marble night
      AND tiles_missing = 0 AND facilities_written > 0
 )
 SELECT
-  (SELECT (length(prosrc) - length(replace(prosrc, 'mig 166 (Reality Check PR-3)', '')))
-          / length('mig 166 (Reality Check PR-3)') = 1 FROM fn)                   AS predicate_once,
-  (SELECT position(E'       AND p.capacity_mw >= p_min_mw\n       -- mig 166 (Reality Check PR-3)' IN prosrc) > 0
-     FROM fn)                                                                    AS predicate_in_power_branch,
-  (SELECT prosrc LIKE '%firms_link_twins%' FROM fn)                              AS twin_linking,
-  (SELECT CASE md5(prosrc) WHEN '970b5efc72895bbaeb6356d36fa3f896' THEN '085 + 166'
-                           WHEN 'c4296bdc42502ae41f1e364476784099' THEN '164 + 166'
-                           WHEN 'd3de0425a39ec36875e76106a47f85f5' THEN '085, 166 NOT applied'
+  (SELECT CASE md5(prosrc) WHEN 'c4296bdc42502ae41f1e364476784099' THEN '164 + 166'
                            WHEN '62b04fa280ef9a63e95ffea3b4618f04' THEN '164, 166 NOT applied'
+                           WHEN 'd3de0425a39ec36875e76106a47f85f5' THEN '085, 164 and 166 NOT applied'
                            ELSE 'other: ' || md5(prosrc) END FROM fn)            AS body,
+  (SELECT prosrc LIKE '%firms_link_twins%' FROM fn)                              AS twin_linking,
   (SELECT has_function_privilege('anon',          oid, 'EXECUTE') FROM fn)       AS anon_exec,
   (SELECT has_function_privilege('authenticated', oid, 'EXECUTE') FROM fn)       AS authenticated_exec,
   (SELECT has_function_privilege('service_role',  oid, 'EXECUTE') FROM fn)       AS service_role_exec,
