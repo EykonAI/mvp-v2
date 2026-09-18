@@ -5,6 +5,8 @@ import { ScatterplotLayer, IconLayer, PathLayer, GeoJsonLayer, TextLayer } from 
 import Map, { type MapRef } from 'react-map-gl/maplibre';
 import { MAP_CONFIG } from '@/lib/constants';
 import type { BBox } from '@/lib/types';
+import SnapshotAgeChip from '@/components/intel/shared/SnapshotAgeChip';
+import { snapshotChip, type ReferenceSnapshot } from '@/lib/reference/freshness';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 interface MapViewProps {
@@ -14,6 +16,9 @@ interface MapViewProps {
   airports: any[];
   ports: any[];
   powerPlants: any[];
+  /** Load date + freshness of the power-plant registry (migration 167). A
+   *  stale snapshot puts an age chip on every power-plant tooltip. */
+  powerPlantSnapshot?: ReferenceSnapshot | null;
   pipelines: any[];
   refineries: any[];
   mines: any[];
@@ -190,6 +195,7 @@ export default function MapView({
   airports,
   ports,
   powerPlants,
+  powerPlantSnapshot,
   pipelines,
   refineries,
   mines,
@@ -745,6 +751,19 @@ export default function MapView({
               </div>
             )}
             {object.owner && <div className="text-xs text-gray-400 max-w-[260px] truncate">{object.owner}</div>}
+            {/* The registry is a snapshot. When it is past its refresh
+                interval the tooltip says so, with the load date — the chip's
+                own hover title is unreachable inside a cursor tooltip. */}
+            {snapshotChip(powerPlantSnapshot) && (
+              <div className="mt-1.5 flex items-center gap-1.5">
+                <SnapshotAgeChip snapshot={powerPlantSnapshot} compact />
+                <span className="text-[10px] text-gray-400">
+                  {powerPlantSnapshot?.loaded_at
+                    ? `GEM registry loaded ${powerPlantSnapshot.loaded_at.slice(0, 10)}`
+                    : 'GEM registry load date unknown'}
+                </span>
+              </div>
+            )}
           </div>
         );
         break;
@@ -803,7 +822,7 @@ export default function MapView({
         {content}
       </div>
     );
-  }, [hoverInfo]);
+  }, [hoverInfo, powerPlantSnapshot]);
 
   return (
     <div className="w-full h-full relative">

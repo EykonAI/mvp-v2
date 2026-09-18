@@ -1,6 +1,7 @@
 'use client';
 import { CATEGORIES, type DataKey } from '@/lib/layer-config';
 import type { LayerState } from '@/lib/types';
+import SnapshotAgeChip from '@/components/intel/shared/SnapshotAgeChip';
 
 interface LayerControlsProps {
   dataState: Record<DataKey, LayerState>;
@@ -153,6 +154,11 @@ export default function LayerControls({
                     {planned ? '·' : visible ? '☑' : '☐'}
                   </span>
                   <span style={{ flex: 1 }}>{sub.label}</span>
+                  {/* Reference registries only: a stale snapshot shows its
+                      age here (migration 167); a fresh one shows nothing. */}
+                  {!planned && sub.dataKey && (
+                    <SnapshotAgeChip snapshot={dataState[sub.dataKey]?.snapshot} compact />
+                  )}
                   {planned ? (
                     <span style={{ color: 'var(--ink-ghost)', fontSize: 10 }}>Soon</span>
                   ) : (

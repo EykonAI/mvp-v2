@@ -155,7 +155,7 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
   {
     name: 'query_power_plants',
     description:
-      'Query unit-level power plants from the Global Energy Monitor — Global Integrated Power Tracker (GIPT). ~127k operating units worldwide spanning coal, oil/gas, nuclear, geothermal, bioenergy, utility-scale solar, wind, and hydropower. Each row carries plant name, fuel type, capacity (MW), status, start year, country, owner. Use for questions like "nuclear plants in France above 1 GW", "coal capacity in India", "operating bioenergy plants in Brazil". Pass include_minor=true to bypass the operating-only filter (e.g. to include proposed/retired). Pass fuel to slice to a single fuel_type.',
+      'Query unit-level power plants from the Global Energy Monitor — Global Integrated Power Tracker (GIPT). ~127k operating units worldwide spanning coal, oil/gas, nuclear, geothermal, bioenergy, utility-scale solar, wind, and hydropower. Each row carries plant name, fuel type, capacity (MW), status, start year, country, owner. Use for questions like "nuclear plants in France above 1 GW", "coal capacity in India", "operating bioenergy plants in Brazil". Pass include_minor=true to bypass the operating-only filter (e.g. to include proposed/retired). Pass fuel to slice to a single fuel_type. The registry is a bulk-loaded snapshot: every result carries `snapshot` (load date, age in days, refresh interval); when snapshot.is_stale is true, a snapshot_note says so — state the load date and never describe a unit\'s status as current.',
     input_schema: {
       type: 'object' as const,
       properties: {

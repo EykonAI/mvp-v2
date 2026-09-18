@@ -52,6 +52,7 @@ export type Grounding =
   | 'live'          // real ingest, and the audit found it dense
   | 'live_thin'     // real ingest, known-sparse coverage
   | 'live_lagging'  // real ingest, structural publication delay
+  | 'reference_snapshot' // a registry loaded in bulk from a dated release; its age rides in the payload
   | 'model'         // deterministic simulation over stored inputs — not an observation
   | 'fixture'       // seeded/illustrative data — never quote as measurement
   | 'not_characterised';
@@ -182,6 +183,19 @@ export const TOOL_PROVENANCE: Record<string, ToolProvenance> = {
     grounding: 'live',
     source: 'hourly grounded reports derived from anomaly flags',
     caveats: ['LLM-written prose grounded on flagged anomalies. Treat as analysis, not measurement.'],
+  },
+  query_power_plants: {
+    grounding: 'reference_snapshot',
+    source: 'Global Energy Monitor — Global Integrated Power Tracker, loaded in bulk from a release file',
+    caveats: [
+      // No date here on purpose: a date in a static declaration is a
+      // constant that looks like a clock. The load date and age are read
+      // live from reference_snapshot_freshness (migration 167) and ride in
+      // the payload's `snapshot` block, with a snapshot_note when stale.
+      'A REGISTRY SNAPSHOT, not a live feed. Read the payload\'s snapshot block (load date, age, refresh interval) before quoting any unit as current; a snapshot_note is present when it is past its refresh interval.',
+      'Status and capacity are the registry\'s record at that release. "operating" is a registry attribute, not an observation that the unit is generating.',
+      COUNT_SITES,
+    ],
   },
   query_mines: {
     grounding: 'fixture',

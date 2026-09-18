@@ -139,6 +139,9 @@ export default function Home() {
         const json = await res.json();
         const data = json.data || json || [];
         setterFor(name)(data);
+        // Reference registries (power plants) ship their load date and
+        // freshness with every response (migration 167). Live feeds do not.
+        const snapshot = json && !Array.isArray(json) && json.snapshot ? json.snapshot : undefined;
         setDataState(prev => ({
           ...prev,
           [name]: {
@@ -146,6 +149,7 @@ export default function Home() {
             error: null,
             count: data.length,
             lastFetch: new Date().toISOString(),
+            snapshot,
           },
         }));
       } catch (err: any) {
@@ -298,6 +302,7 @@ export default function Home() {
             airports={visibleAirports}
             ports={visiblePorts}
             powerPlants={visiblePowerPlants}
+            powerPlantSnapshot={dataState['power-plants'].snapshot}
             pipelines={visiblePipelines}
             refineries={visibleRefineries}
             mines={visibleMines}

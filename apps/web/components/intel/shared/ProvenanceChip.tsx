@@ -44,6 +44,7 @@ export default function ProvenanceChip({
   ageHours,
   label,
   title,
+  sr,
 }: {
   state: ProvenanceState;
   /** Age of the newest row, in hours. Omitted for fixtures. */
@@ -51,6 +52,8 @@ export default function ProvenanceChip({
   /** Override the visible label. The screen-reader text still names the state. */
   label?: string;
   title?: string;
+  /** Override the screen-reader sentence (it must still name the state in words). */
+  sr?: string;
 }) {
   const s = STATES[state];
   const age = formatAge(ageHours);
@@ -94,8 +97,7 @@ export default function ProvenanceChip({
         {age ? ` ${age}` : ''}
       </span>
       <span className="sr-only">
-        {s.sr}
-        {age ? `, newest ${age} old` : ''}
+        {sr ?? `${s.sr}${age ? `, newest ${age} old` : ''}`}
       </span>
     </span>
   );

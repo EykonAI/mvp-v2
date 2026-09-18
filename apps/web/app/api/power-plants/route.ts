@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
+import { readReferenceSnapshot } from '@/lib/reference/read-freshness';
+import { publicSnapshot } from '@/lib/reference/freshness';
 
 // GIPT-backed power plants feed.
 //
@@ -7,6 +9,12 @@ import { createServerSupabase } from '@/lib/supabase-server';
 // globe doesn't drown in 100k+ utility-scale solar units. Bypass either with
 // ?include_minor=true (returns every status / every size) or ?fuel=… /
 // ?status=… for explicit slicing (used by the AI analyst tool layer).
+//
+// Every response carries `snapshot`: the registry's load date, age and
+// refresh interval from reference_snapshot_freshness (migration 167). The
+// table was loaded once, on 2026-04-28, and nothing else on the response
+// says so — the map panel, the map tooltip and query_power_plants all read
+// this block to decide whether to show the stale-snapshot chip.
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -57,7 +65,10 @@ export async function GET(req: NextRequest) {
 
     if (fuel) query = query.eq('fuel_type', fuel);
 
-    const { data, error } = await query;
+    const [{ data, error }, snapshot] = await Promise.all([
+      query,
+      readReferenceSnapshot(supabase, 'power_plants'),
+    ]);
     if (error) {
       return NextResponse.json({ error: `Supabase error: ${error.message}` }, { status: 502 });
     }
@@ -67,6 +78,7 @@ export async function GET(req: NextRequest) {
       timestamp: new Date().toISOString(),
       provider: 'gem-gipt',
       attribution: 'Global Energy Monitor — Global Integrated Power Tracker (CC BY 4.0)',
+      snapshot: publicSnapshot(snapshot),
       data: data ?? [],
     });
   } catch (err: any) {

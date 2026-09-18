@@ -6,10 +6,16 @@ import { isFounder } from '@/lib/admin/access';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { probeShardLiveness, type RegionLiveness } from '@/lib/firms/liveness';
 import { probeFeedHealth, SEVERITY_RANK, type FeedHealth } from '@/lib/monitoring/feed-health';
+import { readAllReferenceSnapshots } from '@/lib/reference/read-freshness';
+import type { ReferenceSnapshot } from '@/lib/reference/freshness';
+import SnapshotAgeChip from '@/components/intel/shared/SnapshotAgeChip';
 
 // /admin/ingest-health — founder-only. The standing view of ingest health:
 //   • Live data feeds (AIS / GDELT / ADS-B) — freshness of max(ingested_at)
 //   • Thermal shards (FIRMS) — per-run coverage from firms_ingest_runs
+//   • Reference snapshots — the static registries (power plants, pipelines,
+//     refineries, airports, ports, mines) against their declared refresh
+//     interval, from reference_snapshot_freshness (migration 167)
 //
 // Companion to the Discord alert fired hourly for FIRMS shards. The two feed
 // mechanisms differ on purpose (see lib/monitoring/feed-health.ts): shards
@@ -67,6 +73,54 @@ const TH: React.CSSProperties = {
   fontWeight: 400,
 };
 const TD: React.CSSProperties = { padding: '9px 10px', fontSize: 12.5 };
+const TD_MONO: React.CSSProperties = { ...TD, fontFamily: 'var(--f-mono)' };
+const TD_DIM: React.CSSProperties = { ...TD, color: 'var(--ink-dim)' };
+const TD_DIM_MONO: React.CSSProperties = { ...TD_DIM, fontFamily: 'var(--f-mono)' };
+const TR: React.CSSProperties = { borderTop: '1px solid var(--rule-soft)' };
+const H2: React.CSSProperties = {
+  fontFamily: 'var(--f-mono)',
+  fontSize: 11,
+  letterSpacing: '0.16em',
+  textTransform: 'uppercase',
+  color: 'var(--teal)',
+  margin: '30px 0 6px',
+};
+
+const SNAPSHOT_STATE_TEXT: Record<string, string> = {
+  within_interval: 'within interval',
+  upstream_frozen: 'upstream frozen',
+  empty: 'empty',
+};
+
+// A stale (or unreadable) snapshot gets the same chip the map shows; any other
+// state is named in words — never a blank cell.
+function SnapshotRow({ s }: { s: ReferenceSnapshot }) {
+  const text = SNAPSHOT_STATE_TEXT[s.freshness_state];
+  return (
+    <tr style={TR}>
+      <td style={TD_MONO}>{s.table_name}</td>
+      {text ? (
+        <td style={TD_DIM_MONO}>{text}</td>
+      ) : (
+        <td style={TD}>
+          <SnapshotAgeChip snapshot={s} />
+        </td>
+      )}
+      <td style={TD_DIM_MONO}>
+        {s.loaded_at ? s.loaded_at.slice(0, 10) : '—'}
+        {s.oldest_row_at && s.loaded_at && s.oldest_row_at.slice(0, 10) !== s.loaded_at.slice(0, 10)
+          ? ` (oldest ${s.oldest_row_at.slice(0, 10)})`
+          : ''}
+      </td>
+      <td style={TD_DIM_MONO}>{s.age_days !== null ? `${s.age_days}d` : '—'}</td>
+      <td style={TD_DIM_MONO} title={s.refresh_reason}>
+        {s.expected_refresh_days !== null ? `${s.expected_refresh_days}d` : 'none'}
+      </td>
+      <td style={TD_DIM_MONO}>{s.row_count !== null ? s.row_count.toLocaleString() : '—'}</td>
+      <td style={TD_DIM}>{s.reload_via || '—'}</td>
+    </tr>
+  );
+}
 
 function FeedRow({ f }: { f: FeedHealth }) {
   return (
@@ -109,12 +163,23 @@ export default async function IngestHealthPage() {
   if (!isFounder(user)) redirect('/app');
 
   const supabase = createServerSupabase();
-  const [{ feeds, errors: feedErrors }, { regions, errors: shardErrors }] = await Promise.all([
+  const [
+    { feeds, errors: feedErrors },
+    { regions, errors: shardErrors },
+    { rows: snapshots, error: snapshotError },
+  ] = await Promise.all([
     probeFeedHealth(supabase),
     probeShardLiveness(supabase),
+    readAllReferenceSnapshots(supabase),
   ]);
 
-  const errors = [...feedErrors, ...shardErrors];
+  // Reference snapshots stay out of the worst-severity banner on purpose: they
+  // go stale over months, not minutes, and would pin the banner at WARN.
+  const errors = [...feedErrors, ...shardErrors, ...(snapshotError ? [snapshotError] : [])];
+  const staleSnapshots = snapshots.filter((r) => r.is_stale).length;
+  const sortedSnapshots = [...snapshots].sort(
+    (a, b) => Number(b.is_stale) - Number(a.is_stale) || (b.age_days ?? -1) - (a.age_days ?? -1),
+  );
   const allSeverities = [...feeds.map((f) => f.severity), ...regions.map((r) => r.severity)];
   const worst = allSeverities.includes('critical')
     ? 'critical'
@@ -248,6 +313,33 @@ export default async function IngestHealthPage() {
         <tbody>
           {sortedShards.map((r) => (
             <ShardRow key={r.region} r={r} />
+          ))}
+        </tbody>
+      </table>
+
+      {/* ── Reference snapshots (migration 167) ─────────────────── */}
+      <h2 style={H2}>Reference snapshots</h2>
+      <p style={TD_DIM}>
+        Static registries, loaded in bulk. Stale means older than the refresh interval declared for
+        each in reference_snapshot_freshness (hover an interval for its reason) —{' '}
+        {snapshotError
+          ? 'the view could not be read.'
+          : `${staleSnapshots} of ${snapshots.length} are past it.`}{' '}
+        Loaded = newest row inserted: a reload that only updates existing rows does not move it.
+      </p>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr>
+            {['Registry', 'State', 'Loaded', 'Age', 'Interval', 'Rows', 'Reload via'].map((h) => (
+              <th key={h} style={TH}>
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sortedSnapshots.map((r) => (
+            <SnapshotRow key={r.table_name} s={r} />
           ))}
         </tbody>
       </table>
