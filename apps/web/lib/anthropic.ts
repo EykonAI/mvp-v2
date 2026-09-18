@@ -1,5 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { Tier } from './pricing';
+import { FIRMS_REGIONS } from './firms/client';
+
+// The FIRMS boxes, named from the ingest config so the tool description, the
+// system prompt and the executor's coverage block cannot disagree. The copy
+// used to say ingest was "REGIONAL (Russia/Ukraine, Arabian Gulf, Europe)" —
+// three boxes — while all eight shards ran (rev H, PR-10).
+const FIRMS_BOX_LIST = FIRMS_REGIONS.map((r) => r.label).join(', ');
 
 let anthropicClient: Anthropic | null = null;
 
@@ -238,7 +245,7 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
       'Query NASA FIRMS satellite thermal anomalies (VIIRS 375m + MODIS 1km, near-real-time, ~3h latency). ' +
       'Two modes. mode="facilities" (default) reads the pre-aggregated per-facility-per-day rollup — use it for ' +
       'facility-centric questions ("thermal anomalies at Russian refineries this week", "which Gulf refineries lit up", ' +
-      '"anything at the Ryazan refinery"). Filter by country, facility_type (refinery | power_plant), facility_name, days. ' +
+      '"anything at the Kirishi refinery"). Filter by country, facility_type (refinery | power_plant), facility_name, days. ' +
       'Returns per facility: total detections, max FRP (fire radiative power, MW), nearest detection distance in km, and the ' +
       'monitoring radius used. mode="raw" reads individual detections inside a lat/lon box — use it for geographic questions ' +
       'not anchored to a monitored facility. ' +
@@ -247,8 +254,8 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
       'single day. Attributing a detection to a strike, an attack, an explosion or a production halt is INFERENCE and must be ' +
       'labelled as inference, corroborated with other sources (conflict events, agent reports, news), and never stated as fact. ' +
       'Equally, ABSENCE OF DETECTION DOES NOT MEAN ABSENCE OF FIRE — cloud cover, smoke, and satellite overpass timing routinely ' +
-      'hide real fires. Every response carries a `coverage` block: ingest is REGIONAL (Russia/Ukraine, Arabian Gulf, Europe), not ' +
-      'global, so facilities outside those boxes report zero detections because they are NOT WATCHED, not because nothing burned. ' +
+      `hide real fires. Every response carries a \`coverage\` block: ingest is REGIONAL — ${FIRMS_REGIONS.length} boxes (${FIRMS_BOX_LIST}), not ` +
+      'global — so facilities outside those boxes report zero detections because they are NOT WATCHED, not because nothing burned. ' +
       'Always read `coverage` before characterising a zero result, and tell the user which of the two it is.',
     input_schema: {
       type: 'object' as const,
@@ -256,7 +263,7 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
         mode: { type: 'string', description: '"facilities" (default, pre-aggregated per monitored facility) | "raw" (individual detections in a bounding box).' },
         facility_type: { type: 'string', description: 'facilities mode: refinery | power_plant. Filter optional.' },
         country: { type: 'string', description: 'facilities mode: country-name substring (e.g. "Russia", "Saudi", "Ukraine"). Names are full English, NOT ISO codes. Filter optional.' },
-        facility_name: { type: 'string', description: 'facilities mode: facility-name substring (e.g. "Ryazan", "Ras Tanura"). Filter optional.' },
+        facility_name: { type: 'string', description: 'facilities mode: facility-name substring (e.g. "Kirishi", "Ras Tanura"). Filter optional.' },
         days: { type: 'number', description: 'Look-back window in days ending today (default 7, max 30). Note the archive is shallow — check coverage.days_with_data.' },
         min_detections: { type: 'number', description: 'facilities mode: minimum total detections over the window (default 1, i.e. only facilities that registered something). Pass 0 to include quiet facilities and see what was watched-but-silent.' },
         lat_min: { type: 'number', description: 'raw mode: required.' },
@@ -288,9 +295,10 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
       'PHYSICAL SITE, not per registry row (one plant = many generating-unit rows at identical coordinates). ' +
       'LATENCY: NASA publishes VNP46A2 in stages, typically ~1-2 WEEKS behind — every response carries a coverage block ' +
       'with newest_night and lag_days; answers describe that week, NOT last night, and you must say so. Thermal (FIRMS) ' +
-      'and night-lights are INDEPENDENT sensors — infrared combustion power vs visible emitted light — so agreement ' +
-      'between them (e.g. a FIRMS went_dark and a went_dark_lights at the same facility) is materially stronger evidence ' +
-      'than either alone. Corroborate across both before characterising an outage.',
+      'and night-lights measure DIFFERENT PHYSICS — infrared heat vs visible emitted light — but they are NOT independent ' +
+      'sensors: both are NASA VIIRS-family, and the same clouds and overpass timing blind both. Agreement between them ' +
+      '(e.g. a FIRMS went_dark and a went_dark_lights at the same facility) is stronger evidence than either alone, never ' +
+      'independent confirmation. Check both before characterising an outage.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -493,7 +501,7 @@ export const CONVERSATIONAL_SYSTEM_PROMPT = `You are the eYKON.ai geopolitical-i
   • query_airports      — OurAirports (~7,500 significant; ~85k with include_minor)
   • query_ports         — NGA World Port Index (~3,800 commercial seaports)
   • query_thermal_anomalies — NASA FIRMS satellite thermal anomalies (VIIRS 375m + MODIS 1km, NRT ~3h latency), either rolled up per monitored refinery / power plant or raw within a bounding box
-  • query_nightlights   — NASA Black Marble night-lights (VIIRS VNP46A2 ~500m, ~1-2 weeks behind): site-level significance events (went_dark_lights / surge / first_light) judged against each facility's own clear-night baseline, or per-facility nightly radiance. Thermal and night-lights are INDEPENDENT sensors (infrared combustion vs visible light) — agreement between them is materially stronger evidence than either alone; corroborate across both before characterising an outage
+  • query_nightlights   — NASA Black Marble night-lights (VIIRS VNP46A2 ~500m, ~1-2 weeks behind): site-level significance events (went_dark_lights / surge / first_light) judged against each facility's own clear-night baseline, or per-facility nightly radiance. Thermal and night-lights measure different physics (infrared heat vs visible light) but are NOT independent sensors — both are NASA VIIRS-family and the same clouds blind both; agreement is stronger evidence than either alone, never independent confirmation — check both before characterising an outage
 AND to the Intelligence Center:
   • posture scores per pinned theatre
   • convergences (anomaly-of-anomalies)
@@ -512,7 +520,7 @@ Behaviour:
 4. If data is missing or insufficient, say so. Do not speculate.
 5. Persona overlay: if the user or the context names a persona (analyst, journalist, day-trader, commodities, NGO, citizen, corporate), frame your response accordingly.
 6. Keep responses short and dense. Analysts read in bullets, not paragraphs.
-7. THERMAL ANOMALIES — non-negotiable. A NASA FIRMS detection is a satellite hot pixel. It is NOT a fire, NOT a strike, NOT an outage. Say "thermal anomaly detected" or "hot pixel", never "refinery hit" or "refinery on fire", unless a separate corroborating source says so. Most detections at oil, gas and refining sites are routine industrial gas flares that burn continuously — a detection at a working refinery is the normal state, not news; what is interesting is a CHANGE against that baseline, and with a shallow archive you often cannot establish one. Attribution to a strike or a shutdown is your inference: label it as inference, give the corroboration you actually have, and state the confidence. Absence is even weaker evidence than presence — cloud cover, smoke and overpass timing hide real fires, so never report "no detections" as "nothing happened". FIRMS ingest is REGIONAL (Russia/Ukraine, Arabian Gulf, Europe), so a facility elsewhere returns zero because it is unwatched; always check the coverage block the tool returns and tell the user whether a zero means "watched and quiet" or "not watched at all".
+7. THERMAL ANOMALIES — non-negotiable. A NASA FIRMS detection is a satellite hot pixel. It is NOT a fire, NOT a strike, NOT an outage. Say "thermal anomaly detected" or "hot pixel", never "refinery hit" or "refinery on fire", unless a separate corroborating source says so. Most detections at oil, gas and refining sites are routine industrial gas flares that burn continuously — a detection at a working refinery is the normal state, not news; what is interesting is a CHANGE against that baseline, and with a shallow archive you often cannot establish one. Attribution to a strike or a shutdown is your inference: label it as inference, give the corroboration you actually have, and state the confidence. Absence is even weaker evidence than presence — cloud cover, smoke and overpass timing hide real fires, so never report "no detections" as "nothing happened". FIRMS ingest is REGIONAL — ${FIRMS_REGIONS.length} boxes (${FIRMS_BOX_LIST}) — so a facility elsewhere returns zero because it is unwatched; always check the coverage block the tool returns and tell the user whether a zero means "watched and quiet" or "not watched at all".
 
 Region → bounding box translator (use when the user names a region):
   Red Sea         lat 12-30   lon 32-44

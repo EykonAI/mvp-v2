@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
+import { CALIBRATION_MIN_SAMPLE } from '@/lib/calibration/cohortHeadline';
 
 export const dynamic = 'force-dynamic';
 // force-dynamic alone does NOT stop Next 14 caching the supabase GET in
@@ -21,7 +22,8 @@ export const fetchCache = 'force-no-store';
  * Note already applies to creators, applied to the house too.
  */
 
-const MIN_SAMPLE = 10;
+// One floor for every surface that quotes a cohort (lib/calibration/cohortHeadline.ts).
+const MIN_SAMPLE = CALIBRATION_MIN_SAMPLE;
 const TRACKS = ['house', 'machine', 'creator'] as const;
 type Track = (typeof TRACKS)[number];
 

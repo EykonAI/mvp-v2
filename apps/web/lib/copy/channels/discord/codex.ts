@@ -21,7 +21,11 @@
 // REFRESH: quarterly. Owner: the discord-copywriter subagent.
 // Next due 2026-11-27.
 
-export const CODEX_VERSION = '2026-08-27.0';
+// 2026-09-18.0 — the WHAT FITS sample no longer calls FIRMS and Black Marble
+// "two independent sensors": they are different physics (heat vs emitted
+// light) from the same NASA VIIRS family, and the same clouds blind both.
+// A sample is copied by the writer; a wrong word in it ships (rev H PR-10).
+export const CODEX_VERSION = '2026-09-18.0';
 
 export interface CodexRule {
   id: string;
@@ -161,7 +165,7 @@ list previews, and for most readers it is the whole post.
     a chat, not an inbox.
 
   WHAT FITS. A real message, on register, from the Sicily samples:
-    "Two independent sensors flag concurrent anomalies at Sicily's
+    "Heat and night-light sensors flag concurrent anomalies at Sicily's
      largest refinery-power complex. FIRMS: 36.8 MW FRP at ISAB sito
      sud, 21 and 26 Aug. Black Marble: San Filippo del Mela +83% vs
      21-night baseline, 16 Aug. Not a confirmed outage."

@@ -212,17 +212,26 @@ export interface DraftRow {
   channel: string;
   posts: string[];
   status: string;
+  /** The promoted link — read so the approve path can hold a non-/start draft (promo-link.ts). */
+  ref_url: string | null;
 }
 
 export async function getDraft(supabase: SB, draftId: string): Promise<DraftRow | null> {
   const { data } = await supabase
     .from('newsjack_drafts')
-    .select('id, event_id, channel, posts, status')
+    .select('id, event_id, channel, posts, status, ref_url')
     .eq('id', draftId)
     .maybeSingle();
   if (!data) return null;
-  const d = data as { id: string; event_id: string; channel: string; posts: unknown; status: string };
-  return { id: d.id, event_id: d.event_id, channel: d.channel, posts: Array.isArray(d.posts) ? (d.posts as string[]) : [], status: d.status };
+  const d = data as { id: string; event_id: string; channel: string; posts: unknown; status: string; ref_url: string | null };
+  return {
+    id: d.id,
+    event_id: d.event_id,
+    channel: d.channel,
+    posts: Array.isArray(d.posts) ? (d.posts as string[]) : [],
+    status: d.status,
+    ref_url: d.ref_url ?? null,
+  };
 }
 
 async function setEventStatus(supabase: SB, eventId: string, status: string): Promise<void> {

@@ -342,7 +342,7 @@ function SignalRow({ s, selected, onSelect }: { s: Signal; selected: boolean; on
         : 'var(--green)';
   const oldMean = s.old_window?.mean;
   const newMean = s.new_window?.mean;
-  // AIS is chokepoint-only: a theatre outside the sampled polygons has
+  // AIS covers regional boxes, not the globe: a theatre outside them has
   // structurally zero rows. Two all-zero windows are "no coverage",
   // never a measured flat regime.
   const noCoverage =

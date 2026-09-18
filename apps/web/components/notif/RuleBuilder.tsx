@@ -895,7 +895,7 @@ function FirmsProximityFields({
           type="text"
           value={value.facilityName}
           onChange={e => set('facilityName', e.target.value)}
-          placeholder="e.g. Ryazan"
+          placeholder="e.g. Kirishi"
           style={inputStyle}
         />
       </label>

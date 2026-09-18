@@ -675,8 +675,10 @@ export const CROSS_DATA_SUGGESTIONS: Suggestion[] = [
   // ─── Sensor buckets (Phase 2) ────────────────────────────────────
   // These use the AI rule types, whose builder tabs already exist, so
   // they reach users immediately. The headline card is the first one:
-  // two INDEPENDENT satellites agreeing is the strongest claim the
-  // platform can make, and until now there was no way to ask for it.
+  // heat and emitted light agreeing at one site is the strongest claim the
+  // platform can make, and until now there was no way to ask for it. They
+  // are different physics, NOT independent sensors — FIRMS and Black Marble
+  // are both NASA VIIRS-family and the same clouds blind both (rev H PR-10).
   {
     id: 'sensor-corroborated-outage',
     title: 'Outage corroborated by BOTH satellites (thermal + night-lights)',
@@ -684,9 +686,10 @@ export const CROSS_DATA_SUGGESTIONS: Suggestion[] = [
       rule_type: 'cross_data_ai',
       outcome_statement:
         'A facility shows a thermal went_dark AND a night-lights went_dark_lights within days of each other — ' +
-        'two independent sensors (infrared combustion vs visible light) agreeing on the same site stopping. ' +
-        'Treat agreement as materially stronger evidence than either alone, but still an inference: neither ' +
-        'sensor observes power state directly.',
+        'two different physical measurements (infrared heat vs visible light) from the same NASA VIIRS instrument ' +
+        'family agreeing on the same site stopping. They are not independent sensors: the same clouds blind both. ' +
+        'Treat agreement as stronger evidence than either alone, but still an inference: neither observes power ' +
+        'state directly.',
       buckets: ['Thermal', 'Nightlights'],
     },
   },
@@ -725,11 +728,13 @@ export const CROSS_DATA_SUGGESTIONS: Suggestion[] = [
   // so a raw-detection rule fires forever and the reader mutes the
   // channel — which reads as coverage while providing none.
   //
-  // Note on filters: FIRMS ingest is REGIONAL (Russia/Ukraine, Arabian
-  // Gulf, Europe), and the API refuses to save a rule matching zero
-  // monitored facilities. Cards therefore lean on facility_type and
-  // name rather than countries outside those boxes, so a click cannot
-  // land on a rejection.
+  // Note on filters: FIRMS ingest is REGIONAL — the eight FIRMS_REGIONS
+  // boxes in lib/firms/client.ts (Russia/Ukraine, Arabian Gulf, Europe,
+  // East, South and Southeast Asia, North America east and west) — and the
+  // API refuses to save a rule matching zero monitored facilities. Cards
+  // therefore lean on facility_type and name rather than countries outside
+  // those boxes, so a click cannot land on a rejection. (This note listed
+  // three boxes while all eight ran — rev H PR-10.)
   {
     id: 'firms-refinery-significant',
     title: 'Unusual thermal activity at a refinery (not routine flaring)',
@@ -768,7 +773,11 @@ export const CROSS_DATA_SUGGESTIONS: Suggestion[] = [
     title: 'Watch one named facility \u2014 edit the name before saving',
     config: {
       rule_type: 'firms_proximity',
-      facility_name: 'Ryazan',
+      // Was 'Ryazan', which is not in the refinery registry — the card
+      // resolved to zero monitored facilities, the one outcome the note
+      // above exists to prevent. Kirishi is registered and inside the
+      // Russia/Ukraine box (checked 2026-09-18; rev H PR-10).
+      facility_name: 'Kirishi',
       radius_km: 5,
       min_detections: 1,
       significant_only: true,

@@ -2,11 +2,15 @@
 import ProvenanceChip from '@/components/intel/shared/ProvenanceChip';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { convergenceScoreLabel, CONVERGENCE_SCORE_TITLE } from '@/lib/intel/convergenceScore';
 
 interface Convergence {
   id: string;
   location: string;
   joint_p_value: number;
+  /** Distinct source classes (mig 088). What the badge renders — joint_p_value
+   *  is 0.3 / K over these, a lookup, never a p-value (rev H PR-10). */
+  source_classes?: string[] | null;
   corroboration_level?: 'single-source' | 'multi-source' | 'sensor-confirmed' | null;
   contributing_anomalies: Array<{ domain: string; label: string } | string>;
   synthesis: string;
@@ -30,7 +34,8 @@ const DEMO: Convergence[] = [
   {
     id: 'demo-1',
     location: 'Red Sea',
-    joint_p_value: 0.0008,
+    joint_p_value: 0.1,
+    source_classes: ['media', 'sensor-ais', 'sensor-firms'],
     contributing_anomalies: [
       { domain: 'maritime', label: 'AIS gap' },
       { domain: 'air_traffic', label: 'Naval reposition' },
@@ -43,7 +48,8 @@ const DEMO: Convergence[] = [
   {
     id: 'demo-2',
     location: 'Black Sea',
-    joint_p_value: 0.0043,
+    joint_p_value: 0.15,
+    source_classes: ['media', 'sensor-firms'],
     contributing_anomalies: [
       { domain: 'air_traffic', label: 'Mil cargo surge' },
       { domain: 'energy', label: 'Grid draw spike' },
@@ -144,12 +150,15 @@ export default function ConvergenceFeed({ linkBase = '/briefs/convergence' }: { 
                 )}
               </span>
             </span>
-            <span
-              className="num-lg"
-              style={{ fontSize: 10.5, color: 'var(--violet)', letterSpacing: '0.02em' }}
-            >
-              p &lt; {c.joint_p_value.toFixed(3)}
-            </span>
+            {convergenceScoreLabel(c.source_classes) && (
+              <span
+                className="num-lg"
+                title={CONVERGENCE_SCORE_TITLE}
+                style={{ fontSize: 10.5, color: 'var(--violet)', letterSpacing: '0.02em' }}
+              >
+                {convergenceScoreLabel(c.source_classes)}
+              </span>
+            )}
           </header>
           {!degraded && c.corroboration_level && CORROBORATION_BADGE[c.corroboration_level] && (
             <span

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser, getServerSupabase } from '@/lib/auth/session';
 import { getCurrentTier } from '@/lib/subscription';
+import { FIRMS_REGIONS } from '@/lib/firms/client';
 import {
   ACTIVE_RULE_LIMITS,
   DEFAULT_COOLDOWN_MINUTES,
@@ -292,7 +293,9 @@ export async function POST(req: NextRequest) {
           error: 'no_facilities_in_ingest_coverage',
           matching_facilities: coverage.matching,
           monitored_facilities: 0,
-          hint: `${coverage.matching} facilities match, but none fall inside a region FIRMS is ingested for (Russia/Ukraine, Arabian Gulf, Europe). Those facilities would report zero detections forever because no satellite query covers them — which is absence of observation, not absence of fire.`,
+          // The region list is read from the ingest config — it named three
+          // boxes while eight ran (rev H PR-10).
+          hint: `${coverage.matching} facilities match, but none fall inside a region FIRMS is ingested for (${FIRMS_REGIONS.map((r) => r.label).join(', ')}). Those facilities would report zero detections forever because no satellite query covers them — which is absence of observation, not absence of fire.`,
         },
         { status: 400 },
       );

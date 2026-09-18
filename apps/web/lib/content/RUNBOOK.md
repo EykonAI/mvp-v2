@@ -13,12 +13,15 @@ nothing publishes without a founder approval.
 2. **Ground + answer** — `runAnalyst` answers the angle's prompt using its live
    tools (that IS the grounding). "insufficient live data" ⇒ skipped.
 3. **Draft** — an X thread: the sourced answer → sources → the engageable HOOK +
-   a public `/q/[id]` link (utm-tagged). Stored in `newsjack_events`/`newsjack_drafts`
+   the `https://eykon.ai/start` link (utm-tagged; decision 7, rev H PR-10 — it was
+   the `/q/[id]` page until 2026-09-18, and drafts still carrying a /q/ link are held
+   at approval). Stored in `newsjack_events`/`newsjack_drafts`
    with `source='proactive'`.
 4. **Gate** — voice + coverage lints (reused) + **anti-bait** ending lint. Fail ⇒
    `blocked`.
 5. **Alert + approve** — Discord ping → `/admin/newsjack` → founder approves →
-   posts to X via the same X API path. Public landing at `/q/[id]`.
+   posts to X via the same X API path. The `/q/[id]` page still renders, but no
+   promotional link points at it.
 
 ## The three pillars
 - **Query library** (`content_angles`, migration 069): angles are data, cross-feed
@@ -39,7 +42,7 @@ nothing publishes without a founder approval.
   `Authorization: Bearer $CRON_SECRET`.
 - **Migration**: `069_content_angles.sql` — apply in the Supabase SQL Editor BEFORE merge.
 - **Review**: `/admin/newsjack` (proactive drafts appear alongside newsjack ones).
-- **Public landing**: `/q/[id]`.
+- **Promotional link**: `https://eykon.ai/start` only (the `/q/[id]` page is not linked from posts).
 
 ## Deferred (v1.1)
 - Retention scoring writeback (needs X-metrics polling) + auto-weighting.

@@ -33,7 +33,8 @@ export function renderReddit(ev: Evidence): ChannelArtifact {
     src,
     'What this does not establish: no cause is confirmed and no ground truth exists yet. A detection is an instrument reading, not an event.',
     'Disclosure: posted by eYKON, the platform that produced this detection.',
-    `Live view, with the sensor series: ${refUrl}`,
+    // The link is /start (decision 7, rev H PR-10) — not a live view.
+    `Start here: ${refUrl}`,
   ]
     .filter(Boolean)
     .join('\n\n');

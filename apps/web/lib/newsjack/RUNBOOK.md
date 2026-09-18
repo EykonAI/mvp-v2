@@ -44,12 +44,13 @@ Human-in-the-loop: nothing publishes without a founder approval in `/admin/newsj
 | `NEWSJACK_COPYWRITER_REDDIT` / `_DISCORD` / `_TIKTOK` | per-channel writer switches (multi-channel foundation). OFF = that channel's deterministic template drafts; the channel itself is removed only by deleting its registry entry | optional (default off) |
 | `COPYWRITER_REGISTER_REDDIT` / `_DISCORD` / `_TIKTOK` | per-channel register override (flat/dry/open). Defaults, per the PR-0 founder decision 2026-08-27: reddit dry · discord dry · tiktok flat | optional |
 | `REDDIT_COPYWRITER_MODEL` / `DISCORD_` / `TIKTOK_` | per-channel model knobs, default claude-sonnet-5 (lib/analyst/model.ts) | optional |
-| `NEWSJACK_ANOMALY_SOURCE` | opt in single anomalies as a source (`on`); OFF by default because anomalies have no public landing page | optional |
+| `NEWSJACK_ANOMALY_SOURCE` | opt in single anomalies as a source (`on`); OFF by default (lower signal than convergences; both now link to /start) | optional |
 | `FOUNDER_EMAILS` | existing founder allowlist for `/admin/newsjack` | yes (already set) |
 
-## Landing pages (where a post's link sends the reader)
-- **Convergence events → `/c/[id]`** — a PUBLIC, no-login page (map, p-value, synthesis, contributing detectors + a signup CTA). This is the default/only source, so every post links here. "Give before you ask."
-- Anomaly events → the (gated) globe `/app` — which is why anomalies are OFF by default (see `NEWSJACK_ANOMALY_SOURCE`). Re-enable only once anomalies get their own public artifact.
+## Landing page (where a post's link sends the reader)
+- **Every draft → `https://eykon.ai/start`**, utm-tagged per channel — founder decision 7 (18 Sep 2026, Reality Check rev H PR-10): every promotional asset links to /start and nowhere else. `PROMO_LINK` in `lib/newsjack/promo-link.ts`.
+- Until then convergence drafts linked to `/c/[id]` and anomaly drafts to `/app`. The approve/publish route (`/api/admin/newsjack/[id]`) now **holds** any draft whose link is not /start — 409 `held_promo_link` on approve and mark_published; the review card shows the hold and offers only Reject. 973 queued drafts carried a /c/ link on 2026-09-18; reject them — new drafts carry /start.
+- The 21 posts already published with a /c/ link (14 X, 7 Discord) are removed by the founder by hand: `select id, channel, ref_url from newsjack_drafts where status = 'published' and ref_url like '%/c/%';`
 
 ## Ops
 - **Crons**: `POST /api/cron/newsjack-detect` hourly; `POST /api/cron/newsjack-digest`

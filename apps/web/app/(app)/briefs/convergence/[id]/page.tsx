@@ -3,9 +3,10 @@ import { notFound } from 'next/navigation';
 import type { CSSProperties } from 'react';
 import { loadConvergence } from '@/lib/briefs/convergence';
 import { MiniMapClient } from '@/components/briefs/MiniMapClient';
+import { convergenceScoreLabel, CONVERGENCE_SCORE_TITLE } from '@/lib/intel/convergenceScore';
 
 // Per-convergence drill-down: the synthesis, the contributing anomalies, the
-// joint p-value, and a locator mini-map from the event's bounding box.
+// source-class count, and a locator mini-map from the event's bounding box.
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +29,10 @@ const CORROBORATION: Record<string, { label: string; colour: string; caption: st
   'sensor-confirmed': {
     label: 'Sensor-confirmed',
     colour: 'var(--teal)',
-    caption: 'A physical sensor (FIRMS thermal or AIS maritime) independently agrees with the reported activity.',
+    // Was "independently agrees with the reported activity". A sensor anomaly
+    // somewhere in the same 10° cell is co-occurrence, not agreement — a hot
+    // pixel does not confirm a strike (rev H PR-10).
+    caption: 'A physical sensor (FIRMS thermal, night-lights or AIS) recorded an anomaly in the same cell as the other signals. Co-occurrence, not confirmation.',
   },
   'multi-source': {
     label: 'Multi-source',
@@ -66,9 +70,13 @@ export default async function ConvergenceDetailPage({ params }: { params: { id: 
         <span style={{ fontFamily: 'var(--f-mono)', fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>
           Convergence
         </span>
-        <span className="num-lg" style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--violet)' }}>
-          p &lt; {c.jointPValue.toFixed(3)}
-        </span>
+        {/* Not "p < {joint_p_value}": 0.3 / K over K source classes, a lookup,
+            never a p-value (rev H PR-10). */}
+        {convergenceScoreLabel(c.sourceClasses) && (
+          <span className="num-lg" title={CONVERGENCE_SCORE_TITLE} style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--violet)' }}>
+            {convergenceScoreLabel(c.sourceClasses)}
+          </span>
+        )}
       </div>
 
       <h1 style={{ fontFamily: 'var(--f-display)', fontSize: 22, margin: '0 0 2px', color: 'var(--ink)' }}>{c.location}</h1>

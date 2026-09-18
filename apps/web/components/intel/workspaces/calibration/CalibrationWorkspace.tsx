@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { bucketWeeks, cohortSeriesFor, lastJudgedCohort, type Cohort } from '@/lib/calibration/cohortHeadline';
 
 /**
  * Calibration Ledger — one screen, no scroll (brief §6).
@@ -46,13 +47,8 @@ interface Window30 {
   resolved: number; scored: number; unscored: number; void: number;
   avg_brier: number | null; avg_log_loss: number | null; base_rate: number | null; skill: number | null;
 }
-interface Cohort {
-  day: string; issued: number; n: number; open: number; complete: boolean;
-  /** mig 155: voided claims, so live = issued − void and open = issued − n − void */
-  void?: number;
-  sum_brier: number; sum_y: number; sum_absdev: number;
-  brier: number | null; base_rate: number | null; sharpness: number | null; skill: number | null;
-}
+// Cohort and the judged-only reader live in lib/calibration/cohortHeadline.ts
+// since rev H PR-10, so the public /calibration page quotes the same cohort.
 interface Change { at: string; pr: string; note: string }
 interface ObservableFamily {
   key: string; source: string; verdict: 'admit' | 'exclude'; reason: string;
@@ -96,16 +92,14 @@ export default function CalibrationWorkspace() {
 
   // never quoted — the claims that resolve first are the reappearances (#401).
 
-  const cohortSeries = track?.key === 'house' ? bucketWeeks(track?.cohorts ?? []) : (track?.cohorts ?? []);
+  const cohortSeries = cohortSeriesFor(track?.key ?? '', track?.cohorts ?? []);
 
   // FULLY RESOLVED, not merely past deadline. mig 137's `complete` means every
   // deadline has passed; the scorer then judges 500 claims per hourly tick, so
   // a large cohort is "complete" for hours while most of it is still unscored
   // (the 09-06 cohort: 8,243 claims due 22:00–23:01 UTC, ~17 ticks to score).
   // Quote a cohort only when nothing in it is still open.
-  const lastComplete = [...cohortSeries]
-    .filter(c => c.complete && c.open === 0 && c.n >= data.min_sample && c.skill != null)
-    .sort((a, b) => (a.day < b.day ? 1 : -1))[0] ?? null;
+  const lastComplete = lastJudgedCohort(cohortSeries, data.min_sample);
 
   const w30 = track?.window_30d ?? null;
 
@@ -563,25 +557,6 @@ function Cohorts({ points, changes, error, weekly }: {
       </p>
     </>
   );
-}
-
-function bucketWeeks(points: Cohort[]): Cohort[] {
-  const by = new Map<string, Cohort>();
-  for (const c of points) {
-    const d = new Date(`${c.day}T00:00:00Z`);
-    const dow = (d.getUTCDay() + 6) % 7;                 // Monday = 0
-    const monday = new Date(d.getTime() - dow * 86_400_000).toISOString().slice(0, 10);
-    const acc = by.get(monday) ?? { day: monday, issued: 0, n: 0, open: 0, complete: true, sum_brier: 0, sum_y: 0, sum_absdev: 0, brier: null, base_rate: null, sharpness: null, skill: null };
-    acc.issued += c.issued; acc.n += c.n; acc.open += c.open; acc.void = (acc.void ?? 0) + (c.void ?? 0); acc.complete = acc.complete && c.complete;
-    acc.sum_brier += Number(c.sum_brier); acc.sum_y += Number(c.sum_y); acc.sum_absdev += Number(c.sum_absdev);
-    by.set(monday, acc);
-  }
-  return [...by.values()].sort((a, b) => a.day.localeCompare(b.day)).map(a => {
-    if (a.n === 0) return a;
-    const brier = a.sum_brier / a.n, base = a.sum_y / a.n, sharp = a.sum_absdev / a.n;
-    const denom = base * (1 - base);
-    return { ...a, brier, base_rate: base, sharpness: sharp, skill: denom > 0.001 ? 1 - brier / denom : null };
-  });
 }
 
 function Head({ children }: { children: React.ReactNode }) {

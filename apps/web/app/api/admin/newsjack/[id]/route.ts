@@ -5,6 +5,7 @@ import { createServerSupabase } from '@/lib/supabase-server';
 import { getDraft, approveDraft, rejectDraft, editDraft, markPublished } from '@/lib/newsjack/store';
 import { publishThread } from '@/lib/newsjack/publish';
 import { publishDiscord, discordConfigured } from '@/lib/newsjack/discord-publish';
+import { promoLinkHold } from '@/lib/newsjack/promo-link';
 
 // POST /api/admin/newsjack/[id] — founder-only review actions on a draft
 // (Newsjacking SOP layer 4/5). Approve → publish via the configured webhook,
@@ -31,6 +32,17 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const supabase = createServerSupabase();
   const draft = await getDraft(supabase, params.id);
   if (!draft) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+
+  // The promotional-link hold (founder decision 7, rev H PR-10). Approve is a
+  // publish on X and on Discord-with-webhook, and mark_published records a
+  // post made by hand — so both refuse a draft whose link is not /start. This
+  // is the code-level fence: the 973 queued /c/ drafts cannot go out, however
+  // the button is reached. Reject and edit stay open, so a held draft can be
+  // cleared out of the queue.
+  if (body.action === 'approve' || body.action === 'mark_published') {
+    const hold = promoLinkHold(draft);
+    if (hold) return NextResponse.json({ error: 'held_promo_link', detail: hold }, { status: 409 });
+  }
 
   switch (body.action) {
     case 'approve': {

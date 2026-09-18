@@ -9,6 +9,7 @@ import { composeForChannel } from '@/lib/copy/shared/compose';
 import { composeXThread } from '@/lib/copy/x-composer';
 import { insertEvent, insertDraft, recentLeads as fetchRecentLeads } from '@/lib/newsjack/store';
 import { notifyFounder } from '@/lib/newsjack/notify';
+import { PROMO_LINK } from '@/lib/newsjack/promo-link';
 import { selectAngle, markAngleUsed, buildAnglePrompt, splitAnswer, endingIsBait } from '@/lib/content/library';
 
 // The daily proactive tick (build-prompt §10). Reuses the newsjack pipeline:
@@ -94,7 +95,11 @@ export async function runProactiveTick(supabase: SB): Promise<ProactiveResult> {
     headline: hook || angle.title,
     analystLine: body,
     sources,
-    replayUrl: `${PUBLIC_BASE}/q/${eventId}`,
+    // Decision 7 (rev H PR-10): the promoted link is /start, never the /q/
+    // page. These drafts share the newsjack approve/publish path, which holds
+    // any draft linking elsewhere — so a /q/ link here would only ever write
+    // drafts that cannot be approved.
+    replayUrl: PROMO_LINK,
     framing: framingFor(angle.title),
     seatsRemaining: null,
   };

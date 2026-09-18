@@ -14,9 +14,14 @@
 //   - Missing observations render as gaps, never zero and never interpolated.
 //     The Kuwait chart shows this with hollow markers and a "no clear look"
 //     label on the two nights the sensor had no confident view.
-//   - No Hormuz figure exists anywhere in this file. There has been no
-//     observation since 2026-05-28, so UC-01 states the gap instead of hiding
-//     it. Critical Minerals is fixture-backed and likewise absent.
+//   - No Hormuz figure exists anywhere in this file. Hormuz is not in the
+//     daily chokepoint snapshot UC-01's figure comes from, and its AIS box
+//     reports intermittently, so the card states the gap instead of hiding it.
+//     Critical Minerals is fixture-backed and likewise absent.
+//   - Coverage copy states what is live, not what was live. AIS stopped being
+//     chokepoint-only on 2026-08-24 (four broad boxes plus six chokepoints);
+//     the night-lights figure on UC-02 is read from the named query
+//     (lib/marketing/watched-coverage.ts), never typed (rev H, PR-10).
 //
 // Each card carries the four-part provenance rule — chip, wordmark, source
 // feed, UTC stamp — because a card is the only artifact this platform emits
@@ -29,7 +34,14 @@ const COUNT = 3;
 
 type Persona = 'trader' | 'press';
 
-export function UseCases() {
+export function UseCases({
+  nightlightsClearReadings = null,
+  nightlightsNight = null,
+}: {
+  /** Confident-clear readings with a retrieval on the newest published night. */
+  nightlightsClearReadings?: number | null;
+  nightlightsNight?: string | null;
+} = {}) {
   // SSR / no-JS / reduced-motion / narrow viewport all render the static grid.
   // The carousel switches on after mount, desktop only — same rule the pricing
   // section uses, for the same reason.
@@ -104,7 +116,7 @@ export function UseCases() {
               <>Six theatres against five signals, at <b>p &lt; 0.01</b></>,
               <>Signals whose volume is set by our own ingest display, but <b>can never raise a flag</b></>,
             ]}
-            limit="AIS here is thin and chokepoint-only. Hormuz is not covered at all, and the panel says so rather than showing a zero."
+            limit="AIS runs across four broad regional boxes and six chokepoints, dense in some and thin in others; Bab-el-Mandeb has been dark since 18 July 2026. A theatre with no vessel rows reads as no coverage, never as a flat regime."
             gate="Pro"
             href="/intel/regime-shifts"
             cta="Open Regime Shifts"
@@ -123,7 +135,17 @@ export function UseCases() {
             feed="NASA Black Marble VNP46A2"
             stamp="2026-07-23 22:14 UTC"
             points={[
-              <>Night-time radiance sampled nightly at <b>10,556 facilities</b></>,
+              <>
+                Night-time radiance read nightly at every thermal-watched site
+                {/* The figure appears only once the named query answers —
+                    absent, never a fallback number. */}
+                {nightlightsClearReadings != null && (
+                  <>
+                    {' '}— <b>{nightlightsClearReadings.toLocaleString('en-US')} clear-sky readings</b> on the
+                    newest published night{nightlightsNight ? ` (${nightlightsNight})` : ''}
+                  </>
+                )}
+              </>,
               <>Three neighbouring sites collapsed together across <b>three consecutive confidently-clear nights</b></>,
               <>Az Zour North then showed a thermal elevation the next day — <b>heat up just after light down</b></>,
               <>Confirmed independently by the founder. No news input.</>,
@@ -306,16 +328,17 @@ function MalaccaFigure() {
     <svg viewBox="0 0 520 190" role="img" aria-labelledby="uc-mal-t uc-mal-d">
       <title id="uc-mal-t">Vessel coverage at the Strait of Malacca</title>
       <desc id="uc-mal-d">
-        891 vessels observed on 31 August 2026 over a 24-hour window on the free
-        chokepoint-only AIS tier. Hormuz is not covered.
+        891 vessels at the Strait of Malacca on 31 August 2026, from the daily
+        chokepoint snapshot (Malacca, Suez, Bosphorus) over a 24-hour window.
+        Hormuz is not in that snapshot.
       </desc>
       <text x="30" y="34" fill="#8791a4" fontFamily="IBM Plex Mono, monospace" fontSize="10" letterSpacing="1.4">STRAIT OF MALACCA</text>
       <text x="30" y="96" fill="#19d0b8" fontFamily="Jura, sans-serif" fontSize="58" fontWeight="600">891</text>
       <text x="146" y="96" fill="#8791a4" fontFamily="IBM Plex Mono, monospace" fontSize="11">vessels</text>
       <text x="30" y="120" fill="#8791a4" fontFamily="IBM Plex Mono, monospace" fontSize="9.5">24-HOUR WINDOW · 31 AUG 2026</text>
       <line x1="30" y1="138" x2="490" y2="138" stroke="#1f2e48" />
-      <text x="30" y="158" fill="#4abf8a" fontFamily="IBM Plex Mono, monospace" fontSize="9">● MALACCA · SUEZ · BOSPHORUS — covered</text>
-      <text x="30" y="175" fill="#8791a4" fontFamily="IBM Plex Mono, monospace" fontSize="9">○ HORMUZ — no observation since 28 May 2026</text>
+      <text x="30" y="158" fill="#4abf8a" fontFamily="IBM Plex Mono, monospace" fontSize="9">● MALACCA · SUEZ · BOSPHORUS — in the daily snapshot</text>
+      <text x="30" y="175" fill="#8791a4" fontFamily="IBM Plex Mono, monospace" fontSize="9">○ HORMUZ — not in the daily snapshot</text>
     </svg>
   );
 }

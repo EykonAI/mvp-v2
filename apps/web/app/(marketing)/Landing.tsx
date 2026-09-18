@@ -11,6 +11,7 @@ import { CalibrationAnchor } from '@/components/landing/CalibrationAnchor';
 import { CommShowcase } from '@/components/landing/CommShowcase';
 import { BriefsShowcase } from '@/components/landing/BriefsShowcase';
 import { PLATFORM_STATS as PS, stat } from '@/lib/marketing/platform-stats';
+import type { WatchedCoverage } from '@/lib/marketing/watched-coverage';
 import { UseCases } from '@/components/landing/UseCases';
 import { NextStep } from '@/components/landing/NextStep';
 import { FounderVideo } from '@/components/landing/FounderVideo';
@@ -157,6 +158,29 @@ export function Landing() {
     };
   }, []);
   const spotsDisplay = spotsLeft == null ? '—' : spotsLeft.toLocaleString('en-US');
+
+  // Watched counts render COMPUTED, never as a literal (Reality Check rev H,
+  // PR-10). The registry holds 634 refineries; the thermal boxes watch fewer,
+  // and "634 refineries watched" said the first number with the second's
+  // verb. The figure comes from the one named query
+  // (lib/marketing/watched-coverage.ts) via /api/coverage/watched — the same
+  // query /start, /mcp and /llms.txt read. Em dash until it loads; never a
+  // fallback number.
+  const [watched, setWatched] = useState<WatchedCoverage | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/coverage/watched')
+      .then(r => (r.ok ? r.json() : null))
+      .then((d: WatchedCoverage | null) => {
+        if (alive && d) setWatched(d);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const refineriesWatchedDisplay =
+    watched?.refineriesWatched == null ? '—' : stat(watched.refineriesWatched);
 
   // ── Pricing carousel state (§10). Static grid is the SSR / no-JS /
   // reduced-motion / narrow-viewport / "compare all" rendering; the
@@ -362,8 +386,11 @@ export function Landing() {
             <span className="val">6</span> pillars
           </div>
           <div className="stat sep">·</div>
+          {/* Worded by the founder, 18 Sep (rev H §10). FIRMS and Black
+              Marble are both NASA VIIRS-family: different physics (heat vs
+              emitted light), the same clouds — not independent sensors. */}
           <div className="stat">
-            <span className="val">3</span> independent physical sensors
+            <span className="val">Three</span> sensor feeds — heat and night-lights (NASA VIIRS family, different physics) and vessel AIS
           </div>
           <div className="stat sep">·</div>
           <div className="stat">
@@ -371,7 +398,7 @@ export function Landing() {
           </div>
           <div className="stat sep">·</div>
           <div className="stat">
-            <span className="val">{stat(PS.refineries)}</span> refineries watched
+            <span className="val">{refineriesWatchedDisplay}</span> refineries watched
           </div>
           <div className="stat sep">·</div>
           <div className="stat">
@@ -383,7 +410,10 @@ export function Landing() {
       {/* ─── USE CASES (LP v2, PR-B) ─────────────────────────────── */}
       {/* Capabilities first, then what they are for. Sits between the    */}
       {/* pillars and the analyst section on purpose.                     */}
-      <UseCases />
+      <UseCases
+        nightlightsClearReadings={watched?.nightlightsClearReadings ?? null}
+        nightlightsNight={watched?.nightlightsNight ?? null}
+      />
 
       {/* ─── NEXT STEP — hand off to /start ──────────────────────── */}
       {/* Intent peaks here: three worked examples tied to named beats,   */}

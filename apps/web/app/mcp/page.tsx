@@ -3,6 +3,12 @@ import Link from 'next/link';
 import { APP_URL } from '@/lib/url';
 import { CLAUDE_TOOLS, CITIZEN_AI_TOOLS } from '@/lib/anthropic';
 import { MCP_DAILY_LIMITS } from '@/lib/mcp/limits';
+import {
+  aisCoverageSentence,
+  loadAisBoxes,
+  loadWatchedCoverage,
+  thermalCoverageSentence,
+} from '@/lib/marketing/watched-coverage';
 
 /**
  * /mcp — the public page a person lands on when they want to connect an
@@ -31,8 +37,12 @@ export const metadata: Metadata = {
 
 const PAID_TIERS = ['member', 'pro', 'desk', 'enterprise'] as const;
 
-export default function McpPage() {
+export default async function McpPage() {
   const tools = CLAUDE_TOOLS;
+  // Coverage limits are computed, not typed (rev H, PR-10): this paragraph
+  // said "AIS is chokepoint-only" (false since 2026-08-24) and quoted a July
+  // thermal pair that counted unit rows as facilities.
+  const [coverage, aisBoxes] = await Promise.all([loadWatchedCoverage(), loadAisBoxes()]);
   const citizenCount = tools.filter((t) => CITIZEN_AI_TOOLS.has(t.name)).length;
 
   return (
@@ -110,10 +120,9 @@ export default function McpPage() {
           travel with the data.
         </p>
         <p className="max-w-[62ch] text-[14px] leading-relaxed text-eykon-ink-dim">
-          Several feeds are partial and say so. AIS is chokepoint-only. Night-lights lag NASA
-          publication by about nine days. Thermal watches 10,556 of 13,262 facilities, and the
-          uncovered regions return <span className="font-mono text-eykon-ink">NO DATA</span>, never
-          zero. Critical minerals is fixture-backed and excluded from anything quotable.
+          Several feeds are partial and say so. Vessel AIS covers {aisCoverageSentence(aisBoxes)}{' '}
+          Night-lights lag NASA publication by about nine days. {thermalCoverageSentence(coverage)}{' '}
+          Critical minerals is fixture-backed and excluded from anything quotable.
         </p>
       </section>
 
