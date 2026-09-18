@@ -26,6 +26,13 @@
 --     that last wrote N (blackmarble_ingest_runs.ran_at). A trailing
 --     maximum of past row counts is NOT used: PR-3's roster cut would
 --     turn it into weeks of false partial nights.
+--     rows_present counts ONLY rows of facilities in that roster. The
+--     worker upserts and never deletes, so a night re-fetched across a
+--     roster change (PR-3's power cut, a shard outage shrinking the 5-day
+--     FIRMS window) still carries rows for sites earlier runs sampled and
+--     the last run did not. Counting them would lift a night with a
+--     missing tile to >= 0.95 of the smaller roster. They are recorded in
+--     rows_outside_roster and never count toward coverage.
 --   * FIRMS. firms_derive_facility_observations writes its whole covered
 --     roster for a day in ONE INSERT, so a FIRMS day is all-or-nothing at
 --     this layer and its roster is the rows it wrote. The ingest re-derives
@@ -73,6 +80,8 @@ CREATE TABLE IF NOT EXISTS public.sensor_night_census (
   rows_present    integer     NOT NULL,
   roster_size     integer,
   roster_source   text        NOT NULL,
+  -- rows written for the night by facilities NOT in its roster (never counted)
+  rows_outside_roster integer,
   coverage_ratio  numeric     GENERATED ALWAYS AS (
                     CASE WHEN roster_size > 0
                          THEN round(rows_present::numeric / roster_size, 6) END) STORED,
@@ -90,6 +99,13 @@ CREATE TABLE IF NOT EXISTS public.sensor_night_census (
 
 COMMENT ON TABLE public.sensor_night_census IS
   'Reality Check PR-1 (mig 159). One row per (sensor, facility_type, night): rows that arrived against that night''s actual roster. usable = rows >= 0.95 x roster (FIRMS: and the day is final). Never reads blackmarble_ingest_runs.ok. The classifier reads nights only through sensor_usable_nights. Refreshed by pg_cron job refresh-sensor-night-census.';
+-- a table created by an earlier draft of this file gains the column too
+ALTER TABLE public.sensor_night_census ADD COLUMN IF NOT EXISTS rows_outside_roster integer;
+
+COMMENT ON COLUMN public.sensor_night_census.rows_present IS
+  'Rows for the night that belong to its roster. blackmarble: rows of facilities outside the roster of the ingest run that last wrote the night (left by earlier runs across a roster change) are excluded and counted in rows_outside_roster. When no roster was recorded, every row written for the night.';
+COMMENT ON COLUMN public.sensor_night_census.rows_outside_roster IS
+  'Rows written for the night by facilities not in its roster — recorded, never counted toward coverage. NULL when no roster was recorded; always 0 for firms (the roster is the rows).';
 COMMENT ON COLUMN public.sensor_night_census.roster_size IS
   'That night''s actual roster. blackmarble: distinct facilities FIRMS observed in the 5 days up to the ingest run that last wrote the night (the worker''s own roster rule). firms: the rows the derive wrote (one INSERT per day). NULL = no roster recorded. Never a trailing maximum.';
 COMMENT ON COLUMN public.sensor_night_census.is_final IS
@@ -108,6 +124,12 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'snc_counts_sane') THEN
     ALTER TABLE public.sensor_night_census ADD CONSTRAINT snc_counts_sane
       CHECK (rows_present >= 0 AND (roster_size IS NULL OR roster_size > 0));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'snc_outside_roster_sane') THEN
+    ALTER TABLE public.sensor_night_census ADD CONSTRAINT snc_outside_roster_sane
+      CHECK ((rows_outside_roster IS NULL) = (roster_size IS NULL)
+             AND (rows_outside_roster IS NULL OR rows_outside_roster >= 0)
+             AND (sensor <> 'firms' OR rows_outside_roster IS NULL OR rows_outside_roster = 0));
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'snc_roster_source_known') THEN
     ALTER TABLE public.sensor_night_census ADD CONSTRAINT snc_roster_source_known
@@ -215,20 +237,34 @@ BEGIN
                 AND s.is_final
                 AND s.ingest_ran_at IS NOT DISTINCT FROM r.ran_at)
   ),
-  present AS (
-    SELECT b.period AS night, b.facility_type, count(*)::int AS n
-      FROM blackmarble_facility_radiance b
-     WHERE b.period IN (SELECT night FROM todo)
-     GROUP BY 1, 2
-  ),
   run_days AS (
     SELECT DISTINCT (t.ran_at AT TIME ZONE 'UTC')::date AS d FROM todo t WHERE t.ran_at IS NOT NULL
   ),
-  roster AS (
+  roster_members AS (
     -- the worker's own roster rule: FIRMS-observed in the 5 days up to the run
-    SELECT rd.d, f.facility_type, count(DISTINCT f.facility_id)::int AS n
+    SELECT DISTINCT rd.d, f.facility_type, f.facility_id
       FROM run_days rd
       JOIN firms_facility_observations f ON f.period BETWEEN rd.d - 5 AND rd.d
+  ),
+  roster AS (
+    SELECT rm.d, rm.facility_type, count(*)::int AS n
+      FROM roster_members rm
+     GROUP BY 1, 2
+  ),
+  present AS (
+    -- every row written for the night (n_all) and the rows of facilities in
+    -- the roster of the run that last wrote it (n_roster). Rows left by
+    -- earlier runs for sites the last run no longer samples are not a look
+    -- the roster can be measured against.
+    SELECT t.night, b.facility_type,
+           count(*)::int              AS n_all,
+           count(rm.facility_id)::int AS n_roster
+      FROM todo t
+      JOIN blackmarble_facility_radiance b ON b.period = t.night
+      LEFT JOIN roster_members rm
+        ON rm.d             = (t.ran_at AT TIME ZONE 'UTC')::date
+       AND rm.facility_type = b.facility_type
+       AND rm.facility_id   = b.facility_id
      GROUP BY 1, 2
   ),
   types AS (
@@ -236,7 +272,10 @@ BEGIN
   ),
   calc AS (
     SELECT t.night, ty.facility_type,
-           coalesce(p.n, 0) AS rows_present,
+           -- with a roster: only its members' rows count; without one: every row
+           CASE WHEN ro.n IS NOT NULL THEN coalesce(p.n_roster, 0)
+                ELSE coalesce(p.n_all, 0) END                            AS rows_present,
+           CASE WHEN ro.n IS NOT NULL THEN coalesce(p.n_all - p.n_roster, 0) END AS rows_outside_roster,
            ro.n             AS roster_size,
            t.tiles_expected, t.tiles_processed, t.tiles_missing, t.ran_at,
            (coalesce(t.tiles_expected > 0
@@ -255,11 +294,12 @@ BEGIN
       FROM calc c
   )
   INSERT INTO sensor_night_census AS s (
-    sensor, facility_type, night, rows_present, roster_size, roster_source,
+    sensor, facility_type, night, rows_present, roster_size, roster_source, rows_outside_roster,
     tiles_expected, tiles_processed, tiles_missing, ingest_ran_at,
     is_final, usable, status, computed_at)
   SELECT 'blackmarble', facility_type, night, rows_present, roster_size,
          CASE WHEN roster_size IS NULL THEN 'unrecorded' ELSE 'ingest_run_firms_window' END,
+         rows_outside_roster,
          tiles_expected, tiles_processed, tiles_missing, ran_at,
          is_final, usable,
          CASE WHEN usable                                   THEN 'usable'
@@ -273,6 +313,7 @@ BEGIN
      SET rows_present    = EXCLUDED.rows_present,
          roster_size     = EXCLUDED.roster_size,
          roster_source   = EXCLUDED.roster_source,
+         rows_outside_roster = EXCLUDED.rows_outside_roster,
          tiles_expected  = EXCLUDED.tiles_expected,
          tiles_processed = EXCLUDED.tiles_processed,
          tiles_missing   = EXCLUDED.tiles_missing,
@@ -330,10 +371,11 @@ BEGIN
       FROM calc c
   )
   INSERT INTO sensor_night_census AS s (
-    sensor, facility_type, night, rows_present, roster_size, roster_source,
+    sensor, facility_type, night, rows_present, roster_size, roster_source, rows_outside_roster,
     is_final, usable, status, computed_at)
   SELECT 'firms', facility_type, night, rows_present, roster_size,
          CASE WHEN roster_size IS NULL THEN 'unrecorded' ELSE 'firms_derive_rows' END,
+         CASE WHEN roster_size IS NULL THEN NULL ELSE 0 END,
          is_final, usable,
          CASE WHEN usable                                   THEN 'usable'
               WHEN roster_size IS NULL AND rows_present > 0 THEN 'roster_unrecorded'
@@ -346,13 +388,14 @@ BEGIN
      SET rows_present  = EXCLUDED.rows_present,
          roster_size   = EXCLUDED.roster_size,
          roster_source = EXCLUDED.roster_source,
+         rows_outside_roster = EXCLUDED.rows_outside_roster,
          is_final      = EXCLUDED.is_final,
          usable        = EXCLUDED.usable,
          status        = EXCLUDED.status,
          computed_at   = EXCLUDED.computed_at
-   WHERE (s.rows_present, s.roster_size, s.is_final, s.usable, s.status)
+   WHERE (s.rows_present, s.roster_size, s.rows_outside_roster, s.is_final, s.usable, s.status)
          IS DISTINCT FROM
-         (EXCLUDED.rows_present, EXCLUDED.roster_size, EXCLUDED.is_final, EXCLUDED.usable, EXCLUDED.status);
+         (EXCLUDED.rows_present, EXCLUDED.roster_size, EXCLUDED.rows_outside_roster, EXCLUDED.is_final, EXCLUDED.usable, EXCLUDED.status);
   GET DIAGNOSTICS v_fi_rows = ROW_COUNT;
 
   INSERT INTO sensor_night_census_runs (full_refresh, blackmarble_nights, blackmarble_rows_recomputed, firms_rows_changed, duration_ms)
@@ -369,7 +412,7 @@ END;
 $function$;
 
 COMMENT ON FUNCTION public.refresh_sensor_night_census(boolean) IS
-  'Reality Check PR-1 (mig 159). Classifies every Black Marble and FIRMS night against that night''s actual roster; writes a sensor_night_census_runs row on every call. Heavy (a full refresh takes ~8 s: it re-derives every night''s roster from FIRMS): pg_cron only, never over PostgREST.';
+  'Reality Check PR-1 (mig 159). Classifies every Black Marble and FIRMS night against that night''s actual roster; writes a sensor_night_census_runs row on every call. Heavy (a full refresh takes ~15-20 s on 2026-09-18 data: it re-derives every night''s roster from FIRMS and matches every row against it): pg_cron only, never over PostgREST.';
 
 REVOKE EXECUTE ON FUNCTION public.refresh_sensor_night_census(boolean) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.refresh_sensor_night_census(boolean) TO service_role;
@@ -404,7 +447,7 @@ SELECT cron.unschedule(jobid) FROM cron.job WHERE jobname = 'refresh-sensor-nigh
 SELECT cron.schedule('refresh-sensor-night-census', '50 * * * *',
                      $job$ SELECT public.refresh_sensor_night_census(false) $job$);
 
--- ─── 6 · Seed: classify every night once (≈ 8 s; SQL Editor, not PostgREST)
+-- ─── 6 · Seed: classify every night once (≈ 15-20 s; SQL Editor, not PostgREST)
 SELECT public.refresh_sensor_night_census(true);
 
 COMMIT;
@@ -438,8 +481,9 @@ SELECT sensor, facility_type, status, count(*) AS nights,
 
 -- V3 · every Black Marble refinery night that is NOT usable, with its numbers
 --      (expect 07-10 145/431, 07-17 313/431, 08-03 9/431, 08-06 1/431 partial;
---       07-11..07-16, 07-26, 08-04, 08-05 empty; 09-09 405/431 pending)
-SELECT night, rows_present, roster_size, coverage_ratio, tiles_processed, tiles_missing,
+--       07-11..07-16, 07-26, 08-04, 08-05 empty; 09-09 405/431 pending;
+--       rows_outside_roster 0 on every row — no roster has changed yet)
+SELECT night, rows_present, roster_size, coverage_ratio, rows_outside_roster, tiles_processed, tiles_missing,
        is_final, status
   FROM public.sensor_night_census
  WHERE sensor = 'blackmarble' AND facility_type = 'refinery' AND NOT usable

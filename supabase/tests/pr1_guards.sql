@@ -58,6 +58,7 @@ DECLARE
   v_res2    jsonb;
   v_runs0   integer;
   v_runs1   integer;
+  v_night   date;
   t         record;
   r         record;
   v_failed  text[] := '{}';
@@ -234,6 +235,53 @@ BEGIN
   r_results := r_results || jsonb_build_object('id', 'G2.8',
     'what', 'a census refresh writes its run record even when nothing changes',
     'ok', v_detail IS NULL AND v_runs1 = v_runs0 + 1, 'detail', coalesce(v_detail, v_runs0 || ' -> ' || v_runs1));
+
+  -- G2.9 · a night re-fetched across a roster change (PR-3's cut) carries
+  -- rows left by earlier runs for sites the last run no longer samples. They
+  -- must not count. Fixture: a synthetic night the day before the first real
+  -- one, "written" by a run today with every tile processed; rows for 90% of
+  -- today's refinery roster (as if a tile were missing) plus as many rows
+  -- again for facilities outside it. Counting every row reads 1.9x the roster.
+  v_detail := NULL; v_txt := NULL; v_n := NULL; v_ok := false; v_night := NULL;
+  BEGIN
+    SELECT min(night) - 1 INTO v_night FROM public.blackmarble_ingest_runs;
+    SELECT count(DISTINCT f.facility_id)::int INTO v_n
+      FROM public.firms_facility_observations f
+     WHERE f.facility_type = 'refinery'
+       AND f.period BETWEEN (now() AT TIME ZONE 'UTC')::date - 5 AND (now() AT TIME ZONE 'UTC')::date;
+    INSERT INTO public.blackmarble_ingest_runs
+      (night, tiles_expected, tiles_processed, tiles_missing, facilities_written, ok, ran_at)
+    VALUES (v_night, 84, 84, 0, v_n * 2, true, now());
+    INSERT INTO public.blackmarble_facility_radiance (facility_type, facility_id, period, tile, px_hq_3x3)
+    SELECT 'refinery', x.facility_id, v_night, 'h00v00', 0
+      FROM (SELECT DISTINCT f.facility_id
+              FROM public.firms_facility_observations f
+             WHERE f.facility_type = 'refinery'
+               AND f.period BETWEEN (now() AT TIME ZONE 'UTC')::date - 5 AND (now() AT TIME ZONE 'UTC')::date
+             ORDER BY f.facility_id
+             LIMIT floor(0.9 * v_n)::int) x
+    UNION ALL
+    SELECT 'refinery', 'rc-guard-off-roster-' || g, v_night, 'h00v00', 0
+      FROM generate_series(1, v_n) g;
+    PERFORM public.refresh_sensor_night_census(false);
+    SELECT c.status || ' ' || c.rows_present || '/' || coalesce(c.roster_size::text, '?')
+             || ', ' || coalesce(c.rows_outside_roster::text, 'null') || ' outside the roster'
+      INTO v_txt
+      FROM public.sensor_night_census c
+     WHERE c.sensor = 'blackmarble' AND c.facility_type = 'refinery' AND c.night = v_night;
+    v_ok := v_n > 0
+            AND v_txt = 'permanently_partial ' || floor(0.9 * v_n)::int || '/' || v_n || ', ' || v_n || ' outside the roster'
+            AND NOT EXISTS (SELECT 1 FROM public.sensor_usable_nights u
+                             WHERE u.sensor = 'blackmarble' AND u.facility_type = 'refinery' AND u.night = v_night);
+    RAISE EXCEPTION 'rc_guard_undo';
+  EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_msg = MESSAGE_TEXT;
+    IF v_msg <> 'rc_guard_undo' THEN v_detail := v_msg; v_ok := false; END IF;
+  END;
+  r_results := r_results || jsonb_build_object('id', 'G2.9',
+    'what', 'rows of facilities outside the night''s roster never count: 90% of the roster plus as many off-roster rows is not usable',
+    'ok', v_detail IS NULL AND coalesce(v_ok, false),
+    'detail', coalesce(v_detail, coalesce(v_txt, 'no census row') || ' (roster ' || coalesce(v_n::text, '?') || ')'));
 
   -- ═══ fixtures for the verdict table ══════════════════════════════════
   -- A real, minted refinery complex (the verdict FK demands one) and a
