@@ -39,6 +39,7 @@ DECLARE
   v_ok       boolean;
   v_detail   text;
   v_md5      text;
+  v_src      text;
   v_oid      oid;
   v_pre_day  date;
   -- expectations, read from the registry (never hard-coded)
@@ -71,8 +72,15 @@ BEGIN
 
   r_results := r_results || jsonb_build_object('id', 'E1', 'what', 'firms_derive_facility_observations(date, numeric, numeric, jsonb) exists',
                  'ok', v_oid IS NOT NULL, 'detail', coalesce(v_oid::text, 'missing'));
-  r_results := r_results || jsonb_build_object('id', 'E2', 'what', 'its body is migration 166''s (md5 970b5efc…)',
-                 'ok', v_md5 = '970b5efc72895bbaeb6356d36fa3f896', 'detail', coalesce(v_md5, 'no body'));
+  SELECT prosrc INTO v_src FROM pg_proc WHERE oid = v_oid;
+  r_results := r_results || jsonb_build_object('id', 'E2', 'what', 'its body carries the 166 predicate exactly once, in the power branch of monitored',
+                 'ok', (length(v_src) - length(replace(v_src, 'mig 166 (Reality Check PR-3)', '')))
+                         / length('mig 166 (Reality Check PR-3)') = 1
+                       AND position(E'       AND p.capacity_mw >= p_min_mw\n       -- mig 166 (Reality Check PR-3)' IN v_src) > 0,
+                 'detail', 'body md5 ' || coalesce(v_md5, 'none')
+                           || CASE v_md5 WHEN '970b5efc72895bbaeb6356d36fa3f896' THEN ' (085 + 166)'
+                                         WHEN 'c4296bdc42502ae41f1e364476784099' THEN ' (164 + 166)'
+                                         ELSE ' (another base + 166: record it)' END);
   r_results := r_results || jsonb_build_object('id', 'E3', 'what', 'no stale 3-arg overload',
                  'ok', to_regprocedure('public.firms_derive_facility_observations(date, numeric, numeric)') IS NULL, 'detail', '');
   v_ok := v_oid IS NOT NULL
@@ -251,7 +259,9 @@ SELECT 'PR-3 guards: all assertions passed (E1–E5, G1–G5); nothing was writt
 -- C1 · apply day + 1 (after the first hourly ingest): rows per day.
 --      Expect the cut day and the day before at 431 refinery / 10,125 power
 --      (started before the cut, finished by the derive), every later day at
---      431 / 5,046.
+--      431 / 5,046. Exception: if 166 was applied before the cut day's first
+--      successful derive (just after 00:00 UTC), the cut day already reads
+--      431 / 5,046 — also correct, nothing had been started for it.
 -- WITH cut AS (SELECT min(at) AS at FROM public.ledger_change_log
 --               WHERE note LIKE 'sensor roster: FIRMS and night-lights stop sampling power sites%')
 -- SELECT o.period, o.facility_type, count(*) AS rows, max(o.computed_at) AS newest_compute

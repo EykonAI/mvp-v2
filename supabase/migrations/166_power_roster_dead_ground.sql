@@ -2,7 +2,7 @@
 -- eYKON.ai — 166 · Stop sampling dead ground
 --             (Reality Check programme, build prompt rev H, Wave 2, PR-3)
 --
--- WHAT CHANGES — one CTE, nothing else
+-- WHAT CHANGES — one predicate in one CTE, nothing else
 -- firms_derive_facility_observations() writes one row per watched facility
 -- per day into firms_facility_observations. Its `monitored` CTE is the
 -- sensor roster of BOTH instruments: the Black Marble worker samples every
@@ -20,8 +20,22 @@
 --   keep a power unit when its site (gem_location_id) has at least one unit
 --   with status = 'operating', of ANY capacity. Remove the site otherwise.
 -- Refineries: unchanged, all of them. The capacity floor, the geometry
--- test, the region test, the radius, the detection join and the upsert:
--- unchanged, byte for byte (see the body below — only `monitored` moved).
+-- test, the region test, the radius, the detection join, the upsert — and
+-- whatever mig 164 (PR-12) put in the body — are not touched.
+--
+-- HOW — an insertion into the LIVE body, not a rewrite of it
+-- This function is replaced by two in-flight migrations: 164 (PR-12, FIRMS
+-- twin guard: links twins first, aggregates canonical records, writes
+-- twins_excluded) and this one. Apply order is 164 then 166. Rather than
+-- carry a copy of 164's body (which is still a draft and may change),
+-- §1 reads the live definition (pg_get_functiondef), finds the power
+-- branch of `monitored` — the same three lines in mig 085 and in mig 164 —
+-- and inserts the 166 predicate after it. It refuses unless that branch
+-- occurs exactly once, and after the CREATE OR REPLACE it proves the new
+-- body is the old body plus the insertion and nothing else (else the
+-- transaction rolls back). Measured 2026-09-18: the insertion into the live
+-- (085) body gives md5 970b5efc72895bbaeb6356d36fa3f896; into the PR-12
+-- draft's 164 body (5bce85e) it gives c4296bdc42502ae41f1e364476784099.
 --
 -- NOT CHANGED, on purpose:
 --   • firms_monitored_facilities (the view). The 086 proximity tag/prune and
@@ -33,12 +47,12 @@
 --
 -- THE TRANSITION: a day already started is finished, never abandoned.
 -- The ingest re-derives today and yesterday every hour. Without the last
--- OR-branch below, the rows a removed site already has for those two days
--- would freeze at whatever the last pre-cut run counted — a partial day
--- stored as a full-day look, the exact dishonesty mig 085 exists to
--- prevent. With it, a removed site keeps being re-derived on any day it
--- ALREADY has a row for, and no new day is ever started for it. It cannot
--- perpetuate itself: a day with no row never gets one.
+-- OR-branch of the predicate, the rows a removed site already has for those
+-- two days would freeze at whatever the last pre-cut run counted — a
+-- partial day stored as a full-day look, the exact dishonesty mig 085
+-- exists to prevent. With it, a removed site keeps being re-derived on any
+-- day it ALREADY has a row for, and no new day is ever started for it. It
+-- cannot perpetuate itself: a day with no row never gets one.
 --
 -- MEASURED 2026-09-18 (supabase-ro; the covered roster reproduces
 -- firms_facility_observations for 2026-09-17 exactly, 0 rows either way):
@@ -67,95 +81,49 @@
 --   evidence. Resolvers VOID a window with no look at all
 --   (firms-recovery: "was not observed"; blackmarble: "no confident_clear
 --   night"; data-clock stale guard) — never a miss. A window that straddles
---   the cut resolves on the days/nights that WERE looked at, exactly as a
---   cloud-truncated window does today. Future issuance at dead ground stops:
---   85 % of all nightlights_first_light_persistence claims ever issued sat
---   at sites this rule removes (251 of 296), 24 % of firms_went_dark_recovery
---   (37 of 154) and 25 % of nightlights_recovery (14 of 56). The change is
---   recorded in ledger_change_log (§4) because it changes those families'
---   population mid-series.
+--   the cut resolves on the days/nights that WERE looked at: for Black Marble
+--   that is what a cloud-truncated window gets today; for FIRMS it is new —
+--   a firms_went_dark_recovery claim flagged the day or two before the cut is
+--   judged on 1–2 of its 3 days (PR body: a founder decision). Future
+--   issuance at dead ground stops: 85 % of all
+--   nightlights_first_light_persistence claims ever issued sat at sites this
+--   rule removes (251 of 296), 24 % of firms_went_dark_recovery (37 of 154)
+--   and 25 % of nightlights_recovery (14 of 56). The change is recorded in
+--   ledger_change_log (§3) because it changes those families' population
+--   mid-series.
 --
 -- DEPENDS ON (apply in number order):
 --   • 158–165 applied first, as for every migration in the programme.
---   • 164 (PR-12, FIRMS twin guard) may replace this same function. §1
---     refuses to run if the live body is anything other than mig 085's or
---     this file's — a silent overwrite of 164 is impossible. If §1 raises,
---     rebase this file onto 164's body; do not force it.
+--   • 164 (PR-12, FIRMS twin guard) replaces this same function. §1 inserts
+--     into whatever body is live, so 166 applies on 164's body (or on 085's
+--     if 164 has not landed). Order matters the other way: if 164 were
+--     applied AFTER 166, 164's own guard stops it (its body md5 check) — do
+--     not force 164 over 166; re-run 166 after 164 instead (§1 re-inserts).
 --   • The census acceptance (supabase/tests/pr3_guards.sql, watch items
 --     C2/C3) reads sensor_night_census, created by 159 (PR-1).
 --
--- Idempotent: guarded CREATE OR REPLACE, re-asserted grants, change-log row
--- keyed on the PR. No temp tables, no session state, no data deleted.
+-- Idempotent: a re-run finds the predicate already in place and changes
+-- nothing; grants re-asserted; change-log row keyed on the PR. No temp
+-- tables, no session state, no data deleted.
 -- Apply MANUALLY in the Supabase SQL Editor — the whole file — BEFORE merge.
 -- Nothing on Railway: the ingest route's RPC call is unchanged.
 -- ═══════════════════════════════════════════════════════════════════════
 
 BEGIN;
 
--- ─── 1 · Refuse to overwrite a body this file was not written against ──
--- md5(prosrc) of mig 085's body (verified in production 2026-09-18) or of
--- this file's body (a re-run). Anything else means another migration —
--- most likely 164 — replaced the function after 085: stop, rebase.
-DO $guard$
+-- ─── 1 · Insert the predicate into the live body; change nothing else ──
+DO $patch$
 DECLARE
-  v_md5 text;
-BEGIN
-  SELECT md5(p.prosrc) INTO v_md5
-    FROM pg_proc p
-    JOIN pg_namespace n ON n.oid = p.pronamespace
-   WHERE n.nspname = 'public'
-     AND p.oid = to_regprocedure('public.firms_derive_facility_observations(date, numeric, numeric, jsonb)');
-
-  IF v_md5 IS NULL THEN
-    RAISE EXCEPTION '166: public.firms_derive_facility_observations(date, numeric, numeric, jsonb) not found — nothing to change';
-  END IF;
-
-  IF v_md5 NOT IN ('d3de0425a39ec36875e76106a47f85f5',    -- mig 085
-                   '970b5efc72895bbaeb6356d36fa3f896') THEN -- this file (re-run)
-    RAISE EXCEPTION '166: firms_derive_facility_observations body has changed since mig 085 (md5 %). Another migration (likely 164, PR-12) replaced it. Rebase 166 onto the live body; do not force.', v_md5;
-  END IF;
-END
-$guard$;
-
--- ─── 2 · The function: mig 085's body, only `monitored` changed ────────
-CREATE OR REPLACE FUNCTION public.firms_derive_facility_observations(
-  p_day       date,
-  p_radius_km numeric DEFAULT 5,
-  p_min_mw    numeric DEFAULT 500,
-  p_regions   jsonb   DEFAULT NULL
-) RETURNS int LANGUAGE plpgsql AS $function$
-DECLARE
-  v_rows int;
-BEGIN
-  IF p_regions IS NULL OR jsonb_array_length(p_regions) = 0 THEN
-    -- Fail closed AND LOUD. Returning 0 here would be worse than
-    -- useless: the caller reports a successful run that wrote
-    -- nothing, which is the silent-no-op failure mode this whole
-    -- feature exists to prevent. A caller that forgets its regions
-    -- must go red, not green-with-no-data.
-    RAISE EXCEPTION 'firms_derive_facility_observations: p_regions is required (declared coverage cannot be empty)';
-  END IF;
-
-  WITH monitored AS (
-    SELECT 'refinery'::text AS facility_type,
-           r.id::text       AS facility_id,
-           r.refinery_name  AS facility_name,
-           r.country,
-           r.geom,
-           r.latitude, r.longitude
-      FROM refineries r
-     WHERE r.geom IS NOT NULL
-    UNION ALL
-    SELECT 'power_plant'::text,
-           p.id::text,
-           p.plant_name,
-           p.country,
-           p.geom,
-           p.latitude, p.longitude
-      FROM power_plants p
+  c_sig    constant text := 'public.firms_derive_facility_observations(date, numeric, numeric, jsonb)';
+  -- The power branch of `monitored`, identical in mig 085 and mig 164.
+  -- The predicate goes between c_head and c_tail.
+  c_head   constant text := $h$      FROM power_plants p
      WHERE p.geom IS NOT NULL
        AND p.capacity_mw >= p_min_mw
-       -- mig 166 (Reality Check PR-3): stop sampling dead ground.
+$h$;
+  c_tail   constant text := $t$  ),
+  covered AS ($t$;
+  c_insert constant text := $i$       -- mig 166 (Reality Check PR-3): stop sampling dead ground.
        -- A unit is sampled when its SITE has an operating unit of any
        -- capacity. The key stays power_plants.id (R-1: the CEMS join).
        AND (
@@ -177,60 +145,67 @@ BEGIN
                   AND x.facility_id   = p.id::text
                   AND x.period        = p_day)
            )
-  ),
-  covered AS (
-    SELECT * FROM monitored m
-     WHERE firms_point_in_regions(m.latitude, m.longitude, p_regions)
-  ),
-  day_detections AS (
-    SELECT f.id, f.frp, f.geom
-      FROM firms_thermal_anomalies f
-     WHERE f.acq_date = p_day
-       AND f.geom IS NOT NULL
-  ),
-  hits AS (
-    SELECT c.facility_type,
-           c.facility_id,
-           COUNT(*)                                                        AS detection_count,
-           MAX(d.frp)                                                      AS max_frp,
-           MIN(ST_Distance(c.geom::geography, d.geom::geography)) / 1000.0 AS nearest_km
-      FROM day_detections d
-      JOIN covered c
-        ON ST_DWithin(c.geom::geography, d.geom::geography, p_radius_km * 1000)
-     GROUP BY 1, 2
-  )
-  INSERT INTO firms_facility_observations (
-    facility_type, facility_id, facility_name, country,
-    period, detection_count, max_frp, nearest_km, radius_km, computed_at
-  )
-  SELECT c.facility_type, c.facility_id, c.facility_name, c.country,
-         p_day,
-         COALESCE(h.detection_count, 0),
-         h.max_frp, h.nearest_km, p_radius_km, now()
-    FROM covered c
-    LEFT JOIN hits h
-      ON h.facility_type = c.facility_type
-     AND h.facility_id   = c.facility_id
-  ON CONFLICT (facility_type, facility_id, period) DO UPDATE
-    SET detection_count = EXCLUDED.detection_count,
-        max_frp         = EXCLUDED.max_frp,
-        nearest_km      = EXCLUDED.nearest_km,
-        radius_km       = EXCLUDED.radius_km,
-        computed_at     = now();
+$i$;
+  c_marker constant text := 'mig 166 (Reality Check PR-3)';
+  c_note   constant text := 'Mig 166 (Reality Check PR-3): this rollup is the sensor roster of FIRMS and Black Marble (the BM worker samples what FIRMS observed in the last 5 days). Its power branch samples a >= 500 MW unit only when the unit''s site (gem_location_id) has an operating unit of any capacity — dead ground is no longer sampled — and keeps re-deriving a removed site only on a day it already has a row for. Refineries unchanged. Heavy: called per day by /api/cron/ingest-firms.';
+  v_oid    oid;
+  v_old    text;
+  v_def    text;
+  v_new    text;
+  v_n      int;
+  v_cmt    text;
+BEGIN
+  v_oid := to_regprocedure(c_sig);
+  IF v_oid IS NULL THEN
+    RAISE EXCEPTION '166: % not found — nothing to change', c_sig;
+  END IF;
+  SELECT p.prosrc INTO v_old FROM pg_proc p WHERE p.oid = v_oid;
 
-  GET DIAGNOSTICS v_rows = ROW_COUNT;
-  RETURN v_rows;
-END;
-$function$;
+  IF position(c_marker IN v_old) > 0 THEN
+    -- Re-run. The exact predicate must still sit in the power branch.
+    IF position(c_head || c_insert || c_tail IN v_old) = 0 THEN
+      RAISE EXCEPTION '166: the live body carries the 166 marker but not the exact 166 predicate in the power branch (body md5 %). It was edited after 166 — stop; do not force.', md5(v_old);
+    END IF;
+    RAISE NOTICE '166: predicate already in place (body md5 %) — function unchanged', md5(v_old);
+  ELSE
+    v_n := (length(v_old) - length(replace(v_old, c_head || c_tail, ''))) / length(c_head || c_tail);
+    IF v_n <> 1 THEN
+      RAISE EXCEPTION '166: expected the power branch of `monitored` exactly once in the live body, found % (body md5 %). Another migration changed that branch — rebase 166 onto the live body; do not force.', v_n, md5(v_old);
+    END IF;
 
-COMMENT ON FUNCTION public.firms_derive_facility_observations(date, numeric, numeric, jsonb) IS
-  'Per-facility daily FIRMS rollup, and the sensor roster of both FIRMS and Black Marble (the BM worker samples what FIRMS observed in the last 5 days). Mig 085 body; mig 166 (Reality Check PR-3) narrows the power branch to units whose site (gem_location_id) has an operating unit of any capacity — dead ground is no longer sampled — and keeps re-deriving a removed site only on a day it already has a row for. Refineries unchanged. Heavy: called per day by /api/cron/ingest-firms.';
+    v_def := pg_get_functiondef(v_oid);
+    v_n := (length(v_def) - length(replace(v_def, c_head || c_tail, ''))) / length(c_head || c_tail);
+    IF v_n <> 1 THEN
+      RAISE EXCEPTION '166: the power branch occurs % times in the full definition — refusing to patch', v_n;
+    END IF;
 
--- ─── 3 · Grants, re-asserted by role name (mig 143 / 139 lesson) ───────
+    EXECUTE replace(v_def, c_head || c_tail, c_head || c_insert || c_tail);
+
+    SELECT p.prosrc INTO v_new FROM pg_proc p WHERE p.oid = to_regprocedure(c_sig);
+    IF v_new IS DISTINCT FROM replace(v_old, c_head || c_tail, c_head || c_insert || c_tail) THEN
+      RAISE EXCEPTION '166: the new body is not the old body plus the 166 predicate — rolled back';
+    END IF;
+    RAISE NOTICE '166: predicate inserted — base body md5 % (%), new body md5 %',
+      md5(v_old),
+      CASE md5(v_old) WHEN 'd3de0425a39ec36875e76106a47f85f5' THEN 'mig 085'
+                      WHEN '62b04fa280ef9a63e95ffea3b4618f04' THEN 'mig 164, PR-12 draft 5bce85e'
+                      ELSE 'another revision — record it in the PR' END,
+      md5(v_new);
+  END IF;
+
+  -- Comment: append the 166 note, keep whatever is already there.
+  v_cmt := obj_description(v_oid, 'pg_proc');
+  IF v_cmt IS NULL OR position('Mig 166' IN v_cmt) = 0 THEN
+    EXECUTE format('COMMENT ON FUNCTION %s IS %L', c_sig, concat_ws(' ', v_cmt, c_note));
+  END IF;
+END
+$patch$;
+
+-- ─── 2 · Grants, re-asserted by role name (mig 143 / 139 lesson) ───────
 REVOKE EXECUTE ON FUNCTION public.firms_derive_facility_observations(date, numeric, numeric, jsonb) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.firms_derive_facility_observations(date, numeric, numeric, jsonb) TO service_role;
 
--- ─── 4 · On the record (mig 137 pattern; idempotent on the PR) ─────────
+-- ─── 3 · On the record (mig 137 pattern; idempotent on the PR) ─────────
 -- It changes the population three machine families issue on, so it is a
 -- change-log row, not a silent change (build prompt D-5). `at` is also the
 -- cut timestamp the dated watch items in supabase/tests/pr3_guards.sql read.
@@ -243,13 +218,17 @@ COMMIT;
 -- ═══════════════════════════════════════════════════════════════════════
 -- VERIFY — read-only, ONE row. Run with the file (it is the last statement,
 -- so the SQL Editor shows it) and paste the row back. Expect:
---   body_is_166 true · marker true · anon_exec false · authenticated_exec
---   false · service_role_exec true · stale_3arg_overload false ·
---   change_log_rows 1 · roster_refinery 431 · roster_power 5046 ·
---   roster_total 5477 · rows_removed_pct 48.1 · refineries_dropped 0 ·
---   cems_rows 582 · cems_plants 401 · cems_min_mw 500 · cems_in_roster 582 ·
---   cems_bm_rows_on_power_plants_id 582
--- The roster columns apply the SAME predicate as §2 (a mirror, stated as
+--   predicate_once true · predicate_in_power_branch true ·
+--   twin_linking true (164 applied first, as planned; false only if 166 went
+--   on 085's body) · body '164 + 166' (or '085 + 166') · anon_exec false ·
+--   authenticated_exec false · service_role_exec true ·
+--   stale_3arg_overload false · change_log_rows 1 · roster_refinery 431 ·
+--   roster_power 5046 · roster_total 5477 · rows_removed_pct 48.1 ·
+--   refineries_dropped 0 · cems_rows 582 · cems_plants 401 · cems_min_mw 500 ·
+--   cems_in_roster 582 · cems_bm_rows_on_power_plants_id 582
+-- body reads 'other: <md5>' if PR-12 revised its function body after
+-- 5bce85e — fine as long as the two predicate_* columns are true; paste it.
+-- The roster columns apply the SAME predicate as §1 (a mirror, stated as
 -- such); the behavioural test that calls the function itself is
 -- supabase/tests/pr3_guards.sql (E1–E5, G1–G5). The region boxes mirror
 -- FIRMS_REGIONS (apps/web/lib/firms/client.ts, origin/main 0b0d4b1, 8
@@ -268,7 +247,7 @@ op_sites AS (
   SELECT DISTINCT gem_location_id FROM power_plants
    WHERE status = 'operating' AND gem_location_id IS NOT NULL
 ),
-roster AS (          -- mirror of §2 for a day not yet started
+roster AS (          -- mirror of §1 for a day not yet started
   SELECT 'refinery'::text AS facility_type, r.id::text AS facility_id
     FROM refineries r, regions g
    WHERE r.geom IS NOT NULL
@@ -281,7 +260,7 @@ roster AS (          -- mirror of §2 for a day not yet started
           OR p.gem_location_id IN (SELECT gem_location_id FROM op_sites))
      AND firms_point_in_regions(p.latitude, p.longitude, g.j)
 ),
-before_cut AS (      -- the roster FIRMS wrote the day before the cut (complete: see §2)
+before_cut AS (      -- the roster FIRMS wrote the day before the cut (complete: see §1)
   SELECT o.facility_type, o.facility_id
     FROM firms_facility_observations o
    WHERE o.period = COALESCE(
@@ -303,8 +282,16 @@ bm_night AS (        -- newest complete Black Marble night
      AND tiles_missing = 0 AND facilities_written > 0
 )
 SELECT
-  (SELECT md5(prosrc) = '970b5efc72895bbaeb6356d36fa3f896' FROM fn)             AS body_is_166,
-  (SELECT prosrc LIKE '%mig 166 (Reality Check PR-3)%' FROM fn)                  AS marker,
+  (SELECT (length(prosrc) - length(replace(prosrc, 'mig 166 (Reality Check PR-3)', '')))
+          / length('mig 166 (Reality Check PR-3)') = 1 FROM fn)                   AS predicate_once,
+  (SELECT position(E'       AND p.capacity_mw >= p_min_mw\n       -- mig 166 (Reality Check PR-3)' IN prosrc) > 0
+     FROM fn)                                                                    AS predicate_in_power_branch,
+  (SELECT prosrc LIKE '%firms_link_twins%' FROM fn)                              AS twin_linking,
+  (SELECT CASE md5(prosrc) WHEN '970b5efc72895bbaeb6356d36fa3f896' THEN '085 + 166'
+                           WHEN 'c4296bdc42502ae41f1e364476784099' THEN '164 + 166'
+                           WHEN 'd3de0425a39ec36875e76106a47f85f5' THEN '085, 166 NOT applied'
+                           WHEN '62b04fa280ef9a63e95ffea3b4618f04' THEN '164, 166 NOT applied'
+                           ELSE 'other: ' || md5(prosrc) END FROM fn)            AS body,
   (SELECT has_function_privilege('anon',          oid, 'EXECUTE') FROM fn)       AS anon_exec,
   (SELECT has_function_privilege('authenticated', oid, 'EXECUTE') FROM fn)       AS authenticated_exec,
   (SELECT has_function_privilege('service_role',  oid, 'EXECUTE') FROM fn)       AS service_role_exec,
