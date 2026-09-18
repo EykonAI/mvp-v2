@@ -62,6 +62,13 @@ function centroidOf(el: any): [number, number] | null {
   return null;
 }
 
+// country / iso_country / us_state are deliberately NOT in the payload.
+// Migration 158 backfilled them from Natural Earth boundaries (the OSM tags
+// this used to read, addr:country and ISO3166-1, are null on almost every
+// feature). The upsert is ON CONFLICT (id) DO UPDATE over the columns
+// sent, so sending them would wipe the backfill on every re-ingest. Rows this
+// route INSERTS arrive with them NULL; attribute them by re-running
+// apps/web/scripts/data/refinery-countries.py and shipping the new values.
 function rowFromElement(el: any) {
   const tags = el.tags || {};
   const c = centroidOf(el);
@@ -88,8 +95,6 @@ function rowFromElement(el: any) {
     product: pickStr(tags, 'product'),
     capacity_bpd: pickNum(tags, 'capacity:bpd', 'capacity_bpd'),
     start_date: pickStr(tags, 'start_date', 'opening_date'),
-    country: pickStr(tags, 'addr:country', 'is_in:country'),
-    iso_country: pickStr(tags, 'ISO3166-1', 'addr:country_code'),
     city: pickStr(tags, 'addr:city', 'is_in:city'),
     wiki_url,
     source_tags: tags,

@@ -2,7 +2,8 @@
 //
 // eYKON's data feeds encode country INCONSISTENTLY:
 //   • conflict_events.country            → FIPS 10-4 (GDELT): Ukraine="UP", Russia="RS"
-//   • refineries.country / firms facility obs / mines → ISO2: Ukraine="UA"
+//   • refineries.iso_country / firms facility obs / mines → ISO2: Ukraine="UA"
+//     (refineries.country holds the English name since migration 158)
 //   • power_plants.country               → full names: "Ukraine"
 //
 // A user or the model naturally types a country NAME ("Ukraine"), which

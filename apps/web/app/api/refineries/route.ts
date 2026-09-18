@@ -29,9 +29,16 @@ export async function GET(req: NextRequest) {
       .lte('longitude', lon_max)
       .limit(limit);
 
-    if (country) {
-      const c = country.toUpperCase();
-      query = query.or(`iso_country.eq.${c},country.ilike.%${country}%`);
+    // Migration 158 fills iso_country (ISO 3166-1 alpha-2) and country (the
+    // English name) on every row. A two-letter value is a code and matches
+    // iso_country only: as a substring of the English names, 'IR' would also
+    // return Iraq, 'US' Russia and Australia, 'IN' China and Argentina.
+    // Anything longer is a country name or name substring (e.g. "Saudi").
+    const c = country?.trim();
+    if (c) {
+      query = /^[A-Za-z]{2}$/.test(c)
+        ? query.eq('iso_country', c.toUpperCase())
+        : query.ilike('country', `%${c}%`);
     }
 
     const { data, error } = await query;
