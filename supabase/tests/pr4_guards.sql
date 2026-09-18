@@ -2,8 +2,12 @@
 --
 -- READ ONLY. Run in the Supabase SQL Editor AFTER applying 167 (whole file).
 -- Wrapped in BEGIN … ROLLBACK anyway, so nothing it touches can persist.
--- Each check RAISEs EXCEPTION on failure; a clean run ends with the PASS
--- notices below — paste them back.
+-- Each check RAISEs EXCEPTION on failure, which stops the script with its
+-- FAIL message. A clean run ends with ONE RESULT ROW ("PR-4 guards: PASS
+-- 1-5 …") — paste that row back, plus the PASS notices if the editor shows
+-- them. The row is the signal because the DO block and the ROLLBACK return
+-- no rows of their own: without it a clean run would read "Success. No rows
+-- returned", the same banner a file that never ran whole shows.
 --
 -- Existence first (D-1), then the build-prompt acceptance: power_plants is
 -- listed with its 2026-04-28 load and an age beyond its interval (stale →
@@ -93,3 +97,16 @@ END
 $$;
 
 ROLLBACK;
+
+-- RESULT ROW (read-only). Reached only when every check above passed: a FAIL
+-- aborts the script before this statement runs. Paste this row back.
+SELECT 'PR-4 guards: PASS 1-5 (exists, 8 registries, power_plants stale, one inside its interval, states closed)' AS result,
+       f.loaded_at::date          AS power_plants_loaded_on,
+       f.age_days                 AS power_plants_age_days,
+       f.expected_refresh_days    AS power_plants_interval_days,
+       f.freshness_state          AS power_plants_state,
+       (SELECT string_agg(w.table_name, ', ' ORDER BY w.table_name)
+          FROM public.reference_snapshot_freshness w
+         WHERE w.freshness_state = 'within_interval') AS inside_interval_no_chip
+  FROM public.reference_snapshot_freshness f
+ WHERE f.table_name = 'power_plants';
