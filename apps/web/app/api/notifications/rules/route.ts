@@ -302,9 +302,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Partial coverage is allowed but recorded on the rule, so the UI
-    // can state what is actually watched (e.g. Russia 971/1801 — the
-    // ru-ua bbox stops at 60E) instead of implying full national
-    // coverage.
+    // can state what is actually watched (e.g. Russia is partial — the
+    // ru-ua bbox stops at 74E; it read 971/1801 when it stopped at 60E)
+    // instead of implying full national coverage.
     savedConfig = {
       ...(firmsConfig as unknown as Record<string, unknown>),
       coverage_at_creation: {

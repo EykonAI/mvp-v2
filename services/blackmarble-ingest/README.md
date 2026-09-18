@@ -73,6 +73,8 @@ service's equivalent of `npm run build`.
      `SUPABASE_SERVICE_ROLE_KEY` — same values as the web service, so
      copying the variables from ais-ingest just works.
    - Optional: `BM_LAG_DAYS` (3), `BM_RESCAN_DAYS` (4), `BM_ROSTER_DAYS` (5).
+   - One-off only: `BM_BACKFILL_START` / `BM_BACKFILL_END` /
+     `BM_BACKFILL_FACILITY_IDS` (see Backfill) — never leave them set.
 
 ## Backfill (baselines from day one)
 Black Marble's archive goes back to 2012, so unlike FIRMS there is no
@@ -80,6 +82,26 @@ dead-air baseline wait. After the first clean scheduled run, backfill
 ~90 nights in month chunks (one-off manual runs with):
 
     BM_BACKFILL_START=2026-04-01 BM_BACKFILL_END=2026-04-30 python main.py
+
+### Backfilling sites added later (scoped backfill)
+A plain backfill **skips every night already complete** for the roster of the
+day (`completed_nights()`), so a facility added to the registry afterwards is
+never sampled on those nights — on 2026-09-18, 46 of 78 nights were complete.
+For those sites, add their ids:
+
+    BM_BACKFILL_START=2026-06-29 BM_BACKFILL_END=2026-07-31 \
+    BM_BACKFILL_FACILITY_IDS=way:59165930,relation:3532772 python main.py
+
+- The run visits **every** night in the window, for those ids only (their
+  tiles only), and upserts their rows like any other run.
+- It **does not write `blackmarble_ingest_runs`**: that table holds one row
+  per night describing the full roster, and a scoped pass would overwrite it.
+- It **refuses to start** if any id is not on the roster (no
+  `firms_facility_observations` row in the last `BM_ROSTER_DAYS`): wait until
+  FIRMS watches the site, then run it.
+- `BM_BACKFILL_FACILITY_IDS` without both dates is a fatal error, so a
+  forgotten variable cannot narrow the nightly ingest to a handful of sites.
+  Remove all three variables after the run.
 
 ## Verify (don't trust a green run)
 ```sql

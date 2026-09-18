@@ -40,6 +40,10 @@ Env:
   BM_H5_GROUP                HDF5 Data Fields group path override
   BM_BACKFILL_START/END      YYYY-MM-DD inclusive — overrides the
                              rolling window for a manual backfill run
+  BM_BACKFILL_FACILITY_IDS   comma-separated facility ids — scopes a
+                             BACKFILL run to those facilities (sites added
+                             to the registry after their nights completed;
+                             see scope_roster). Only with START/END.
 """
 
 from __future__ import annotations
@@ -83,6 +87,14 @@ RESCAN_DAYS = int(os.environ.get("BM_RESCAN_DAYS", "12"))
 ROSTER_DAYS = int(os.environ.get("BM_ROSTER_DAYS", "5"))
 BACKFILL_START = os.environ.get("BM_BACKFILL_START")
 BACKFILL_END = os.environ.get("BM_BACKFILL_END")
+# A plain backfill run cannot reach a facility that joined the roster
+# AFTER its nights were ingested: completed_nights() skips every night
+# already complete for the roster of the day, so the new site is never
+# sampled on them (46 of 78 nights were complete on 2026-09-18). A
+# scoped run visits every night in the window, for these ids only.
+BACKFILL_FACILITY_IDS = {
+    s.strip() for s in (os.environ.get("BM_BACKFILL_FACILITY_IDS") or "").split(",") if s.strip()
+}
 
 # ─── Collection 002 ────────────────────────────────────────────────
 # VNP46A2 moved from v001 (allData/5000) to v002 (allData/5200).
@@ -363,6 +375,24 @@ def load_roster() -> dict[str, list[dict]]:
     return by_tile
 
 
+def scope_roster(roster: dict[str, list[dict]],
+                 wanted: set[str]) -> tuple[dict[str, list[dict]], set[str]]:
+    """Restrict the roster to `wanted` facility ids (a scoped backfill).
+
+    Returns the scoped {tile: [facility…]} and the ids that are NOT on the
+    roster. The caller refuses to run when any id is missing: the roster is
+    the FIRMS-watched set, and sampling a site FIRMS does not watch would
+    break the 1:1 corroboration join this worker exists to keep."""
+    scoped: dict[str, list[dict]] = {}
+    seen: set[str] = set()
+    for tile, facilities in roster.items():
+        keep = [f for f in facilities if f["facility_id"] in wanted]
+        if keep:
+            scoped[tile] = keep
+            seen.update(f["facility_id"] for f in keep)
+    return scoped, wanted - seen
+
+
 # ─── NASA listing + granule processing ─────────────────────────────
 def assert_not_auth_bounce(r: requests.Response, what: str) -> None:
     """A bad/expired token doesn't 401 here — LAADS redirects to the
@@ -543,7 +573,17 @@ def completed_nights() -> set[str]:
         return set()
 
 
-def process_night(night: date, roster: dict[str, list[dict]]) -> None:
+def process_night(night: date, roster: dict[str, list[dict]],
+                  record_run: bool = True) -> None:
+    """Sample one night for `roster`.
+
+    record_run=False is the scoped backfill. blackmarble_ingest_runs holds
+    ONE row per night describing the FULL roster (upsert on night), and the
+    sensor-night census reads it; a scoped pass over a handful of tiles
+    would overwrite that row with its own tiles_expected and make a
+    complete night read as a different night. So a scoped run leaves the
+    run record alone: its evidence is the rows it writes (computed_at) and
+    this log."""
     published = list_night_files(night)
     expected = list(roster.keys())
     have = [t for t in expected if t in published]
@@ -551,6 +591,8 @@ def process_night(night: date, roster: dict[str, list[dict]]) -> None:
 
     if not have:
         log(f"{night}: 0/{len(expected)} tiles published — pending (NASA latency), skipping")
+        if not record_run:
+            return
         sb_upsert("blackmarble_ingest_runs", "night", [{
             "night": night.isoformat(),
             "tiles_expected": len(expected), "tiles_processed": 0,
@@ -589,6 +631,12 @@ def process_night(night: date, roster: dict[str, list[dict]]) -> None:
     if unavailable:
         log(f"{night}: {unavailable} tile(s) listed but not downloadable — night left incomplete")
 
+    if not record_run:
+        log(f"{night}: SCOPED {processed}/{len(expected)} tiles processed, "
+            f"{missing + unavailable} missing, {written} facility rows written "
+            f"(run record left untouched)")
+        return
+
     sb_upsert("blackmarble_ingest_runs", "night", [{
         "night": night.isoformat(),
         "tiles_expected": len(expected), "tiles_processed": processed,
@@ -608,6 +656,14 @@ def main() -> int:
             log(f"FATAL: {name} missing")
             return 1
 
+    scoped = bool(BACKFILL_FACILITY_IDS)
+    if scoped and not (BACKFILL_START and BACKFILL_END):
+        # A scoped ROLLING run would silently narrow the nightly ingest to a
+        # handful of sites — refuse rather than leave that variable set.
+        log("FATAL: BM_BACKFILL_FACILITY_IDS is only valid with BM_BACKFILL_START "
+            "and BM_BACKFILL_END — remove it, or set both dates")
+        return 1
+
     if BACKFILL_START and BACKFILL_END:
         start = date.fromisoformat(BACKFILL_START)
         end = date.fromisoformat(BACKFILL_END)
@@ -623,7 +679,19 @@ def main() -> int:
         log("FATAL: empty roster — no FIRMS-watched facilities found (is FIRMS ingest healthy?)")
         return 1
 
-    done = completed_nights()
+    if scoped:
+        roster, absent = scope_roster(roster, BACKFILL_FACILITY_IDS)
+        if absent:
+            log(f"FATAL: not on the roster (no firms_facility_observations row in the last "
+                f"{ROSTER_DAYS} days): {', '.join(sorted(absent))} — wait until FIRMS watches "
+                f"them, then re-run")
+            return 1
+        n = sum(len(v) for v in roster.values())
+        log(f"SCOPED backfill: {n} facilities across {len(roster)} tiles — every night in the "
+            f"window is visited (complete nights included) and no run record is written")
+        done: set[str] = set()
+    else:
+        done = completed_nights()
     todo = [n for n in nights if n.isoformat() not in done]
     skipped = len(nights) - len(todo)
     if skipped:
@@ -631,7 +699,7 @@ def main() -> int:
 
     for night in todo:
         try:
-            process_night(night, roster)
+            process_night(night, roster, record_run=not scoped)
         except AuthError as e:
             # One clear line, not a traceback repeated per night. Nothing
             # downstream can succeed until a human fixes the token.
