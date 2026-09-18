@@ -6,10 +6,17 @@ import { instrumentDataClock, windowVerdict } from './data-clock';
  * families.
  *
  *   a clear night at or above the frozen threshold -> observed = 1
- *   clear nights, none reaching it                 -> observed = 0
+ *   clear nights with a retrieval, none reaching it -> observed = 0
+ *   clear nights, none carrying a retrieval        -> VOID (Reality Check PR-1)
  *   NO confident_clear night in the window         -> VOID
  *
- * The third case is the whole reason this sensor can be trusted. Only 43% of
+ * A clear night counts only if it carries a radiance_3x3 retrieval. NULL is
+ * "no usable look", never zero — the same gate as the Reality Check
+ * classifier (build prompt D-4). The family base rates (mig 128/142 plan)
+ * were measured with max(radiance_3x3), which already skips NULLs; this
+ * brings the resolver into line with them.
+ *
+ * The VOID cases are the whole reason this sensor can be trusted. Only 43% of
  * readings are confident_clear, and cloud scatters city light back at the
  * sensor — cloudy pixels average 3,010 nW against 29.6 on clear ones. Scoring
  * a cloudy night as darkness would let weather confirm every outage claim we
@@ -68,7 +75,7 @@ export const resolveBlackmarble: Resolver = async (row, supabase) => {
 
   if (error) return null;
 
-  const clear = data ?? [];
+  const clear = (data ?? []) as ClearNight[];
   if (clear.length === 0) {
     // Cloud on every night of a window the instrument HAS published (the
     // data-clock guard above rules out "not yet published"). Still "we did
@@ -80,9 +87,34 @@ export const resolveBlackmarble: Resolver = async (row, supabase) => {
     };
   }
 
-  const lit = clear.some((r: { radiance_3x3: number | null }) => Number(r.radiance_3x3) >= threshold);
+  // THE RETRIEVAL GATE (Reality Check PR-1). A confident_clear night is only
+  // a look if it carries a retrieval: radiance_3x3 is NULL when no pixel of
+  // the 3x3 window had a high-quality retrieval that night (mig 091), and
+  // Number(null) is 0 — so before this gate a cloud-clear night with no
+  // retrieval was scored as a dark night. 2,534 confident_clear refinery
+  // nights through 2026-09-08 carry no radiance_3x3. Zero itself is a real
+  // measurement (18 genuine zeros) and stays a look.
+  const looked = clear.filter((r) => retrieval(r.radiance_3x3) !== null);
+  if (looked.length === 0) {
+    return {
+      observed: 0,
+      source_url: '/intel/calibration',
+      void_reason: `${clear.length} confident_clear night(s) for site ${siteKey} between ${period} and ${end}, none carrying a radiance_3x3 retrieval — not looked, not darkness`,
+    };
+  }
+
+  const lit = looked.some((r) => (retrieval(r.radiance_3x3) as number) >= threshold);
   return { observed: lit ? 1 : 0, source_url: '/intel/calibration' };
 };
+
+type ClearNight = { radiance_3x3: number | string | null; period: string };
+
+/** The retrieved radiance, or null when the night carries no retrieval. Never 0 for missing. */
+function retrieval(v: number | string | null | undefined): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
 /** site_key is `round(lat,4):round(lon,4)`; reverse-map by a bounded box, never float equality. */
 async function facilitiesAtSite(siteKey: string, supabase: SupabaseAny): Promise<string[] | null> {
