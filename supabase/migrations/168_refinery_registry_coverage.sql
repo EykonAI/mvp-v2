@@ -24,12 +24,12 @@
 -- WHY THE INGEST MISSED THEM. app/api/cron/ingest-osm-refineries asks Overpass
 -- for exactly three tags: man_made=petroleum_refinery, industrial=refinery,
 -- industrial=oil_refinery. Read from the OSM API on 2026-09-18, none of the 16
--- objects below carries any of them: 9 are industrial=oil (OSM's generic
--- "oil industry" value) and 7 are landuse=industrial with only a name. Adding
--- industrial=oil to the query is not a small fix — the route's own comment
--- records that the broader query returned ~125k features (oilfields,
--- vegetable-oil mills, paint factories), and 7 of the 16 would still be
--- missed. So they are inserted here by OSM id, and the route is not touched
+-- objects below carries any of them: 10 are industrial=oil (OSM's generic
+-- "oil industry" value) and 6 are landuse=industrial with no industrial=*
+-- tag at all. Adding industrial=oil to the query is not a small fix — the
+-- route's own comment records that the broader query returned ~125k features
+-- (oilfields, vegetable-oil mills, paint factories), and 6 of the 16 would
+-- still be missed. So they are inserted here by OSM id, and the route is not touched
 -- (PR-0 edits it).
 --
 -- WHAT KEEPS IT.

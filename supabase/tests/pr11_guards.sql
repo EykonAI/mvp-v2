@@ -117,10 +117,13 @@ BEGIN
     ('relation:4096524'), ('way:115832750'), ('relation:3138434'), ('way:186584015'))
   SELECT count(r.id),
          string_agg(i.id, ' ') FILTER (
+           -- NULL-safe: a NULL iso_country / country must FAIL, not slip
+           -- through a NOT IN that evaluates to NULL.
            WHERE r.id IS NULL
-              OR r.site_type <> 'refinery'
-              OR r.iso_country NOT IN ('RU', 'UA')
-              OR r.country NOT IN ('Russia', 'Ukraine')
+              OR r.site_type IS DISTINCT FROM 'refinery'
+              OR COALESCE(r.iso_country NOT IN ('RU', 'UA'), true)
+              OR COALESCE(r.country NOT IN ('Russia', 'Ukraine'), true)
+              OR COALESCE((r.iso_country, r.country) NOT IN (('RU', 'Russia'), ('UA', 'Ukraine')), true)
               OR r.geom IS NULL
               OR NOT public.firms_point_in_regions(r.latitude, r.longitude,
                    '[{"west":22,"south":44,"east":74,"north":62}]'::jsonb))

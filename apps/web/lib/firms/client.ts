@@ -53,9 +53,11 @@ export const FIRMS_REGIONS: FirmsRegion[] = [
   // claims and sat outside every box. 74 E covers its fence plus the 8 km
   // ingest proximity radius. The strip 60–74 E × 44–62 N adds ~1.87 M km²
   // (+36.8% of this box) and, read 2026-09-18, 2 refinery rows (Omsk, ЗИиОФ)
-  // and 33 power unit rows ≥ 500 MW on 16 sites to the watched set, and 5
+  // and 33 power unit rows ≥ 500 MW on 14 sites to the watched set, and 5
   // Black Marble tiles (h24v03, h24v04, h25v02, h25v03, h25v04) to its
-  // roster. The slug is unchanged, so the Railway shard command
+  // roster. Under migration 166's operating-site rule (PR-3) the power
+  // share is 18 rows on 4 sites and the tiles are 3 (h24v03, h25v02,
+  // h25v03). The slug is unchanged, so the Railway shard command
   // (?region=ru-ua) needs no edit.
   { slug: 'ru-ua', label: 'Russia / Ukraine', bbox: { west: 22, south: 44, east: 74, north: 62 } },
   // Gulf refining + export complex.
