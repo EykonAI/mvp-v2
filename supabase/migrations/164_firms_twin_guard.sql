@@ -132,6 +132,12 @@
 -- longer reproduce the stored count (reported as obs_skipped).
 -- Linking itself (all held days, ~3–10 s) runs inline in STEP 2.
 --
+-- ORDER WITH 166 (PR-3). 166 rewrites the same rollup function (its
+-- `monitored` CTE). Each file refuses to run over a body other than mig
+-- 085's or its own (§0 here, §1 there), so neither can silently undo the
+-- other: whichever is applied second raises, and is rebased onto the live
+-- body before it is re-applied.
+--
 -- NOT CHANGED HERE (listed in the PR): raw-row readers that count
 -- detections themselves — /api/firms (globe), cascade_node_sensor_status,
 -- compute-regime-shifts, the analyst tool's raw-row path — and Thermal
@@ -149,6 +155,37 @@
 -- linking pass runs in STEP 2, after this commits).
 -- ═══════════════════════════════════════════════════════════════
 BEGIN;
+
+-- ─── 0 · Refuse to overwrite a body this file was not written against ─
+-- Two functions are replaced below. Each must still be mig 085's body
+-- (md5(prosrc) read in production 2026-09-18) or this file's own (a
+-- re-run). Anything else means another migration replaced it after 085
+-- — most likely 166 (PR-3), which rewrites the rollup's `monitored` CTE
+-- and carries the mirror of this guard. Stop and rebase; never force:
+-- a silent CREATE OR REPLACE here would undo that change.
+DO $guard$
+DECLARE
+  v_derive text;
+  v_detect text;
+BEGIN
+  SELECT md5(p.prosrc) INTO v_derive FROM pg_proc p
+   WHERE p.oid = to_regprocedure('public.firms_derive_facility_observations(date, numeric, numeric, jsonb)');
+  SELECT md5(p.prosrc) INTO v_detect FROM pg_proc p
+   WHERE p.oid = to_regprocedure('public.firms_detect_significant_events(date, integer, integer, numeric, numeric, integer)');
+
+  IF v_derive IS NULL OR v_detect IS NULL THEN
+    RAISE EXCEPTION '164: firms_derive_facility_observations or firms_detect_significant_events not found — this file targets the mig 085 functions';
+  END IF;
+  IF v_derive NOT IN ('d3de0425a39ec36875e76106a47f85f5',     -- mig 085
+                      '62b04fa280ef9a63e95ffea3b4618f04') THEN                -- this file (re-run)
+    RAISE EXCEPTION '164: firms_derive_facility_observations body has changed since mig 085 (md5 %). Another migration (likely 166, PR-3) replaced it. Rebase 164 onto the live body; do not force.', v_derive;
+  END IF;
+  IF v_detect NOT IN ('03d071b9f728d3b31b0fa8ddcf3169f1',     -- mig 085
+                      '52ddb05ffac2f9c265381b7ee83dfab5') THEN                -- this file (re-run)
+    RAISE EXCEPTION '164: firms_detect_significant_events body has changed since mig 085 (md5 %). Rebase 164 onto the live body; do not force.', v_detect;
+  END IF;
+END
+$guard$;
 
 -- ─── 1 · The link ──────────────────────────────────────────────
 ALTER TABLE public.firms_thermal_anomalies
@@ -931,8 +968,8 @@ COMMIT;
 -- Expected details (production, 2026-09-18): superseded ≈ 19,502 and
 -- MODIS linked 0; Sweeny 078bc27e… → 9b852901… (2.02 MW canonical);
 -- wildfire a6265bc0… → e896c33b… (canonical keeps 1016.87); backfill
--- ~64 days queued. The backfill then drains on its own — re-run the
--- last two rows after ~10 minutes: pending 0, job gone.
+-- ~64 days queued. The backfill then drains on its own — re-run rows
+-- 12–13 after ~10 minutes: pending 0, job gone.
 -- ═══════════════════════════════════════════════════════════════
 SELECT n, check_name, ok, detail FROM (
   SELECT 1 AS n, 'twin_of column (uuid) on firms_thermal_anomalies' AS check_name,
@@ -1041,5 +1078,14 @@ SELECT n, check_name, ok, detail FROM (
          EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'firms-twin-backfill' AND active)
          OR NOT EXISTS (SELECT 1 FROM public.firms_twin_backfill_days WHERE done_at IS NULL AND attempts < 3),
          (SELECT schedule || ' · ' || command FROM cron.job WHERE jobname = 'firms-twin-backfill')
+  UNION ALL
+  SELECT 14, 'live rollup + detector bodies are this file''s (md5 of prosrc)',
+         (SELECT md5(prosrc) FROM pg_proc
+           WHERE oid = to_regprocedure('public.firms_derive_facility_observations(date,numeric,numeric,jsonb)'))
+           = '62b04fa280ef9a63e95ffea3b4618f04'
+         AND (SELECT md5(prosrc) FROM pg_proc
+               WHERE oid = to_regprocedure('public.firms_detect_significant_events(date,integer,integer,numeric,numeric,integer)'))
+           = '52ddb05ffac2f9c265381b7ee83dfab5',
+         NULL
 ) v
 ORDER BY n;
