@@ -235,8 +235,8 @@ GRANT  EXECUTE ON FUNCTION public.firms_derive_facility_observations(date, numer
 -- change-log row, not a silent change (build prompt D-5). `at` is also the
 -- cut timestamp the dated watch items in supabase/tests/pr3_guards.sql read.
 INSERT INTO public.ledger_change_log (at, pr, note)
-SELECT now(), '__PR__', 'sensor roster: FIRMS and night-lights stop sampling power sites with no operating unit (10,556 → 5,477 facility rows a night; refineries unchanged) — first_light and recovery families issue on the remaining sites only'
-WHERE NOT EXISTS (SELECT 1 FROM public.ledger_change_log WHERE pr = '__PR__');
+SELECT now(), '#531', 'sensor roster: FIRMS and night-lights stop sampling power sites with no operating unit (10,556 → 5,477 facility rows a night; refineries unchanged) — first_light and recovery families issue on the remaining sites only'
+WHERE NOT EXISTS (SELECT 1 FROM public.ledger_change_log WHERE pr = '#531');
 
 COMMIT;
 
@@ -285,7 +285,7 @@ before_cut AS (      -- the roster FIRMS wrote the day before the cut (complete:
   SELECT o.facility_type, o.facility_id
     FROM firms_facility_observations o
    WHERE o.period = COALESCE(
-           (SELECT (at AT TIME ZONE 'UTC')::date - 1 FROM public.ledger_change_log WHERE pr = '__PR__'),
+           (SELECT (at AT TIME ZONE 'UTC')::date - 1 FROM public.ledger_change_log WHERE pr = '#531'),
            (SELECT max(period) - 1 FROM firms_facility_observations))
 ),
 cohort AS (          -- R-1: watched ∩ US ∩ operating ∩ coal / oil/gas / bioenergy
@@ -310,7 +310,7 @@ SELECT
   (SELECT has_function_privilege('service_role',  oid, 'EXECUTE') FROM fn)       AS service_role_exec,
   to_regprocedure('public.firms_derive_facility_observations(date, numeric, numeric)') IS NOT NULL
                                                                                  AS stale_3arg_overload,
-  (SELECT count(*) FROM public.ledger_change_log WHERE pr = '__PR__')            AS change_log_rows,
+  (SELECT count(*) FROM public.ledger_change_log WHERE pr = '#531')            AS change_log_rows,
   (SELECT count(*) FROM roster WHERE facility_type = 'refinery')                 AS roster_refinery,
   (SELECT count(*) FROM roster WHERE facility_type = 'power_plant')              AS roster_power,
   (SELECT count(*) FROM roster)                                                  AS roster_total,
