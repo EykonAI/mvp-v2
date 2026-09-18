@@ -254,7 +254,9 @@ async function queryRefineries(input: Record<string, any>): Promise<string> {
     lon_min: String(input.lon_min),
     lon_max: String(input.lon_max),
   });
-  // refineries.country is ISO2. Translate name/ISO3/FIPS → ISO2.
+  // refineries.iso_country is ISO2 (mig 158; country is the English name).
+  // Translate name/ISO3/FIPS → ISO2; /api/refineries matches a 2-letter
+  // value against iso_country only, anything longer against the name.
   if (input.country) params.set('country', toIso2(String(input.country)) ?? String(input.country));
   const limit = Math.min(500, Math.max(1, Number(input.limit ?? 50)));
   const res = await fetch(`${APP_URL()}/api/refineries?${params.toString()}`);
