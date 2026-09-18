@@ -18,8 +18,18 @@ export const maxDuration = 120;
 //      matching the lane's origin_keywords (P2a port_calls derivation)
 //      — which upgrades the inference from 'destination' to
 //      'destination+port_call'.
-// Precision improves automatically as port_calls accumulates; today
-// that table is young/sparse, so most rows will be destination-only.
+//
+// Port-call coverage (migration 163). The upgrade in 3 is only as good as
+// the derivation behind it: a 21-day lookback with un-derived days cannot
+// say "no origin call", and one with v1-window rows says too much. So the
+// tick reads the coverage denominator first (port_call_window_coverage,
+// e.g. "coverage 15/21 days"), reads v2 episodes only, and:
+//   · minerals keep the 'destination+port_call' upgrade only when every
+//     day of the lookback is derived; otherwise the label degrades to
+//     'destination' — never a silent low count;
+//   · oil rows (which exist only because of a port call) step their
+//     confidence down one level and carry the coverage label in `method`.
+// The denominator is returned in the response either way.
 //
 // Pipeline per tick:
 //   1. Load mineral_route_map (seeded by migration 080).
@@ -36,6 +46,7 @@ export const maxDuration = 120;
 // Auth: Bearer <CRON_SECRET>.
 
 const PORT_CALL_LOOKBACK_DAYS = 21;
+const PORT_CALL_GENERATION = 'v2_day'; // mig 162: never read the legacy v1_window rows
 const STALE_AFTER_DAYS = 7;
 const PAGE_SIZE = 1000;
 const IN_CHUNK = 200;
@@ -54,6 +65,22 @@ type Vessel = {
   destination: string | null;
 };
 
+type PortCallCoverage = {
+  first_day: string;
+  last_day: string;
+  days_total: number;
+  days_derived: number;
+  days_partial: number;
+  days_samples_absent: number;
+  days_failed: number;
+  days_missing: number;
+  days_pending: number;
+  complete: boolean;
+  label: string;
+};
+
+const stepDown = (c: 'high' | 'medium'): 'medium' | 'low' => (c === 'high' ? 'medium' : 'low');
+
 function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
@@ -66,6 +93,19 @@ export async function POST(req: NextRequest) {
 
   const supabase = createServerSupabase();
   const errors: string[] = [];
+
+  // 0 ─ Port-call coverage over the lookback (mig 163). Unknown coverage
+  //     is treated as incomplete: the port-call evidence is not used.
+  let coverage: PortCallCoverage | null = null;
+  {
+    const { data, error } = await supabase.rpc('port_call_window_coverage', {
+      p_days: PORT_CALL_LOOKBACK_DAYS,
+    });
+    if (error) errors.push(`port_call_window_coverage: ${error.message}`);
+    else coverage = ((data ?? []) as PortCallCoverage[])[0] ?? null;
+  }
+  const coverageComplete = coverage?.complete === true;
+  const coverageLabel = coverage?.label ?? `coverage unknown/${PORT_CALL_LOOKBACK_DAYS} days`;
 
   // 1 ─ Trade lanes
   const { data: routes, error: routesErr } = await supabase
@@ -81,6 +121,7 @@ export async function POST(req: NextRequest) {
   if (laneList.length === 0) {
     return NextResponse.json({
       ok: true,
+      port_call_coverage: coverage ?? { complete: false, label: coverageLabel },
       routes: 0,
       candidates_scanned: 0,
       shipments_upserted: 0,
@@ -129,10 +170,11 @@ export async function POST(req: NextRequest) {
 
   const candidateMmsis = Array.from(new Set(candidates.map((c) => c.vessel.mmsi)));
 
-  // 3a ─ Recent port calls for candidates (may be sparse — P2a is young).
+  // 3a ─ Recent port calls for candidates — only when the lookback is fully
+  //      derived; an incomplete window cannot support the upgrade.
   type Call = { mmsi: string; port_name: string | null; arrived_at: string };
   const callsByMmsi = new Map<string, Call[]>();
-  if (candidateMmsis.length > 0) {
+  if (candidateMmsis.length > 0 && coverageComplete) {
     const sinceIso = new Date(
       Date.now() - PORT_CALL_LOOKBACK_DAYS * 24 * 3600_000,
     ).toISOString();
@@ -140,6 +182,7 @@ export async function POST(req: NextRequest) {
       const { data, error } = await supabase
         .from('port_calls')
         .select('mmsi, port_name, arrived_at')
+        .eq('derived_by', PORT_CALL_GENERATION)
         .in('mmsi', mmsis)
         .gte('arrived_at', sinceIso);
       if (error) {
@@ -262,6 +305,8 @@ export async function POST(req: NextRequest) {
   //   high   — AIS tanker class (80–89) + oil-port call
   //   medium — oil-port call, class unknown (free tier rarely sends
   //            static data; vessel_type is NULL on >99% of rows)
+  // Either steps down one level (high → medium, medium → low) when the
+  // lookback's port-call coverage is incomplete, and `method` says so.
   // Non-tanker classes (tugs, passenger, fishing) are skipped — a tug
   // at a refinery port is not a shipment. laden/cargo_class/eta stay
   // NULL until the paid AIS tier supplies static data; the columns
@@ -278,6 +323,8 @@ export async function POST(req: NextRequest) {
       type Cand = {
         mmsi: string; port_id: string; port_name: string | null;
         country_code: string | null; arrived_at: string; departed_at: string | null;
+        coverage_days_derived: number; coverage_days_total: number;
+        coverage_complete: boolean; coverage_label: string;
       };
       const cands = (candRows ?? []) as Cand[];
       const candMmsis = Array.from(new Set(cands.map(c => c.mmsi)));
@@ -306,7 +353,7 @@ export async function POST(req: NextRequest) {
         origin_country: string | null;
         destination: string | null;
         destination_kind: 'declared' | 'unknown';
-        confidence: 'high' | 'medium';
+        confidence: 'high' | 'medium' | 'low';
         method: string;
         coverage_scope: 'chokepoint';
         last_seen: string;
@@ -321,6 +368,9 @@ export async function POST(req: NextRequest) {
         // medium confidence (the free tier's static-data gap, stated).
         if (type !== null && !isTanker && !(type >= 70 && type <= 79)) continue;
         const destination = v?.destination?.trim() || null;
+        const baseConfidence: 'high' | 'medium' = isTanker ? 'high' : 'medium';
+        const baseMethod = isTanker ? 'tanker_class+oil_port_call' : 'oil_port_call (class unknown, free tier)';
+        const complete = c.coverage_complete === true;
         oilRows.push({
           commodity: 'oil',
           mmsi: c.mmsi,
@@ -330,8 +380,8 @@ export async function POST(req: NextRequest) {
           origin_country: c.country_code,
           destination,
           destination_kind: destination ? 'declared' : 'unknown',
-          confidence: isTanker ? 'high' : 'medium',
-          method: isTanker ? 'tanker_class+oil_port_call' : 'oil_port_call (class unknown, free tier)',
+          confidence: complete ? baseConfidence : stepDown(baseConfidence),
+          method: complete ? baseMethod : `${baseMethod} · port-call ${c.coverage_label}`,
           coverage_scope: 'chokepoint',
           last_seen: nowIso,
           status: 'underway',
@@ -363,6 +413,8 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     ok: errors.length === 0,
+    port_call_coverage: coverage ?? { complete: false, label: coverageLabel },
+    port_call_upgrade: coverageComplete ? 'applied' : `withheld — ${coverageLabel}`,
     routes: laneList.length,
     candidates_scanned: vessels.length,
     shipments_upserted: upserted,

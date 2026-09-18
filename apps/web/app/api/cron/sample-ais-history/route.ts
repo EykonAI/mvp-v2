@@ -17,8 +17,12 @@ export const maxDuration = 300;
 // since the last run produces a duplicate key and is skipped
 // (ignoreDuplicates), so the table stores one row per actual fix.
 //
-// Retention is enforced by the daily derive-port-calls cron, which
-// prunes rows older than 90 days (~4.4M rows / ~2 GB steady state).
+// Retention (migration 163) is the pg_cron job prune-ais-history: 14 days,
+// the longest reader lookback (shadow-fleet track + evidence pack +
+// refresh_vessel_cadence), deleting a UTC day only after the port-call
+// derivation (pg_cron, mig 162) has recorded it derived. At ~470k rows a
+// day that is ~6.6–7.1M rows / ~1.8–1.9 GB. The old 90-day prune in the
+// derive-port-calls route never ran: it sat behind an RPC that timed out.
 // Auth: Bearer <CRON_SECRET>.
 
 const PROFILE_PAGE = 1000;
