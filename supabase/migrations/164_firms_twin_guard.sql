@@ -132,18 +132,26 @@
 -- longer reproduce the stored count (reported as obs_skipped).
 -- Linking itself (all held days, ~3–10 s) runs inline in STEP 2.
 --
--- ORDER WITH 166 (PR-3). 166 rewrites the same rollup function (its
--- `monitored` CTE). Each file refuses to run over a body other than mig
--- 085's or its own (§0 here, §1 there), so neither can silently undo the
--- other: whichever is applied second raises, and is rebased onto the live
--- body before it is re-applied.
+-- ORDER WITH 166 (PR-3): APPLY 164 FIRST, THEN 166. 166 changes the same
+-- rollup function (the power branch of its `monitored` CTE). It does not
+-- carry a copy of any body: it reads the LIVE definition, inserts its
+-- predicate once, and proves the result is the old body plus that
+-- insertion. md5(pg_proc.prosrc) of the bodies this file installs:
+--   firms_derive_facility_observations  62b04fa280ef9a63e95ffea3b4618f04
+--   firms_detect_significant_events     52ddb05ffac2f9c265381b7ee83dfab5
+-- 166 on top of 164 gives the derive md5 c4296bdc42502ae41f1e364476784099
+-- (reproduced by applying 166's insertion to the body above). If 166 is
+-- applied FIRST, §0 below refuses to run: a CREATE OR REPLACE here would
+-- silently drop 166's predicate. After 166 lands on 164, re-running this
+-- file also stops at §0, by design, and VERIFY row 14 reads false.
 --
 -- NOT CHANGED HERE (listed in the PR): raw-row readers that count
 -- detections themselves — /api/firms (globe), cascade_node_sensor_status,
 -- compute-regime-shifts, the analyst tool's raw-row path — and Thermal
 -- anomaly_flags already emitted for events this retracts.
 --
--- Idempotent: safe to re-run whole. Apply MANUALLY in the Supabase SQL
+-- Idempotent: safe to re-run whole (until 166 is applied on top — see
+-- ORDER WITH 166 above). Apply MANUALLY in the Supabase SQL
 -- Editor BEFORE merge — the WHOLE file, not a highlighted selection —
 -- then paste back the VERIFY rows at the bottom.
 -- ═══════════════════════════════════════════════════════════════
@@ -160,9 +168,9 @@ BEGIN;
 -- Two functions are replaced below. Each must still be mig 085's body
 -- (md5(prosrc) read in production 2026-09-18) or this file's own (a
 -- re-run). Anything else means another migration replaced it after 085
--- — most likely 166 (PR-3), which rewrites the rollup's `monitored` CTE
--- and carries the mirror of this guard. Stop and rebase; never force:
--- a silent CREATE OR REPLACE here would undo that change.
+-- — most likely 166 (PR-3) applied out of order (the planned order is
+-- 164, then 166). Stop and rebase; never force: a silent CREATE OR
+-- REPLACE here would undo that change.
 DO $guard$
 DECLARE
   v_derive text;
