@@ -392,7 +392,7 @@ CREATE TRIGGER trg_predictions_nightlights_no_refinery
 
 -- ─── 5 · The decision, on the record ───────────────────────────────────
 INSERT INTO public.ledger_change_log (at, pr, note)
-SELECT now(), 'RC PR-5 · mig 170',
+SELECT now(), '#540 · mig 170',
        'refinery-rc (mig 170): four scored machine-track families issue from the first Reality Check tick — rc_heat_dark_persists, rc_site_stays_lit, rc_lead_light_persists and the near-certain rc_refutation_holds — by founder decision (2026-09-18/19) to issue before a measured record; every family counts in the machine-track headline. p = (k + 10) / (n + 20) from each family''s judged record, Calibrating until 90 judged. Not yet measurable: refinery recall (no ground truth — recall not measured), each family''s skill (n = 0) and its split-half stability. Refinery sites leave the night-lights families; a source with no resolver now resolves VOID, never 0.5.'
  WHERE NOT EXISTS (SELECT 1 FROM public.ledger_change_log WHERE note LIKE 'refinery-rc (mig 170)%');
 

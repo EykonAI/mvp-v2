@@ -674,7 +674,7 @@ SELECT '2027-02-15 12:00+00'::timestamptz,
 
 -- ─── 6 · The change log (D-5: no parameter or rule changes silently) ───
 INSERT INTO public.ledger_change_log (at, pr, note)
-SELECT now(), 'RC PR-5 · mig 169',
+SELECT now(), '#540 · mig 169',
        'Reality Check method (mig 169): the refinery population is site_type = ''refinery'' only — the 96 re-typed sites leave their complexes and the 59 complexes whose members were all re-typed are retired as dissolved (never deleted). A complex with heat and light both down but fewer than 12 baseline nights (no stability test possible) reads VOID_INSUFFICIENT_NIGHTS — never a lead. Stability test: KS on the baseline''s per-night medians, halves by count.'
  WHERE NOT EXISTS (SELECT 1 FROM public.ledger_change_log WHERE note LIKE 'Reality Check method (mig 169)%');
 
