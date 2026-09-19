@@ -277,7 +277,14 @@ export async function runRefineryRealityCheck(db: Db, now: Date = new Date()): P
     if (plan.kind === 'new') {
       const names = new Map(inputs.map((r) => [r.cluster_key, r.member_names ?? r.members]));
       out.claims = await issueRefineryClaims(db, { runId, windows: w, verdicts, names }, now);
-      if (out.claims.issuing) {
+      // Mark the tick as an issuing tick only when the issuer finished (or
+      // wrote claims). An issuer that FAILED before writing anything leaves
+      // claims_issued NULL: recording 0 would state "issuing tick, nothing to
+      // claim" — false — and would push the next issuing tick 14 nights out,
+      // losing a whole cycle of claims to one transient error. With NULL the
+      // next new tick (+7) issues; the failure itself is in the route's
+      // errors and in issuance_runs.
+      if (out.claims.issuing && (out.claims.error === null || out.claims.issued > 0)) {
         const { error } = await db.from('reality_check_runs').update({ claims_issued: out.claims.issued }).eq('id', runId);
         if (error) out.claims.error = [out.claims.error, `claims_issued: ${error.message}`].filter(Boolean).join(' · ');
       }

@@ -511,6 +511,9 @@ async function handle(req: NextRequest) {
   try {
     realityCheck = await runRefineryRealityCheck(supabase, today);
     if (realityCheck.error) errors.push(`reality-check tick: ${realityCheck.error}`);
+    // A REFUSED tick (stale registry, empty registry) publishes nothing: that
+    // is a failure of this run, not a quiet skip — say so in `errors`.
+    if (realityCheck.action === 'refused') errors.push(`reality-check tick refused: ${realityCheck.reason}`);
     if (realityCheck.claims?.error) errors.push(`reality-check claims: ${realityCheck.claims.error}`);
   } catch (e) {
     errors.push(`reality-check tick: ${e instanceof Error ? e.message : String(e)}`);

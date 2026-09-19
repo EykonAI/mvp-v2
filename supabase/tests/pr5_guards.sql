@@ -25,8 +25,9 @@
 --       days → VOID), light (< 3 usable clear nights with a retrieval → VOID;
 --       a clear night without a retrieval is not a dark night; zero is a
 --       value), refutation holds (LEAD in a next tick → false; VOID in both →
---       VOID), a retired key → VOID, an unpublished window → DEFER, and the
---       same window 45 days on → VOID
+--       VOID; fewer than 12 baseline nights — no LEAD possible — in both →
+--       VOID, in one → the other decides), a retired key → VOID, an
+--       unpublished window → DEFER, and the same window 45 days on → VOID
 --   V1–V8  a verdict row violating a 161 CHECK is still refused; the one new
 --       shape (dual-down, < 12 baseline nights → VOID_INSUFFICIENT_NIGHTS) is
 --       admitted and nothing wider
@@ -189,7 +190,9 @@ BEGIN
   RETURNING id INTO v_run3;
 
   -- verdict fixtures for refutation holds: -1 REFUTED then VOID (holds) ·
-  -- -2 REFUTED then LEAD (broken) · -3 VOID in both
+  -- -2 REFUTED then LEAD (broken) · -3 VOID in both · -7 untested in both
+  -- (8 baseline nights: no LEAD was possible, so no look) · -8 untested then
+  -- tested REFUTED (one look: holds)
   INSERT INTO public.reality_check_site_verdicts
     (run_id, cluster_key, members, member_count, verdict, coverage_state,
      baseline_nights, window_nights, baseline_median, window_median, baseline_min, baseline_max, window_min, window_max,
@@ -208,7 +211,15 @@ BEGIN
     (v_run1, 'RFC-S90-W180-3', '{rcg:x}', 1, 'VOID_NOT_OBSERVED', 'NOT_OBSERVED', 0, 0, NULL, NULL, NULL, NULL, NULL, NULL,
      0, 0, NULL, NULL, NULL, 0, 0, 0, 0, 'HEAT_NOT_OBSERVABLE', NULL, NULL, NULL),
     (v_run2, 'RFC-S90-W180-3', '{rcg:x}', 1, 'VOID_NOT_OBSERVED', 'NOT_OBSERVED', 0, 0, NULL, NULL, NULL, NULL, NULL, NULL,
-     0, 0, NULL, NULL, NULL, 0, 0, 0, 0, 'HEAT_NOT_OBSERVABLE', NULL, NULL, NULL);
+     0, 0, NULL, NULL, NULL, 0, 0, 0, 0, 'HEAT_NOT_OBSERVABLE', NULL, NULL, NULL),
+    (v_run1, 'RFC-S90-W180-7', '{rcg:x}', 1, 'REFUTED', 'OBSERVED', 8, 5, 100, 100, 50, 150, 90, 110,
+     8, 5, 100, 100, 'REFUTED', 31, 10, 15, 0, 'HEAT_DOWN', false, NULL, NULL),
+    (v_run2, 'RFC-S90-W180-7', '{rcg:x}', 1, 'STEADY', 'OBSERVED', 8, 5, 100, 100, 50, 150, 90, 110,
+     8, 5, 100, 100, 'STEADY', 31, 10, 15, 5, 'HEAT_STEADY', false, NULL, NULL),
+    (v_run1, 'RFC-S90-W180-8', '{rcg:x}', 1, 'REFUTED', 'OBSERVED', 8, 5, 100, 100, 50, 150, 90, 110,
+     8, 5, 100, 100, 'REFUTED', 31, 10, 15, 0, 'HEAT_DOWN', false, NULL, NULL),
+    (v_run2, 'RFC-S90-W180-8', '{rcg:x}', 1, 'REFUTED', 'OBSERVED', 20, 5, 100, 100, 50, 150, 90, 110,
+     20, 5, 100, 100, 'REFUTED', 31, 10, 15, 0, 'HEAT_DOWN', true, 0.2, 0.9);
 
   -- ═══ S · the source ════════════════════════════════════════════════
   BEGIN
@@ -256,6 +267,10 @@ BEGIN
               'rc_refutation_holds', '{"cluster_key":"RFC-S90-W180-2","members":["rcg:x"],"window_start":"2031-03-02","window_end":"2031-03-15","tick_data_clock":"2031-03-01"}', c_now_ok, 'ready', 0),
       ('R11', 'refutation holds: VOID in both ticks → VOID',
               'rc_refutation_holds', '{"cluster_key":"RFC-S90-W180-3","members":["rcg:x"],"window_start":"2031-03-02","window_end":"2031-03-15","tick_data_clock":"2031-03-01"}', c_now_ok, 'void', NULL),
+      ('R11b', 'refutation holds: fewer than 12 baseline nights in both next ticks (no LEAD possible) → VOID, never a free "holds"',
+              'rc_refutation_holds', '{"cluster_key":"RFC-S90-W180-7","members":["rcg:x"],"window_start":"2031-03-02","window_end":"2031-03-15","tick_data_clock":"2031-03-01"}', c_now_ok, 'void', NULL),
+      ('R11c', 'refutation holds: untested then a tested REFUTED → 1 (one tick could have called a LEAD)',
+              'rc_refutation_holds', '{"cluster_key":"RFC-S90-W180-8","members":["rcg:x"],"window_start":"2031-03-02","window_end":"2031-03-15","tick_data_clock":"2031-03-01"}', c_now_ok, 'ready', 1),
       ('R12', 'any family on a retired key → VOID',
               'rc_site_stays_lit', '{"cluster_key":"RFC-S90-W180-9","members":["rcg:l-lit"],"window_start":"2031-01-01","window_end":"2031-01-14","baseline_median":100}', c_now_ok, 'void', NULL),
       ('R13', 'an unpublished window DEFERS (light, heat, and fewer than two later ticks)',

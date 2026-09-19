@@ -34,7 +34,11 @@
 --       carry a retrieval (radiance NOT NULL — zero is a value, D-4).
 --   rc_refutation_holds    every REFUTED complex (near-certain): the complex
 --       is not a LEAD in either of the next two published ticks.
---       VOID when it is VOID (or absent) in both.
+--       A tick is a LOOK only if a LEAD was possible there: a non-VOID
+--       verdict with the stability test run (ks_tested, >= 12 baseline
+--       nights — §3.1: below 12 a complex can never be a LEAD). VOID when
+--       neither tick is a look (VOID, absent, or untested in both): a claim
+--       whose only possible outcome is "holds" is not scored (review of #540).
 -- Every family: VOID when the complex key has been retired (merged or
 -- dissolved) — §3.2, "void every open claim on the retired key" — and VOID
 -- with the instrument named when the window is still unpublished 45 days
@@ -99,6 +103,7 @@ DECLARE
   v_runs       bigint[];
   v_clocks     date[];
   v_verdicts   text[];
+  v_looks      boolean[];
 BEGIN
   IF p_feature IS NULL OR p_feature NOT IN ('rc_heat_dark_persists', 'rc_site_stays_lit',
                                             'rc_lead_light_persists', 'rc_refutation_holds') THEN
@@ -250,28 +255,37 @@ BEGIN
     RETURN jsonb_build_object('state', 'defer', 'reason',
              format('ticks published after %s: %s of 2', v_clock, coalesce(cardinality(v_runs), 0)));
   END IF;
-  SELECT array_agg(coalesce(v.verdict, 'ABSENT') ORDER BY u.o) INTO v_verdicts
+  -- At each tick: the verdict, and whether it was a LOOK — could this tick
+  -- have called the complex a LEAD? Only a non-VOID verdict whose stability
+  -- test ran (ks_tested; >= 12 baseline nights) can: below 12 nights §3.1
+  -- forbids a LEAD, so such a tick can confirm "holds" but never refute it.
+  -- Counting it would make the claim unfalsifiable there and inflate the
+  -- near-certain family's record (review of #540).
+  SELECT array_agg(CASE WHEN v.verdict IS NULL THEN 'ABSENT'
+                        WHEN v.verdict = 'LEAD' OR v.verdict LIKE 'VOID_%' OR v.ks_tested IS TRUE THEN v.verdict
+                        ELSE v.verdict || ' (untested: < 12 baseline nights, no LEAD possible)' END ORDER BY u.o),
+         array_agg(coalesce(v.verdict NOT LIKE 'VOID_%' AND v.ks_tested IS TRUE, false) ORDER BY u.o)
+    INTO v_verdicts, v_looks
     FROM unnest(v_runs) WITH ORDINALITY AS u(id, o)
     LEFT JOIN reality_check_site_verdicts v ON v.run_id = u.id AND v.cluster_key = v_key;
   IF 'LEAD' = ANY (v_verdicts) THEN
     RETURN jsonb_build_object('state', 'ready', 'observed', 0,
              'evidence', jsonb_build_object('runs', to_jsonb(v_runs), 'data_clocks', to_jsonb(v_clocks),
-                                            'verdicts', to_jsonb(v_verdicts)));
+                                            'verdicts', to_jsonb(v_verdicts), 'looks', to_jsonb(v_looks)));
   END IF;
-  IF (v_verdicts[1] LIKE 'VOID_%' OR v_verdicts[1] = 'ABSENT')
-     AND (v_verdicts[2] LIKE 'VOID_%' OR v_verdicts[2] = 'ABSENT') THEN
+  IF NOT (v_looks[1] OR v_looks[2]) THEN
     RETURN jsonb_build_object('state', 'void', 'void_reason',
-             format('%s was %s and %s in the next two ticks (runs %s, %s) — not observed, not held',
+             format('%s was %s and %s in the next two ticks (runs %s, %s) — no tick in which it could have been a LEAD (VOID, absent, or fewer than 12 baseline nights), not held',
                     v_key, v_verdicts[1], v_verdicts[2], v_runs[1], v_runs[2]));
   END IF;
   RETURN jsonb_build_object('state', 'ready', 'observed', 1,
            'evidence', jsonb_build_object('runs', to_jsonb(v_runs), 'data_clocks', to_jsonb(v_clocks),
-                                          'verdicts', to_jsonb(v_verdicts)));
+                                          'verdicts', to_jsonb(v_verdicts), 'looks', to_jsonb(v_looks)));
 END;
 $function$;
 
 COMMENT ON FUNCTION public.refinery_rc_resolution(text, jsonb, timestamptz) IS
-  'Reality Check PR-5 (mig 170): the resolution rule for the four refinery-rc families, read-only. Returns {state: ready|defer|void, observed, void_reason, evidence}. Resolves over the members frozen on the claim; VOID on a retired key, on thin coverage (< 12 of 14 FIRMS days; < 3 usable clear nights with a retrieval; VOID in both next ticks) and on a window still unpublished 45 days after it ends; DEFER before that. Called by lib/predictions/resolvers/refinery-rc.ts. Service role only.';
+  'Reality Check PR-5 (mig 170): the resolution rule for the four refinery-rc families, read-only. Returns {state: ready|defer|void, observed, void_reason, evidence}. Resolves over the members frozen on the claim; VOID on a retired key, on thin coverage (< 12 of 14 FIRMS days; < 3 usable clear nights with a retrieval; refutation holds: no next tick in which a LEAD was possible — VOID, absent or < 12 baseline nights in both) and on a window still unpublished 45 days after it ends; DEFER before that. Called by lib/predictions/resolvers/refinery-rc.ts. Service role only.';
 
 REVOKE EXECUTE ON FUNCTION public.refinery_rc_resolution(text, jsonb, timestamptz) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.refinery_rc_resolution(text, jsonb, timestamptz) TO service_role;
@@ -393,7 +407,7 @@ CREATE TRIGGER trg_predictions_nightlights_no_refinery
 -- ─── 5 · The decision, on the record ───────────────────────────────────
 INSERT INTO public.ledger_change_log (at, pr, note)
 SELECT now(), '#540 · mig 170',
-       'refinery-rc (mig 170): four scored machine-track families issue from the first Reality Check tick — rc_heat_dark_persists, rc_site_stays_lit, rc_lead_light_persists and the near-certain rc_refutation_holds — by founder decision (2026-09-18/19) to issue before a measured record; every family counts in the machine-track headline. p = (k + 10) / (n + 20) from each family''s judged record, Calibrating until 90 judged. Not yet measurable: refinery recall (no ground truth — recall not measured), each family''s skill (n = 0) and its split-half stability. Refinery sites leave the night-lights families; a source with no resolver now resolves VOID, never 0.5.'
+       'refinery-rc (mig 170): four scored machine-track families issue from the first Reality Check tick — rc_heat_dark_persists, rc_site_stays_lit, rc_lead_light_persists and the near-certain rc_refutation_holds — by founder decision (2026-09-18/19) to issue before a measured record; every family counts in the machine-track headline. p = (k + 10) / (n + 20) from each family''s judged record, Calibrating until 90 judged. rc_refutation_holds is scored only on a tick that could have called a LEAD (non-VOID, >= 12 baseline nights), else VOID. Not yet measurable: refinery recall (no ground truth — recall not measured), each family''s skill (n = 0) and its split-half stability. Refinery sites leave the night-lights families; a source with no resolver now resolves VOID, never 0.5.'
  WHERE NOT EXISTS (SELECT 1 FROM public.ledger_change_log WHERE note LIKE 'refinery-rc (mig 170)%');
 
 COMMIT;

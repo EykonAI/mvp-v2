@@ -297,7 +297,17 @@ export function classifyComplex(inp: ComplexInputs, w: TickWindows): VerdictRow 
   };
 }
 
-/** The five funnel terms (§2.2), counted by complex, with facility rows beside them. */
+/**
+ * The five funnel terms (§2.2), counted by complex, with facility rows beside them.
+ *
+ * `rows` are the MEMBERS of the complexes counted at each term (one complex
+ * verdict, all its members) — not a facility-by-facility classification. The
+ * two agree on the dark and outcome terms but not upstream: on the first-tick
+ * windows, pre-168 population, the complexes give 338 → 250 (319 member rows)
+ * → 86 (134) → 10 (12) → 9 (11) + 1 (1), while classifying each facility on
+ * its own gives the published 431 → 312 → 125 → 12 → 11 + 1. Any surface
+ * quoting a row figure must say which one it is.
+ */
 export interface Funnel {
   watched: number; observed: number; heat_observable: number; thermally_dark: number;
   refuted: number; lead: number; dark_withheld: number;

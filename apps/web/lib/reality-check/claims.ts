@@ -17,7 +17,9 @@ import { addDays, daysBetween, type TickWindows, type VerdictRow } from './class
  *                          clear-night radiance stays >= 0.60 × baseline.
  *   rc_lead_light_persists every LEAD complex — the same median stays below.
  *   rc_refutation_holds    every REFUTED complex — not a LEAD in either of
- *                          the next two published ticks (near-certain).
+ *                          the next two published ticks (near-certain). A
+ *                          tick counts only if a LEAD was possible there
+ *                          (non-VOID, >= 12 baseline nights); none → VOID.
  *
  * NO SELECTION. Which complexes get a claim is fixed by the tick's verdicts
  * (nights up to the data clock only); the number on the claim is the family's
@@ -122,7 +124,7 @@ export function statementFor(c: Candidate, label: string, w: TickWindows): strin
     case 'rc_lead_light_persists':
       return `${who}, a lead on the Reality Check tick of ${w.data_clock_night}: over the 14 Black Marble nights ${c.window_start}–${c.window_end}, its median clear-night radiance stays below 0.60 × its baseline median of ${fmt(r.baseline_median)} (${base}). VOID with fewer than 3 usable clear nights.`;
     case 'rc_refutation_holds':
-      return `${who}, refuted on the Reality Check tick of ${w.data_clock_night}: it is not a dual-confirmed lead in either of the next two Reality Check ticks. VOID if it is void in both.`;
+      return `${who}, refuted on the Reality Check tick of ${w.data_clock_night}: it is not a dual-confirmed lead in either of the next two Reality Check ticks. VOID unless at least one of those ticks could have called it a lead (a non-VOID verdict on >= 12 baseline nights, the stability test's floor).`;
   }
 }
 
