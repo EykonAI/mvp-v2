@@ -10,10 +10,11 @@
 //   · the rolling rule (lib/reality-check/tick.ts planTick);
 //   · the claim rules (lib/reality-check/claims.ts): p = (k + 10)/(n + 20),
 //     alternate ticks, which families a verdict calls for, no banned phrase,
-//     and decision C (founder, 2026-09-19): no claim window starts on a night
-//     already on disk at issue — driven through the real issuer on an
-//     in-memory register (a partly ingested night, a shrinking frontier lead,
-//     a row that appears inside the window);
+//     and decision C (founder, 2026-09-19): no light or heat claim window
+//     starts on a night already on disk at issue — driven through the real
+//     issuer on an in-memory register (a partly ingested night, a shrinking
+//     frontier lead, a Black Marble row and a FIRMS row that appear inside
+//     their windows);
 //   · the scorer default (lib/predictions/resolvers/index.ts): a source with
 //     no resolver resolves VOID, never 0.5; the refinery-rc wrapper maps the
 //     SQL rule's ready / defer / void faithfully.
@@ -259,8 +260,9 @@ check('light down is strict: exactly 0.60 × baseline is not down', C.lightDown(
 // ── 6b · decision C through the real issuer, on an in-memory register ──
 {
   // A PostgREST-shaped stand-in: eq / in / gte / lte / not-null / order / limit / range / insert.
-  // `frontier` forces the one unfiltered BM read (the frontier) to a stale answer — a row landing mid-issue.
-  const memDb = (tables, rpcs, { frontier } = {}) => {
+  // `frontier` forces the one unfiltered BM read (the frontier) to a stale answer — a row landing mid-issue;
+  // `firmsClock` does the same for the FIRMS clock (the one FIRMS read with limit 1).
+  const memDb = (tables, rpcs, { frontier, firmsClock } = {}) => {
     let nextId = 1;
     const from = (table) => {
       const st = { filters: [], orders: [], lim: null, off: 0, ins: null };
@@ -271,6 +273,7 @@ check('light down is strict: exactly 0.60 × baseline is not down', C.lightDown(
           return { data: rows, error: null };
         }
         if (table === 'blackmarble_facility_radiance' && frontier && st.filters.length === 0) return { data: [{ period: frontier }], error: null };
+        if (table === 'firms_facility_observations' && firmsClock && st.lim === 1) return { data: [{ period: firmsClock }], error: null };
         let rows = (tables[table] ?? []).filter((r) => st.filters.every((f) => f(r)));
         for (const [c, asc] of [...st.orders].reverse()) rows = [...rows].sort((a, b) => (a[c] < b[c] ? -1 : a[c] > b[c] ? 1 : 0) * (asc ? 1 : -1));
         return { data: rows.slice(st.off, st.lim === null ? undefined : st.off + st.lim), error: null };
@@ -347,6 +350,17 @@ check('light down is strict: exactly 0.60 × baseline is not down', C.lightDown(
   check('issuer: a window night on disk at issue → no claim at all, the error names it and lands in issuance_runs',
     rr.issued === 0 && t2.predictions_register.length === 0 && /Black Marble window 2026-09-10\.\.2026-09-23 already holds rows at issue for K1 \(1 night/.test(rr.error ?? '')
     && t2.issuance_runs.length === 1 && t2.issuance_runs[0].error === rr.error, { rr, runs: t2.issuance_runs });
+
+  // the heat family carries the same assertion: a FIRMS day lands inside the heat window between the FIRMS clock read and the count
+  const t3 = {
+    blackmarble_facility_radiance: bm('refinery', 'a', '2026-08-01', '2026-09-08'),
+    firms_facility_observations: [...bm('refinery', 'a', '2026-08-01', '2026-09-19'), { facility_type: 'refinery', facility_id: 'a', period: '2026-09-21' }],
+    reality_check_runs: [], predictions_register: [], issuance_runs: [],
+  };
+  const rh = await K.issueRefineryClaims(memDb(t3, rpcs, { firmsClock: '2026-09-19' }), { runId: 1, windows: C.windowsFor('2026-09-08'), verdicts: [v], names }, new Date('2026-09-20T10:22:00Z'));
+  check('issuer: a heat-window FIRMS day on disk at issue → no claim at all (light included), the error names it and lands in issuance_runs',
+    rh.issued === 0 && t3.predictions_register.length === 0 && /FIRMS window 2026-09-20\.\.2026-10-03 already holds rows at issue for K1 \(1 night/.test(rh.error ?? '')
+    && t3.issuance_runs.length === 1 && t3.issuance_runs[0].error === rh.error, { rh, runs: t3.issuance_runs });
 }
 
 // ── 7 · the scorer: no resolver, no score ───────────────────────────────

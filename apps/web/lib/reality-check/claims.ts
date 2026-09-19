@@ -23,7 +23,12 @@ import { addDays, daysBetween, type TickWindows, type VerdictRow } from './class
  *                          Its nominal window is the 14 nights after the
  *                          tick's data clock (the nights those ticks add).
  *
- * NOTHING OF A WINDOW IS ON DISK AT ISSUE (founder, 2026-09-19, decision C).
+ * NOTHING OF A LIGHT OR HEAT WINDOW IS ON DISK AT ISSUE (founder, 2026-09-19,
+ * decision C). Refutation holds is outside the rule: it resolves on the next
+ * two ticks, which do not exist at issue; its nominal window is informational
+ * (the resolver reads tick_data_clock) and may start on a night already
+ * partly on disk (09-09 on the first tick) — window_nights_on_disk_at_issue
+ * is null for it.
  * The light window starts on the first night strictly after the newest night
  * that holds ANY blackmarble_facility_radiance row (any facility type) when
  * the claim issues, and runs 14 nights. The BM data clock is the newest
