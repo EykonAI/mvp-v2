@@ -14,12 +14,21 @@ import { FIRMS_REGIONS, firmsRegionsAsJsonb } from '@/lib/firms/client';
  * What each field reproduces (measured read-only on production 2026-09-18):
  *
  *   refineriesWatched / refineriesRegistry
- *     firms_rule_coverage('refinery', NULL, NULL, <FIRMS_REGIONS boxes>)
- *       -> monitored_facilities / matching_facilities
- *     i.e. the refinery rows of firms_monitored_facilities that fall inside
- *     the FIRMS region boxes, over all refinery rows.            431 / 634
+ *     refinery_type_coverage(<FIRMS_REGIONS boxes>)            (migration 168)
+ *       -> watched_refineries / registry_refineries
+ *     firms_rule_coverage('refinery', NULL, NULL, <boxes>)'s own definition
+ *     of monitored / matching, restricted to refineries.site_type =
+ *     'refinery' (founder decision 2026-09-19): the crude-oil refineries
+ *     inside the FIRMS region boxes, over all crude-oil refineries. The 96
+ *     sites 168 re-typed (terminals, petrochemical works, gas plants, mills)
+ *     are still observed by FIRMS but are not counted here.
+ *                          353 / 554 once 168 is applied and ru-ua reaches 74 E
+ *     (Before 168 this read firms_rule_coverage over every refinery-tagged
+ *     row: 431 / 634 on 2026-09-18.) firms_rule_coverage itself is unchanged
+ *     — alert-rule creation still needs every row FIRMS observes — so there
+ *     is no fallback to it: if the RPC fails the figure is null ("—").
  *     The registry figure is NOT the watched figure — "634 refineries
- *     watched" was the defect this replaces.
+ *     watched" was the PR-10 defect.
  *
  *   thermalDay, thermalRefineryRows, thermalPowerUnitRows
  *     the newest period in firms_facility_observations and the rows the
@@ -73,24 +82,30 @@ function regionMeta() {
   };
 }
 
+/**
+ * Crude-oil refineries only (refineries.site_type = 'refinery', migration
+ * 168). Fails soft to null on any error — never to firms_rule_coverage, whose
+ * count includes the re-typed non-refineries.
+ */
 async function refineryCoverage(admin: SB): Promise<{ watched: number | null; registry: number | null }> {
   try {
-    const { data, error } = await admin.rpc('firms_rule_coverage', {
-      p_facility_type: 'refinery',
-      p_country: null,
-      p_facility_name: null,
+    const { data, error } = await admin.rpc('refinery_type_coverage', {
       p_regions: firmsRegionsAsJsonb(),
     });
     if (error) return { watched: null, registry: null };
     const row = (Array.isArray(data) ? data[0] : data) as
-      | { matching_facilities?: number | string; monitored_facilities?: number | string }
+      | { watched_refineries?: number | string | null; registry_refineries?: number | string | null }
       | null
       | undefined;
-    const watched = Number(row?.monitored_facilities);
-    const registry = Number(row?.matching_facilities);
+    // Number(null) is 0, so a missing field must stay null, not read as zero.
+    const toCount = (v: number | string | null | undefined): number | null => {
+      if (v == null) return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
     return {
-      watched: Number.isFinite(watched) ? watched : null,
-      registry: Number.isFinite(registry) ? registry : null,
+      watched: toCount(row?.watched_refineries),
+      registry: toCount(row?.registry_refineries),
     };
   } catch {
     return { watched: null, registry: null };

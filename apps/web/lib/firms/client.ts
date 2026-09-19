@@ -47,7 +47,19 @@ export interface FirmsRegion {
 
 export const FIRMS_REGIONS: FirmsRegion[] = [
   // Russian/Ukrainian refinery + grid belt — the long-range-strike beat.
-  { slug: 'ru-ua', label: 'Russia / Ukraine', bbox: { west: 22, south: 44, east: 60, north: 62 } },
+  //
+  // East edge 74 (was 60), Reality Check PR-11 / migration 168: the Omsk
+  // refinery (way:236507372, fence at 73.19–73.27 E) is named in strike
+  // claims and sat outside every box. 74 E covers its fence plus the 8 km
+  // ingest proximity radius. The strip 60–74 E × 44–62 N adds ~1.87 M km²
+  // (+36.8% of this box) and, read 2026-09-18, 2 refinery rows (Omsk, ЗИиОФ)
+  // and 33 power unit rows ≥ 500 MW on 14 sites to the watched set, and 5
+  // Black Marble tiles (h24v03, h24v04, h25v02, h25v03, h25v04) to its
+  // roster. Under migration 166's operating-site rule (PR-3) the power
+  // share is 18 rows on 4 sites and the tiles are 3 (h24v03, h25v02,
+  // h25v03). The slug is unchanged, so the Railway shard command
+  // (?region=ru-ua) needs no edit.
+  { slug: 'ru-ua', label: 'Russia / Ukraine', bbox: { west: 22, south: 44, east: 74, north: 62 } },
   // Gulf refining + export complex.
   { slug: 'gulf', label: 'Arabian Gulf', bbox: { west: 44, south: 22, east: 60, north: 34 } },
   // European refining.
@@ -67,7 +79,9 @@ export const FIRMS_REGIONS: FirmsRegion[] = [
   // unit rows sit on 5,808 locations). Do not quote it from here. The live
   // figures come from the named query in lib/marketing/watched-coverage.ts
   // (rev H, PR-10); on 2026-09-18 it read 431 of 634 refineries and 10,125
-  // power unit rows inside the boxes.
+  // power unit rows inside the boxes. Since migration 168 (PR-11) its
+  // refinery pair counts site_type = 'refinery' only — 353 of 554 with the
+  // ru-ua box at 74 E — while FIRMS still observes every refinery-tagged row.
   //
   // Boxes are split for SHARDING, not for geography: each is a
   // separate `?region=` target so one heavy region cannot starve the
