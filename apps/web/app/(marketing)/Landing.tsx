@@ -16,7 +16,7 @@ import { UseCases } from '@/components/landing/UseCases';
 import { NextStep } from '@/components/landing/NextStep';
 import { FounderVideo } from '@/components/landing/FounderVideo';
 import { ShowcaseRotator } from '@/components/landing/ShowcaseRotator';
-import { PILLAR_SLIDES, WORKSHEET_SLIDES } from '@/lib/marketing/showcase-slides';
+import { pillarSlides, WORKSHEET_SLIDES } from '@/lib/marketing/showcase-slides';
 
 // Billing cycle state — drives prices and CTAs across the pricing grid.
 type Cycle = 'monthly' | 'annual' | 'annual-crypto';
@@ -160,7 +160,7 @@ export function Landing() {
   const spotsDisplay = spotsLeft == null ? '—' : spotsLeft.toLocaleString('en-US');
 
   // Watched counts render COMPUTED, never as a literal (Reality Check rev H,
-  // PR-10). The registry holds 634 refineries; the thermal boxes watch fewer,
+  // PR-10). The registry holds more refineries than the thermal boxes watch,
   // and "634 refineries watched" said the first number with the second's
   // verb. The figure comes from the one named query
   // (lib/marketing/watched-coverage.ts) via /api/coverage/watched — the same
@@ -181,6 +181,9 @@ export function Landing() {
   }, []);
   const refineriesWatchedDisplay =
     watched?.refineriesWatched == null ? '—' : stat(watched.refineriesWatched);
+  // The P-01 globe slide quotes the REGISTRY count from the same response
+  // (crude-oil refineries, TP-2) — it was a 634 literal that went stale.
+  const pillarSlideList = pillarSlides(watched?.refineriesRegistry ?? null);
 
   // ── Pricing carousel state (§10). Static grid is the SSR / no-JS /
   // reduced-motion / narrow-viewport / "compare all" rendering; the
@@ -376,7 +379,7 @@ export function Landing() {
         {/* the section previously rendered as a static text grid, which  */}
         {/* is why the page shipped with no product imagery at all.       */}
         <ShowcaseRotator
-          slides={PILLAR_SLIDES}
+          slides={pillarSlideList}
           idPrefix="pillar"
           label="The platform, pillar by pillar"
           intervalMs={7000}

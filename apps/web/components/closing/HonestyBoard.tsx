@@ -66,7 +66,10 @@ export function HonestyBoard({ status }: { status: ClosingStatus }) {
               is reference data, not live coverage, and does not belong under
               LIVE & DENSE. What is live is the roster the thermal derivation
               wrote on its newest day — the same named query as every other
-              watched count. Power figures are generating-unit rows. */}
+              watched count. Refineries are crude-oil refineries only (mig
+              181), so this reads the homepage's figure, not the 96 re-typed
+              terminals and plants FIRMS also observes. Power figures are
+              generating-unit rows. */}
           <div className="cs-hrow" style={{ borderBottom: 0 }}><span>Thermal watch roster</span><em>{fmt(status.thermalRefineryRows)} refineries · {fmt(status.thermalPowerUnitRows)} power units · day of {status.thermalDay ?? '—'}</em></div>
         </div>
         <div className="cs-hcol">

@@ -37,21 +37,16 @@ export const PLATFORM_STATS = {
   /** select count(distinct theatre_slug) from posture_scores where computed_at > now() - interval '24 hours' */
   postureTheatres: 6,
 
-  /**
-   * select count(*) from refineries — the REGISTRY, not the watched set.
-   * Quote it only with a registry verb ("634 refineries" in the globe
-   * sentence, showcase-slides.ts). The WATCHED figure is deliberately NOT a
-   * constant here — it moves when a box widens or a site is re-typed, so it
-   * is computed at request time by the named query in
-   * lib/marketing/watched-coverage.ts (refineriesWatched) and rendered from
-   * that. Since migration 168 it counts crude-oil refineries only
-   * (site_type = 'refinery'): 353 inside the boxes once 168 and the 74 E
-   * ru-ua box are live (431 refinery-tagged rows on 2026-09-18, before).
-   * "634 refineries watched" was the defect (Reality Check rev H, PR-10).
-   * NOTE: after 168 this registry literal is itself stale — 650 rows, of
-   * which 554 are site_type = 'refinery' — and is left for a copy decision.
-   */
-  refineries: 634,
+  // refineries (634) was removed 2026-09-19 (TP-2). It was the registry row
+  // count, quoted in the P-01 globe slide, and migration 168 left it matching
+  // neither figure: 650 rows, of which 554 are crude-oil refineries
+  // (site_type = 'refinery') and 96 are re-typed terminals, petrochemical
+  // works, gas plants and mills. The registry figure is now computed per
+  // request like the watched figure — refineriesRegistry from the named query
+  // in lib/marketing/watched-coverage.ts (refinery_type_coverage, mig 168):
+  // 554 on 2026-09-19, read by Landing.tsx and passed to pillarSlides() in
+  // showcase-slides.ts. Quote it only with a registry verb; the WATCHED
+  // figure (refineriesWatched, 353) is the one that takes "watched".
 
   /** select count(*) from ports */
   seaports: 3803,

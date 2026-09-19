@@ -37,8 +37,10 @@ export const FIRMS_FACILITY_TYPES: readonly FirmsFacilityType[] = [
 export interface FirmsProximityConfig {
   /** null / undefined = any monitored facility class. */
   facility_type?: FirmsFacilityType | null;
-  /** Country name or ISO-2, matched against the facility's OWN stored
-   *  country. Blank = any. See the coverage caveat below. */
+  /** Full English country name ("Russia"), matched case-insensitively
+   *  against the facility's OWN stored country — refineries (since
+   *  migration 158) and power plants both store the English name, so an
+   *  ISO code matches nothing. Blank = any. See the coverage caveat below. */
   country?: string | null;
   /** Substring match on facility name. Blank = any. */
   facility_name?: string | null;
@@ -210,9 +212,12 @@ export function normaliseFirmsConfig(
  * Called at rule-creation time so we can REFUSE to save a rule that
  * can never fire. Two distinct ways that happens today:
  *
- *  1. No facility matches at all. Refinery country attribution is
- *     effectively absent (3 of 634 rows), so facility_type='refinery'
- *     + country='Russia' resolves to zero facilities.
+ *  1. No facility matches at all — a misspelt name, or an ISO code:
+ *     the country filter is an ILIKE on the English country name, so
+ *     'RU' matches nothing. (Refinery country was absent on 631 of 634
+ *     rows until migration 158 backfilled it; since then
+ *     facility_type='refinery' + country='Russia' resolves — 31
+ *     matching, 27 monitored on 2026-09-19.)
  *  2. Facilities match but none are ingested. China has 39,796
  *     facilities and zero inside any FIRMS bbox; every one of their
  *     observation rows reads detection_count = 0 forever, which looks

@@ -879,7 +879,7 @@ function FirmsProximityFields({
       </label>
 
       <label style={fieldLabel}>
-        Country <span style={hintStyle}>reliable for power plants; refinery attribution is sparse — prefer a name</span>
+        Country <span style={hintStyle}>full English name — not an ISO code</span>
         <input
           type="text"
           value={value.country}
