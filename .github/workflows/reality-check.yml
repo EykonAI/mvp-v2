@@ -1,0 +1,34 @@
+name: reality-check
+
+# Reality Check programme guards that can run without a database.
+#
+# The schema guards themselves (build prompt §3.2) live in the database as
+# CHECKs, views and triggers, and are exercised by supabase/tests/<pr>_guards.sql
+# in the Supabase SQL Editor — there is no test database in CI. What CI can
+# hold is the source-level fence: no average over radiance anywhere in the
+# Reality Check path (§3.2, guard 1: "means manufacture collapses").
+#
+# Node built-ins only, no install step, seconds to run.
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/**'
+      - 'apps/web/app/**'
+      - 'apps/web/lib/**'
+      - 'apps/web/components/**'
+      - 'apps/web/scripts/reality-check/**'
+      - '.github/workflows/reality-check.yml'
+  push:
+    branches: [main]
+
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: No mean over radiance in the Reality Check path (hard gate)
+        run: node apps/web/scripts/reality-check/check-no-mean.mjs
