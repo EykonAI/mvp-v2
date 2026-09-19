@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ClosingStatus } from '@/lib/closing/status';
+import { aisCoverageClause } from '@/lib/closing/ais-coverage';
 import { PERSONA_BY_ID, type PersonaId } from '@/lib/closing/personas';
 import { captureWithFirstTouch, campaignPropsFromLocation } from '@/lib/analytics/utm';
 import { rememberFirstTouch } from '@/lib/analytics/first-touch';
@@ -75,6 +76,14 @@ export function ClosingPage({
       captureWithFirstTouch({ event: 'proof_scrolled', depth: 2 });
     }
   }, [initialPersona, channel]);
+
+  // Vessel coverage, computed from ais_box_liveness on the server (rev H
+  // PR-10). This sentence said "chokepoint-only", which stopped being true on
+  // 2026-08-24; a computed clause cannot outlive the feed it describes.
+  const ais = aisCoverageClause(status);
+  const aisLimit = ais
+    ? `${ais.boxes}${ais.darkProse ? `, with ${ais.darkProse}` : ''}`
+    : 'regional, not global';
 
   const go = useCallback((n: 1 | 2 | 3) => {
     setStep(n);
@@ -196,6 +205,7 @@ export function ClosingPage({
               persona={p}
               turnstileSiteKey={turnstileSiteKey}
               onOfferUnlocked={unlockOffer}
+              aisCoverage={ais}
             />
 
             {offerUnlocked && (
@@ -266,7 +276,7 @@ export function ClosingPage({
                     </div>
                     <div className="cs-lsay">
                       The feeds are not all there yet. Four of nine INTEL workspaces are models,
-                      badged ILLUSTRATIVE, and vessel coverage is chokepoint-only. The roadmap to
+                      badged ILLUSTRATIVE, and vessel coverage is uneven — {aisLimit}. The roadmap to
                       full coverage runs about twelve months.
                     </div>
                     <div className="cs-lget">

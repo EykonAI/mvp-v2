@@ -1,4 +1,5 @@
 import type { ClosingStatus } from '@/lib/closing/status';
+import { aisCoverageClause } from '@/lib/closing/ais-coverage';
 
 /**
  * The honesty block (brief v1.3 §4.4, step 2 since v1.4). Live /
@@ -24,20 +25,21 @@ export function HonestyBoard({ status }: { status: ClosingStatus }) {
   // Per-box first (migration 110): the global figure alone reported the feed
   // LIVE while Hormuz had been silent for weeks, because a Europe-dense
   // aggregate cannot see one dead corridor. If any box is dark, say which.
-  const deadBoxes = status.aisDeadBoxes ?? [];
+  //
+  // The LIVE note used to read "thin, regional" — true before 2026-08-24, when
+  // ingest stepped up ~120x to four broad boxes plus six chokepoints. It now
+  // states the configured boxes and any dark one, from ais_box_liveness, so
+  // the cell describes the feed as it is today and not as it was (rev H PR-10).
+  const clause = aisCoverageClause(status);
+  const coverage = clause ? clause.boxes : 'regional, not global';
   const ais =
     status.aisDaysSince == null
       ? { label: 'AIS vessels', note: '—' }
       : status.aisDaysSince >= 1
         ? { label: 'AIS vessels', note: `DOWN ${status.aisDaysSince}d · provider quota` }
-        : deadBoxes.length > 0
-          ? {
-              label: 'AIS vessels',
-              note: `LIVE · thin — ${deadBoxes
-                .map(b => `${b.label} dark ${b.daysSince}d`)
-                .join(', ')}`,
-            }
-          : { label: 'AIS vessels', note: 'LIVE · thin, regional' };
+        : clause?.dark
+          ? { label: 'AIS vessels', note: `LIVE · ${coverage} — ${clause.dark}` }
+          : { label: 'AIS vessels', note: `LIVE · ${coverage}, density uneven` };
 
   return (
     <section className="cs-section" id="honesty">
@@ -57,10 +59,15 @@ export function HonestyBoard({ status }: { status: ClosingStatus }) {
           <div className="cs-hhead cs-hg">■ LIVE &amp; DENSE</div>
           <div className="cs-hrow"><span>FIRMS thermal</span><em>{fmt(status.thermal48h)} / 48h</em></div>
           <div className="cs-hrow"><span>GDELT conflict</span><em>{fmt(status.conflict48h)} / 48h</em></div>
-          <div className="cs-hrow"><span>Night-lights</span><em>{fmt(status.nightlightsFacilities)} facilities · night of {status.nightlightsNewestNight ?? '—'}</em></div>
+          <div className="cs-hrow"><span>Night-lights</span><em>{fmt(status.nightlightsClearReadings)} clear-sky readings · night of {status.nightlightsNewestNight ?? '—'}</em></div>
           <div className="cs-hrow"><span>Convergence</span><em>{fmt(status.convergences21d)} / 21d</em></div>
           <div className="cs-hrow"><span>OFAC entity graph</span><em>weekly</em></div>
-          <div className="cs-hrow" style={{ borderBottom: 0 }}><span>Infrastructure</span><em>~183k assets</em></div>
+          {/* Was "Infrastructure ~183k assets": 183,051 registry rows, which
+              is reference data, not live coverage, and does not belong under
+              LIVE & DENSE. What is live is the roster the thermal derivation
+              wrote on its newest day — the same named query as every other
+              watched count. Power figures are generating-unit rows. */}
+          <div className="cs-hrow" style={{ borderBottom: 0 }}><span>Thermal watch roster</span><em>{fmt(status.thermalRefineryRows)} refineries · {fmt(status.thermalPowerUnitRows)} power units · day of {status.thermalDay ?? '—'}</em></div>
         </div>
         <div className="cs-hcol">
           <div className="cs-hhead cs-ha">▲ DEGRADED — AND WE SAY SO</div>

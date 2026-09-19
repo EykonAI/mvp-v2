@@ -37,7 +37,16 @@ export const PLATFORM_STATS = {
   /** select count(distinct theatre_slug) from posture_scores where computed_at > now() - interval '24 hours' */
   postureTheatres: 6,
 
-  /** select count(*) from refineries */
+  /**
+   * select count(*) from refineries — the REGISTRY, not the watched set.
+   * Quote it only with a registry verb ("634 refineries" in the globe
+   * sentence, showcase-slides.ts). The WATCHED figure (431 on 2026-09-18:
+   * the refinery rows inside the FIRMS region boxes) is deliberately NOT a
+   * constant here — it moves when a box widens, so it is computed at request
+   * time by the named query in lib/marketing/watched-coverage.ts
+   * (refineriesWatched) and rendered from that. "634 refineries watched" was
+   * the defect (Reality Check rev H, PR-10).
+   */
   refineries: 634,
 
   /** select count(*) from ports */
@@ -70,11 +79,12 @@ export const PLATFORM_STATS = {
   /** select count(*) from entities — OFAC actor graph, rebuilt Mondays 03:00 UTC */
   ofacEntities: 2140,
 
-  /**
-   * select count(distinct facility_id) from blackmarble_facility_radiance
-   * where period = (select max(period) from blackmarble_facility_radiance)
-   */
-  nightLightsFacilities: 10556,
+  // nightLightsFacilities (10,556) was removed 2026-09-18 (rev H, PR-10). Its
+  // own query no longer reproduced it (10,412 on the night of 09-09), and the
+  // figure counted generating-unit ROWS as "facilities" — 10,125 power rows sit
+  // on 5,808 locations. The night-lights figure is now computed per request by
+  // lib/marketing/watched-coverage.ts (nightlightsClearReadings: confident-clear
+  // readings with a retrieval on the newest published night).
 } as const;
 
 /** Thousands separators, so 182417 reads as 182,417 in copy. */

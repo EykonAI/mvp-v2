@@ -1,6 +1,12 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { createServerSupabase } from '@/lib/supabase-server';
+import {
+  CALIBRATION_MIN_SAMPLE,
+  cohortSeriesFor,
+  lastJudgedCohort,
+  type Cohort,
+} from '@/lib/calibration/cohortHeadline';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 60;
@@ -25,8 +31,23 @@ export const metadata: Metadata = {
   },
 };
 
-const NAIVE_BRIER_BASELINE = 0.25;
-const AGGREGATE_MIN_N = 30;
+// The headline is the judged-only cohort reader (#508/#513), per track —
+// never a blended average. Until rev H PR-10 this page averaged an unordered
+// .limit(5000) of Brier scores across every track (0.263 on 2026-09-18): the
+// slice depended on scan order, and machine claims drowned the house track
+// the page exists to benchmark.
+const TRACKS = [
+  { key: 'house', label: 'House', sub: "eYKON's own forecasts" },
+  { key: 'machine', label: 'Machine', sub: 'sensor observables' },
+  { key: 'creator', label: 'Creators', sub: 'community forecasts' },
+] as const;
+
+interface TrackHeadline {
+  key: string;
+  label: string;
+  sub: string;
+  cohort: Cohort | null;
+}
 
 interface ResolvedRow {
   id: string;
@@ -45,12 +66,36 @@ interface ResolvedRow {
 
 interface CalibrationPageData {
   recent: ResolvedRow[];
-  aggregate: {
-    n: number;
-    avg_brier: number | null;
-    delta_vs_naive: number | null;
-  };
+  headlines: TrackHeadline[];
+  /** The cohort reader failed — the strip says so rather than showing a figure. */
+  headlineError: string | null;
   error: string | null;
+}
+
+/**
+ * Per-track headline from calibration_cohorts (mig 137/155) — the RPC the
+ * INTEL ledger route reads — through the shared judged-only reader.
+ * Aggregated in SQL, so there is no row cap to outgrow and no dependence on
+ * fetch order.
+ */
+async function loadHeadlines(
+  supabase: ReturnType<typeof createServerSupabase>,
+): Promise<{ headlines: TrackHeadline[]; error: string | null }> {
+  const empty = TRACKS.map((t) => ({ ...t, cohort: null }));
+  try {
+    const { data, error } = await supabase.rpc('calibration_cohorts', { p_days: 120 });
+    if (error) return { headlines: empty, error: error.message };
+    const tracks = ((data ?? {}) as { tracks?: Record<string, Cohort[]> }).tracks ?? {};
+    return {
+      headlines: TRACKS.map((t) => ({
+        ...t,
+        cohort: lastJudgedCohort(cohortSeriesFor(t.key, tracks[t.key] ?? []), CALIBRATION_MIN_SAMPLE),
+      })),
+      error: null,
+    };
+  } catch (e) {
+    return { headlines: empty, error: e instanceof Error ? e.message : 'cohort reader unavailable' };
+  }
 }
 
 async function loadCalibrationData(): Promise<CalibrationPageData> {
@@ -71,34 +116,14 @@ async function loadCalibrationData(): Promise<CalibrationPageData> {
       .map((r) => normaliseJoinedRow(r))
       .filter((r): r is ResolvedRow => r !== null);
 
-    const { data: allBriers, error: aggErr } = await supabase
-      .from('prediction_outcomes')
-      .select('brier')
-      .not('brier', 'is', null)
-      .limit(5000);
+    const { headlines, error: headlineError } = await loadHeadlines(supabase);
 
-    if (aggErr) throw new Error(aggErr.message);
-
-    const values = (allBriers ?? [])
-      .map((r) => Number((r as { brier?: number }).brier))
-      .filter((x) => Number.isFinite(x));
-
-    const n = values.length;
-    const avgBrier = n > 0 ? values.reduce((a, b) => a + b, 0) / n : null;
-    const deltaVsNaive =
-      avgBrier != null && n >= AGGREGATE_MIN_N
-        ? NAIVE_BRIER_BASELINE - avgBrier
-        : null;
-
-    return {
-      recent,
-      aggregate: { n, avg_brier: avgBrier, delta_vs_naive: deltaVsNaive },
-      error: null,
-    };
+    return { recent, headlines, headlineError, error: null };
   } catch (err) {
     return {
       recent: [],
-      aggregate: { n: 0, avg_brier: null, delta_vs_naive: null },
+      headlines: TRACKS.map((t) => ({ ...t, cohort: null })),
+      headlineError: null,
       error: err instanceof Error ? err.message : 'unknown error',
     };
   }
@@ -171,7 +196,7 @@ export default async function PublicCalibrationPage() {
     >
       <div style={{ maxWidth: 920, margin: '0 auto' }}>
         <PageHeader />
-        <AggregateStrip aggregate={data.aggregate} />
+        <HeadlineStrip headlines={data.headlines} error={data.headlineError ?? data.error} />
         <FeedSection rows={data.recent} error={data.error} />
         <HowItWorks />
         <Footer />
@@ -224,58 +249,57 @@ function PageHeader() {
   );
 }
 
-function AggregateStrip({
-  aggregate,
+function HeadlineStrip({
+  headlines,
+  error,
 }: {
-  aggregate: CalibrationPageData['aggregate'];
+  headlines: TrackHeadline[];
+  error: string | null;
 }) {
-  const { n, avg_brier, delta_vs_naive } = aggregate;
-  const ready = avg_brier != null && n >= AGGREGATE_MIN_N;
-
   return (
-    <section
-      style={{
-        background: 'var(--bg-panel)',
-        border: '1px solid var(--rule)',
-        borderRadius: 6,
-        padding: '20px 24px',
-        marginBottom: 32,
-        display: 'grid',
-        gridTemplateColumns: 'repeat(3, 1fr)',
-        gap: 24,
-      }}
-    >
-      <Stat
-        label="Resolved predictions"
-        value={n > 0 ? String(n) : '—'}
-        hint={n === 0 ? 'awaiting first resolutions' : null}
-      />
-      <Stat
-        label="Aggregate Brier"
-        value={ready ? avg_brier!.toFixed(3) : '—'}
-        hint={
-          ready
-            ? `lower is better · naive baseline ${NAIVE_BRIER_BASELINE.toFixed(2)}`
-            : `available at ${AGGREGATE_MIN_N}+ resolved`
-        }
-      />
-      <Stat
-        label="Edge vs naive"
-        value={
-          ready && delta_vs_naive != null
-            ? `${(delta_vs_naive >= 0 ? '+' : '−')}${Math.abs(delta_vs_naive).toFixed(3)}`
-            : '—'
-        }
-        hint={
-          ready
-            ? delta_vs_naive! >= 0
-              ? 'better than always-guess-0.5'
-              : 'worse than always-guess-0.5'
-            : 'requires ≥30 resolved'
-        }
-      />
+    <section style={{ marginBottom: 32 }}>
+      <div
+        style={{
+          background: 'var(--bg-panel)',
+          border: '1px solid var(--rule)',
+          borderRadius: 6,
+          padding: '20px 24px',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: 24,
+        }}
+      >
+        {headlines.map((h) => (
+          <Stat
+            key={h.key}
+            label={`${h.label} · last judged cohort`}
+            value={h.cohort?.skill != null ? fmtSkill(h.cohort.skill) : '—'}
+            hint={
+              h.cohort
+                ? `skill · issued ${h.cohort.day}${h.key === 'house' ? ' (week)' : ''} · n=${h.cohort.n} · Brier ${fmt3(h.cohort.brier)} · base ${fmt3(h.cohort.base_rate)}`
+                : error
+                  ? 'cohort reader unavailable'
+                  : `${h.sub} · no judged cohort with n≥${CALIBRATION_MIN_SAMPLE} yet`
+            }
+          />
+        ))}
+      </div>
+      <p style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--ink-dim)', margin: '10px 2px 0' }}>
+        Tracks never blend. Each headline is the newest issuance cohort in which every claim is past
+        its deadline and judged (house by week, the others by day), quoted only at{' '}
+        {`n≥${CALIBRATION_MIN_SAMPLE}`}. Skill = 1 − Brier ÷ base·(1−base): above zero beats always
+        predicting the cohort&apos;s own base rate, below zero does not.
+      </p>
     </section>
   );
+}
+
+function fmt3(v: number | null | undefined): string {
+  return v == null ? '—' : Number(v).toFixed(3);
+}
+
+function fmtSkill(v: number): string {
+  return `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`;
 }
 
 function Stat({

@@ -20,7 +20,12 @@ export interface RedditTarget {
   flairRequired: string | null;
 }
 
-export default function NewsjackActions({ draftId, posts, channel, publishTarget, redditTargets }: { draftId: string; posts: string[]; channel: string; publishTarget: string | null; redditTargets?: RedditTarget[] }) {
+// `held` — the draft links somewhere other than /start (founder decision 7,
+// lib/newsjack/promo-link.ts). The server refuses approve/mark_published for
+// it regardless; here the publish-shaped controls (Approve, Copy, Reddit
+// compose) are withheld so a held thread cannot be posted by hand either.
+// Reject stays, so the queue can be cleared.
+export default function NewsjackActions({ draftId, posts, channel, publishTarget, redditTargets, held = false }: { draftId: string; posts: string[]; channel: string; publishTarget: string | null; redditTargets?: RedditTarget[]; held?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -89,16 +94,20 @@ export default function NewsjackActions({ draftId, posts, channel, publishTarget
 
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
-      <button style={{ ...btn, borderColor: 'var(--teal)', color: 'var(--teal)' }} disabled={busy || !!done} onClick={() => act('approve')}>
-        {publishTarget ? `Approve + publish to ${publishTarget}` : 'Approve'}
-      </button>
+      {!held && (
+        <button style={{ ...btn, borderColor: 'var(--teal)', color: 'var(--teal)' }} disabled={busy || !!done} onClick={() => act('approve')}>
+          {publishTarget ? `Approve + publish to ${publishTarget}` : 'Approve'}
+        </button>
+      )}
       <button style={{ ...btn, borderColor: 'var(--amber)', color: 'var(--amber)' }} disabled={busy || !!done} onClick={() => act('reject')}>
         Reject
       </button>
-      <button style={btn} disabled={busy} onClick={copyThread}>
-        Copy
-      </button>
-      {channel === 'reddit' && (redditTargets ?? []).map((t) => (
+      {!held && (
+        <button style={btn} disabled={busy} onClick={copyThread}>
+          Copy
+        </button>
+      )}
+      {!held && channel === 'reddit' && (redditTargets ?? []).map((t) => (
         <a
           key={t.slug}
           href={t.url}

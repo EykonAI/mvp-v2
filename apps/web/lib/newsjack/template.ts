@@ -34,7 +34,10 @@ export function renderXThread(ev: Evidence): { posts: string[]; refUrl: string }
   posts.push(clip(`${verb}: ${ev.analystLine}`));
   if (ev.sources.length) posts.push(clip(`Sources: ${ev.sources.slice(0, 3).join(' · ')}`));
   const seats = ev.seatsRemaining != null ? ` Founding seats remaining: ${ev.seatsRemaining}/1,000.` : '';
-  posts.push(clip(`Open the live view: ${refUrl}.${seats}`));
+  // "Start here", not "Open the live view": the link is /start (decision 7,
+  // rev H PR-10), and a CTA that promises a view the page is not is the
+  // looks-alive-but-isn't failure in one line.
+  posts.push(clip(`Start here: ${refUrl}.${seats}`));
 
   return { posts, refUrl };
 }
@@ -60,7 +63,7 @@ export function renderLinkedIn(ev: Evidence): { body: string; refUrl: string } {
   const verb = ev.framing === 'live' ? 'Live on eYKON' : 'Analysis on eYKON';
   const src = ev.sources.length ? `Sources: ${ev.sources.slice(0, 4).join(', ')}.` : '';
   return {
-    body: [ev.headline, '', `${verb}: ${ev.analystLine}`, src, '', `The operational view: ${refUrl}`]
+    body: [ev.headline, '', `${verb}: ${ev.analystLine}`, src, '', `Start here: ${refUrl}`]
       .filter((l) => l !== '')
       .join('\n')
       .replace(/\n{3,}/g, '\n\n'),
@@ -73,7 +76,7 @@ export function renderSubstack(ev: Evidence): { body: string; refUrl: string } {
   const refUrl = withChannel(ev.replayUrl, CHANNEL_UTM.substack, { campaign: 'newsjack', medium: 'email' });
   const src = ev.sources.length ? `Sourced from ${ev.sources.slice(0, 5).join(', ')}.` : '';
   return {
-    body: [ev.headline, '', ev.analystLine, src, '', `Follow the live view and the resolving call: ${refUrl}`]
+    body: [ev.headline, '', ev.analystLine, src, '', `Start here: ${refUrl}`]
       .filter((l) => l !== '')
       .join('\n')
       .replace(/\n{3,}/g, '\n\n'),

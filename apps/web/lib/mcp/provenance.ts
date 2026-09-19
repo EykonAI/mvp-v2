@@ -35,6 +35,19 @@
 // A tool with NO entry here reports 'not_characterised'. Silence must
 // never read as health.
 
+import { FIRMS_REGIONS } from '@/lib/firms/client';
+
+// The thermal coverage caveat names the boxes from the ingest config itself,
+// so a widened box widens the caveat. It carries no count: the envelope is
+// static per tool, and the previous "10,556 of 13,262 facilities (79.6%)"
+// was a July pair that counted generating-unit rows as facilities. The live
+// figures are served by /mcp and /llms.txt from the named query
+// (lib/marketing/watched-coverage.ts) — rev H, PR-10, re-read 2026-09-18.
+const FIRMS_COVERAGE_CAVEAT =
+  `Coverage is the ${FIRMS_REGIONS.length} FIRMS regional boxes (${FIRMS_REGIONS.map((r) => r.label).join(', ')}): ` +
+  'refineries and power-plant units of 500 MW and up inside them. It is NOT global — facilities outside the boxes ' +
+  '(most of Latin America, Africa and Oceania) have NO DATA, not zero. Power figures are unit rows, not sites.';
+
 export type Grounding =
   | 'live'          // real ingest, and the audit found it dense
   | 'live_thin'     // real ingest, known-sparse coverage
@@ -70,7 +83,7 @@ export const TOOL_PROVENANCE: Record<string, ToolProvenance> = {
       'A detection is a HOT PIXEL, not a confirmed fire and never a strike. Attribution is inference.',
       'Absence of detection is NOT absence of fire — cloud cover and overpass timing both suppress detections.',
       'Gas flaring at a working refinery is baseline, not news. Deviation from a facility\'s own baseline is the signal.',
-      'Coverage is 10,556 of 13,262 facilities (79.6%). South America, Africa and Oceania are OUTSIDE the ingest boxes — those facilities have NO DATA, not zero.',
+      FIRMS_COVERAGE_CAVEAT,
     ],
   },
   query_nightlights: {
@@ -153,7 +166,10 @@ export const TOOL_PROVENANCE: Record<string, ToolProvenance> = {
     grounding: 'live',
     source: 'AIS dark-gap and flag-of-convenience scoring',
     caveats: [
-      'Depends on the AIS feed, which is thin and chokepoint-only. Gaps are measured on the DATA CLOCK, not the wall clock.',
+      // Was "thin and chokepoint-only" — false since the 2026-08-24 step to
+      // four broad boxes plus six chokepoints (the query_vessels caveat above
+      // was corrected in #517; this copy was missed). Re-read 2026-09-18.
+      'Depends on the AIS feed: four broad regional boxes plus six chokepoints, density uneven, and a box can go dark (Bab-el-Mandeb has had no fix since 2026-07-18). Gaps are measured on the DATA CLOCK, not the wall clock.',
       'A lead is a lead, not a finding.',
     ],
   },

@@ -8,6 +8,7 @@ import { composeForChannel } from '@/lib/copy/shared/compose';
 import { composeXThread } from '@/lib/copy/x-composer';
 import { eventExistsForSource, insertEvent, insertDraft, recentLeads as fetchRecentLeads } from '@/lib/newsjack/store';
 import { notifyFounder } from '@/lib/newsjack/notify';
+import { PROMO_LINK } from '@/lib/newsjack/promo-link';
 
 // The detect → package → draft → store loop (Newsjacking SOP §5). Runs from the
 // newsjack-detect cron; it NEVER publishes (approval happens in /admin/newsjack).
@@ -67,11 +68,10 @@ export async function runDetectTick(supabase: SB): Promise<TickResult> {
     recentLeads = [];
   }
 
-  // Convergence-only by default: convergences are multi-domain, higher-signal,
-  // and have a PUBLIC landing page (/c/[id]) that gives a cold reader real value.
-  // A single anomaly has no public page (only the gated globe), so newsjacking one
-  // would post a link that dead-ends at the login wall. Anomalies are opt-in via
-  // NEWSJACK_ANOMALY_SOURCE, until they get a public artifact of their own.
+  // Convergence-only by default: convergences are multi-domain and
+  // higher-signal. Anomalies are opt-in via NEWSJACK_ANOMALY_SOURCE. (Both
+  // now link to /start — decision 7 — so the old "public /c/ page" reason for
+  // preferring convergences no longer applies; the signal-quality one does.)
   const candidates = [
     ...(await collectConvergences(supabase)),
     ...(anomalySourceEnabled() ? await collectAnomalies(supabase) : []),
@@ -349,17 +349,15 @@ function buildHeadline(cand: Candidate): string {
   return `A ${cand.severity ?? ''} ${dom} anomaly is unfolding near ${where}.`.replace(/\s+/g, ' ').trim();
 }
 
-// Live-view URL. Convergences have a PUBLIC, focused, sourced landing page
-// (/c/[id]) — the ideal artifact for a cold reader, with no login wall. Anomalies
-// have no public page yet, so they fall back to the (gated) globe.
-function buildReplayUrl(cand: Candidate): string {
-  if (cand.source === 'convergence_event') {
-    return `${PUBLIC_BASE}/c/${cand.sourceRef}`;
-  }
-  if (cand.lat != null && cand.lon != null) {
-    return `${PUBLIC_BASE}/app?lat=${cand.lat.toFixed(3)}&lon=${cand.lon.toFixed(3)}`;
-  }
-  return `${PUBLIC_BASE}/app`;
+// The promoted link. Every draft points at https://eykon.ai/start and nowhere
+// else — founder decision 7 (18 Sep 2026, Reality Check rev H PR-10). It used
+// to be the public convergence page (/c/[id]) or a globe deep link; 21
+// published posts and 973 queued drafts carried a /c/ link, and the
+// approve/publish route now holds any draft that still does
+// (lib/newsjack/promo-link.ts). The candidate is unused on purpose: the link
+// no longer varies by event. Each channel writer still adds its utm tag.
+function buildReplayUrl(_cand: Candidate): string {
+  return PROMO_LINK;
 }
 
 function firstLine(text: string): string {

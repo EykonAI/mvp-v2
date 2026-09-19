@@ -61,7 +61,13 @@ export const FIRMS_REGIONS: FirmsRegion[] = [
   // globe showed China, India, Japan and the US as empty because
   // nobody was looking, not because nothing was burning.
   //
-  // With these, coverage is 10,556 / 13,262 = 79.6%.
+  // With these, coverage WAS measured as 10,556 / 13,262 = 79.6% on
+  // 2026-07-18 — and note what that pair counts: refinery rows plus power
+  // GENERATING-UNIT rows of 500 MW and up, not facilities or sites (10,125
+  // unit rows sit on 5,808 locations). Do not quote it from here. The live
+  // figures come from the named query in lib/marketing/watched-coverage.ts
+  // (rev H, PR-10); on 2026-09-18 it read 431 of 634 refineries and 10,125
+  // power unit rows inside the boxes.
   //
   // Boxes are split for SHARDING, not for geography: each is a
   // separate `?region=` target so one heavy region cannot starve the

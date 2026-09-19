@@ -444,9 +444,11 @@ async function firmsCoverage(supabase: any, sinceDate: string) {
     days_with_data_count: days.length,
     latest_day_covered: days.length ? days[days.length - 1] : null,
     failed_runs: failed.length,
+    // The example regions used to read "China, the Americas, East Asia" —
+    // all three have been inside the boxes since 2026-07-18 (rev H PR-10).
     note:
       'Ingest covers ONLY the monitored_regions bounding boxes. Facilities outside them ' +
-      '(e.g. China, the Americas, East Asia) return zero detections because they are not ' +
+      '(e.g. most of Latin America, Africa and Oceania) return zero detections because they are not ' +
       'watched — that is not evidence of quiet. Within a covered region, a zero means ' +
       'watched-and-nothing-detected, which still does not rule out a cloud-obscured fire.',
   };
@@ -591,8 +593,9 @@ const NIGHTLIGHTS_CAVEAT =
   '(cloud scatters city light back at the sensor and would fake both surges and collapses). Absence of a ' +
   'row is absence of a LOOK, never darkness. Counts are per PHYSICAL SITE, not per registry row. NASA ' +
   'publishes ~1-2 weeks behind: check coverage.lag_days and present findings as describing that week, not ' +
-  'last night. Thermal (FIRMS) and night-lights are independent sensors - corroborate across both before ' +
-  'characterising an outage.';
+  'last night. Thermal (FIRMS) and night-lights measure different physics (heat vs emitted light) but are ' +
+  'NOT independent sensors: both are NASA VIIRS-family and the same clouds blind both. Check both before ' +
+  'characterising an outage, and never present their agreement as independent confirmation.';
 
 /**
  * Coverage for night-lights answers. Anchored on the newest night that
@@ -621,7 +624,11 @@ async function nightlightsCoverage(supabase: any) {
   return {
     newest_night: newest,
     lag_days: lagDays,
-    roster: 'FIRMS-watched facilities only (~10,556 refineries + power plants) - not global.',
+    // No count here (rev H PR-10): "~10,556 refineries + power plants" counted
+    // generating-unit rows as plants and stopped reproducing. The roster is
+    // defined, and its live size is in the named query
+    // (lib/marketing/watched-coverage.ts).
+    roster: `FIRMS-watched facilities only - refineries and power-plant units of 500 MW and up inside the ${FIRMS_REGIONS.length} FIRMS region boxes; unit rows, not sites - not global.`,
     note:
       `Newest observed night is ${newest} (${lagDays} days behind today - normal NASA staged publishing). ` +
       'Answers describe that week, not last night. A facility outside the FIRMS-watched roster is not ' +

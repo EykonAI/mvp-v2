@@ -5,10 +5,12 @@ import { notFound } from 'next/navigation';
 import type { CSSProperties } from 'react';
 import { loadConvergence } from '@/lib/briefs/convergence';
 import { MiniMapClient } from '@/components/briefs/MiniMapClient';
+import { convergenceScoreLabel, CONVERGENCE_SCORE_TITLE } from '@/lib/intel/convergenceScore';
 
 // Public, unauthenticated convergence view (/c/[id]). This is the landing page
 // the Newsjacking Engine links to: a cold reader from X gets the full sourced
-// convergence readout — map, p-value, synthesis, contributing detectors — with
+// convergence readout — map, source-class count, synthesis, contributing
+// detectors — with
 // NO login wall, then a CTA to explore the live product. "Give before you ask."
 //
 // It lives OUTSIDE the (app) route group on purpose: the (app) layout redirects
@@ -81,7 +83,11 @@ export default async function PublicConvergencePage({ params }: { params: { id: 
 
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, margin: '18px 0 4px' }}>
           <h1 style={{ fontFamily: 'var(--f-display)', fontSize: 26, margin: 0, color: 'var(--ink)' }}>{c.location}</h1>
-          <span style={{ fontFamily: 'var(--f-mono)', fontSize: 12, color: 'var(--violet)', whiteSpace: 'nowrap' }}>p &lt; {c.jointPValue.toFixed(3)}</span>
+          {/* Not "p < {joint_p_value}": that column is 0.3 / K over K source
+              classes, a four-value lookup, never a p-value (rev H PR-10). */}
+          {convergenceScoreLabel(c.sourceClasses) && (
+            <span title={CONVERGENCE_SCORE_TITLE} style={{ fontFamily: 'var(--f-mono)', fontSize: 12, color: 'var(--violet)', whiteSpace: 'nowrap' }}>{convergenceScoreLabel(c.sourceClasses)}</span>
+          )}
         </div>
         <div style={{ ...eyebrow, marginBottom: 18 }}>{timeAgo(c.createdAt)}</div>
 

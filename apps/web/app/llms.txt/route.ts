@@ -14,15 +14,27 @@
 // is one env var.
 //
 // The coverage limits are stated here ON PURPOSE. An agent that learns
-// from this file that AIS is chokepoint-only and that night-lights lag
-// ~9 days will ask better questions and misreport less — and the
-// alternative is a demo it can falsify in a single call, which §13.9.8
-// records as the thing that loses a specialist's trust.
+// from this file which AIS boxes are live (and which are dark), which
+// regions thermal does not watch, and that night-lights lag ~9 days will
+// ask better questions and misreport less — and the alternative is a demo
+// it can falsify in a single call, which §13.9.8 records as the thing that
+// loses a specialist's trust. That cuts both ways: until 2026-09-18 this
+// file told agents AIS was "chokepoint-only" (false since the 2026-08-24
+// step to four broad boxes plus six chokepoints) and quoted a July thermal
+// coverage pair that counted unit rows as facilities. Coverage figures now
+// come from the named query (lib/marketing/watched-coverage.ts) and the AIS
+// line from ais_box_liveness (rev H, PR-10).
 
 import { NextResponse } from 'next/server';
 import { APP_URL } from '@/lib/url';
 import { CLAUDE_TOOLS, CITIZEN_AI_TOOLS } from '@/lib/anthropic';
 import { MCP_DAILY_LIMITS } from '@/lib/mcp/limits';
+import {
+  aisCoverageSentence,
+  loadAisBoxes,
+  loadWatchedCoverage,
+  thermalCoverageSentence,
+} from '@/lib/marketing/watched-coverage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,6 +46,7 @@ export async function GET() {
   const toolCount = CLAUDE_TOOLS.length;
   const citizenToolCount = CLAUDE_TOOLS.filter((t) => CITIZEN_AI_TOOLS.has(t.name)).length;
   const toolNames = CLAUDE_TOOLS.map((t) => `- \`${t.name}\` — ${t.description ?? ''}`).join('\n');
+  const [coverage, aisBoxes] = await Promise.all([loadWatchedCoverage(), loadAisBoxes()]);
 
   const body = `# eYKON.ai
 
@@ -67,9 +80,9 @@ Citizen-subset keys reach ${citizenToolCount} of these; paid keys reach all ${to
 
 ## Limits you should know before quoting eYKON
 
-- **Thermal (NASA FIRMS)**: a detection is a hot pixel, not a confirmed fire and never a strike. Coverage is 10,556 of 13,262 watched facilities — South America, Africa and Oceania are outside the ingest boxes and return NO DATA, not zero.
-- **Night-lights (NASA Black Marble)**: radiance is not power state, and NASA publication lags roughly 9 days. Any answer describes last week, not last night.
-- **Vessels (AIS)**: chokepoint-only on the current tier. Not global vessel coverage.
+- **Thermal (NASA FIRMS)**: a detection is a hot pixel, not a confirmed fire and never a strike. ${thermalCoverageSentence(coverage)}
+- **Night-lights (NASA Black Marble)**: radiance is not power state, and NASA publication lags roughly 9 days. Any answer describes last week, not last night. Thermal and night-lights are different physics (heat vs emitted light) from the same NASA VIIRS instrument family — not independent sensors: the same clouds blind both.
+- **Vessels (AIS)**: ${aisCoverageSentence(aisBoxes)}
 - **Conflict (GDELT)**: media-derived. It measures reporting, not ground truth.
 - **Critical minerals**: fixture-backed. Excluded from demos and not a measurement.
 - **Simulators** (\`run_chokepoint_scenario\`, \`run_sanctions_wargame\`): models over stored inputs. Never quote a modelled second-order effect as data.

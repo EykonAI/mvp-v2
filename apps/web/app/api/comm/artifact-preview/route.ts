@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase-server';
 import { getCurrentTier } from '@/lib/subscription';
 import { loadConvergence } from '@/lib/briefs/convergence';
 import type { ArtifactPreview } from '@/lib/comm/embeds';
+import { convergenceScoreLabel } from '@/lib/intel/convergenceScore';
 
 // Preview data for in-Space artifact cards (monetisation review §4.2).
 // Reads the SAME public data the /c/[id] and /q/[id] no-login pages
@@ -34,7 +35,11 @@ export async function GET(req: NextRequest) {
       kind,
       id,
       href: `/c/${id}`,
-      badge: `Convergence · p ${conv.jointPValue.toFixed(2)}`,
+      // Not "p 0.15": joint_p_value is 0.3 / K over K source classes, a
+      // lookup, never a p-value (rev H PR-10).
+      badge: convergenceScoreLabel(conv.sourceClasses)
+        ? `Convergence · ${convergenceScoreLabel(conv.sourceClasses)}`
+        : 'Convergence',
       title: conv.location,
       excerpt: truncate(conv.synthesis, 180),
       createdAt: conv.createdAt ?? null,

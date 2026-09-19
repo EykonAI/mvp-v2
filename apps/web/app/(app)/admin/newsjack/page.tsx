@@ -11,6 +11,7 @@ import NewsjackActions from './Actions';
 import { redditSubmitTargets } from '@/lib/newsjack/reddit-submit';
 import Filters from './Filters';
 import { parseFacets, filterDrafts, buildGroups, activeCount } from '@/lib/newsjack/review-filters';
+import { promoLinkHold } from '@/lib/newsjack/promo-link';
 
 export const metadata: Metadata = { title: 'Newsjack review — eYKON.ai', robots: { index: false, follow: false } };
 export const dynamic = 'force-dynamic';
@@ -149,6 +150,10 @@ export default async function NewsjackReviewPage({
 function DraftCard({ d }: { d: ReviewDraft }) {
   const meta: React.CSSProperties = { fontFamily: 'var(--f-mono)', fontSize: 10.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-faint)' };
   const isPending = d.event_status === 'drafted' && d.status === 'draft';
+  // Decision 7 (rev H PR-10): a draft whose link is not /start cannot be
+  // approved — the route refuses it (409) — so the card says so up front and
+  // offers only Reject, rather than a button that fails on click.
+  const hold = promoLinkHold({ ref_url: d.ref_url, posts: d.posts });
   return (
     <div style={{ border: '1px solid var(--rule)', borderRadius: 10, padding: '16px 18px', background: 'var(--surface, transparent)' }}>
       <div style={{ display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 10 }}>
@@ -216,8 +221,13 @@ function DraftCard({ d }: { d: ReviewDraft }) {
         <div style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--ink-dim)', marginTop: 10, wordBreak: 'break-all' }}>{d.ref_url}</div>
       )}
 
+      {isPending && hold && (
+        <div style={{ fontSize: 12, color: 'var(--amber)', marginTop: 10 }}>{hold}</div>
+      )}
+
       {isPending ? (
         <NewsjackActions draftId={d.draft_id} posts={d.posts} channel={d.channel} publishTarget={publishTargetFor(d.channel)}
+          held={!!hold}
           // Decided here for the same reason publishTarget is: only the server
           // sees the subreddit allowlist, and it should not ship to the client.
           redditTargets={d.channel === 'reddit' ? redditSubmitTargets(d.posts) : undefined} />

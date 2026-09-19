@@ -6,6 +6,7 @@ import { captureBrowser } from '@/lib/analytics/client';
 import { campaignPropsFromLocation } from '@/lib/analytics/utm';
 import { getBrowserDistinctId } from '@/lib/analytics/client';
 import type { Persona } from '@/lib/closing/personas';
+import type { AisCoverageClause } from '@/lib/closing/ais-coverage';
 
 /**
  * Step 3 — qualification (brief v1.4 §4.0, content spec §4.5).
@@ -120,12 +121,16 @@ export function QualifyForm({
   persona,
   turnstileSiteKey,
   onOfferUnlocked,
+  aisCoverage = null,
 }: {
   persona: Persona;
   turnstileSiteKey: string | null;
   /** Called on success with the server's destination — shown as the
    *  persona's alternative path beside the founding rate, not instead. */
   onOfferUnlocked: (destination: string) => void;
+  /** Live AIS box summary (lib/closing/ais-coverage.ts), for the theatre hint.
+   *  null = liveness unreadable; the hint then makes no quantified claim. */
+  aisCoverage?: AisCoverageClause | null;
 }) {
   const [markets, setMarkets] = useState<string[]>([]);
   const [theatres, setTheatres] = useState<string[]>([]);
@@ -269,8 +274,15 @@ export function QualifyForm({
         <div className="cs-field cs-fgroup">
           <label>Which theatres do you watch? <em>· up to 3</em></label>
           <Chips options={THEATRES} value={theatres} onToggle={multi(setTheatres, theatres, 3)} max={3} label="Theatres" />
+          {/* Was "Coverage is densest in these six and thinner outside them" —
+              not true: the densest AIS box is Europe + Med, Bab-el-Mandeb has
+              been dark since 2026-07-18 and Hormuz reports intermittently.
+              Computed from ais_box_liveness so it tracks the feed (rev H PR-10). */}
           <p className="cs-hint">
-            Coverage is densest in these six and thinner outside them. We&apos;d rather say so now.
+            {aisCoverage
+              ? `Vessel coverage runs across ${aisCoverage.boxes}${aisCoverage.densest ? `, densest in ${aisCoverage.densest}` : ''}${aisCoverage.darkProse ? ` — ${aisCoverage.darkProse}` : ''}. `
+              : 'Vessel coverage is regional, not global. '}
+            These six are not equally covered. We&apos;d rather say so now.
           </p>
         </div>
 

@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase-server';
 import { getAnthropic } from '@/lib/anthropic';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { safeError } from '@/lib/log';
+import { SYNTHESIS_SYSTEM_PROMPT, synthesisOverclaims } from '@/lib/intel/convergenceSynthesis';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 180;
@@ -30,12 +31,13 @@ const SOURCE_CLASS: Record<string, string> = {
   Energy: 'media',
   Maritime: 'sensor-ais',
   Thermal: 'sensor-firms',
-  // VIIRS night-lights. A SEPARATE class from thermal even though both
-  // ride on VIIRS: FIRMS measures mid-infrared radiant power from
-  // combustion, Black Marble measures visible-band emitted light. A
-  // refinery can stop flaring while its grid stays lit, or go dark
-  // while still hot — so the two genuinely corroborate each other
-  // rather than restating one measurement twice.
+  // VIIRS night-lights. A SEPARATE class from thermal because it is a
+  // different physical measurement: FIRMS measures mid-infrared radiant
+  // power from combustion, Black Marble measures visible-band emitted light,
+  // and a refinery can stop flaring while its grid stays lit. They are NOT
+  // independent instruments — both are NASA VIIRS-family and the same clouds
+  // blind both — and inside one 10° cell neither corroborates the other or
+  // anything else; they co-occur (rev H PR-10).
   Nightlights: 'sensor-viirs-dnb',
 };
 function sourceClass(domain: string): string {
@@ -124,16 +126,15 @@ export async function POST(req: NextRequest) {
       const r = await anthropic.messages.create({
         model: 'claude-opus-4-7',
         max_tokens: 160,
-        system:
-          'You are the eYKON Supervisor. Write one short English sentence describing what the cluster of anomalies means, in the voice of a senior analyst. No hedging, no lists. ' +
-          'corroboration_level tells you how independent the evidence is: "single-source" means every signal is media-derived (ACLED/GDELT) and could all stem from one news wave — say the activity is REPORTED, do not imply physical confirmation; ' +
-          '"sensor-confirmed" means a physical sensor (FIRMS thermal or AIS maritime) independently agrees — you may state the signals corroborate.',
+        system: SYNTHESIS_SYSTEM_PROMPT,
         messages: [
           {
             role: 'user',
+            // corroboration_level is deliberately NOT sent: its value
+            // "sensor-confirmed" was read by the model as licence to write
+            // "corroborated" (rev H PR-10). The classes carry the same facts.
             content: JSON.stringify({
               bbox: { lat, lon, size: CELL_DEG },
-              corroboration_level,
               source_classes: classes,
               flags: cluster.slice(0, 6),
             }),
@@ -141,7 +142,10 @@ export async function POST(req: NextRequest) {
         ],
       });
       const txt = r.content.filter((b): b is { type: 'text'; text: string } => b.type === 'text').map(b => b.text).join(' ').trim();
-      if (txt) synthesis = txt;
+      // The fence: an overclaiming sentence is dropped for the deterministic
+      // one above, never stored and never served on /c/[id].
+      if (txt && !synthesisOverclaims(txt)) synthesis = txt;
+      else if (txt) safeError('compute-convergences synthesis rejected (overclaim):', txt.slice(0, 200));
     } catch (err) {
       safeError('compute-convergences synthesis failed:', err);
     }
