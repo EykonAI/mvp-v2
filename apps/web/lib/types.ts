@@ -1,3 +1,4 @@
+import type { ReferenceSnapshot } from './reference/freshness';
 // ─── GeoJSON Canonical Types ───
 export interface EykonFeature {
   type: 'Feature';
@@ -138,6 +139,10 @@ export interface LayerState {
   error: string | null;
   count: number;
   lastFetch: string | null;
+  /** Reference registries only (e.g. /api/power-plants): the snapshot's load
+   *  date and freshness from reference_snapshot_freshness (migration 167).
+   *  Undefined for live feeds. */
+  snapshot?: ReferenceSnapshot | null;
 }
 
 // ─── Layer hierarchy ───

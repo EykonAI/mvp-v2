@@ -4,6 +4,7 @@ import { toFips, toIso2 } from './geography/country-codes';
 import { simulateChokepoint } from './intel/chokepoint';
 import { runWargame } from './intel/sanctions';
 import { FIRMS_REGIONS } from './firms/client';
+import { snapshotNote, unknownSnapshot } from './reference/freshness';
 
 const APP_URL = () => process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
@@ -155,10 +156,26 @@ async function queryPowerPlants(input: Record<string, any>): Promise<string> {
     const min = Number(input.min_capacity_mw);
     plants = plants.filter((p: any) => Number(p.capacity_mw) >= min);
   }
+  // The registry is a bulk-loaded snapshot (migration 167 measures its age;
+  // on 2026-09-18 it read 2026-04-28). Its load date and age ride in the
+  // payload, and a stale snapshot adds a note, so an agent cannot quote a
+  // unit's status as current without being told when the registry was taken.
+  // A response without the block is an unread age, not a fresh one.
+  const snapshot = data.snapshot ?? unknownSnapshot('power_plants');
+  const note = snapshotNote(snapshot);
   return JSON.stringify({
     count: plants.length,
     provider: data.provider,
     attribution: data.attribution,
+    snapshot: {
+      loaded_at: snapshot.loaded_at,
+      age_days: snapshot.age_days,
+      expected_refresh_days: snapshot.expected_refresh_days,
+      freshness_state: snapshot.freshness_state,
+      is_stale: snapshot.is_stale,
+      registry_rows: snapshot.row_count,
+    },
+    ...(note ? { snapshot_note: note } : {}),
     plants: plants.map((p: any) => ({
       id: p.id,
       plant_name: p.plant_name,
