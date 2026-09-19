@@ -79,7 +79,9 @@ export const FIRMS_REGIONS: FirmsRegion[] = [
   // unit rows sit on 5,808 locations). Do not quote it from here. The live
   // figures come from the named query in lib/marketing/watched-coverage.ts
   // (rev H, PR-10); on 2026-09-18 it read 431 of 634 refineries and 10,125
-  // power unit rows inside the boxes.
+  // power unit rows inside the boxes. Since migration 168 (PR-11) its
+  // refinery pair counts site_type = 'refinery' only — 353 of 554 with the
+  // ru-ua box at 74 E — while FIRMS still observes every refinery-tagged row.
   //
   // Boxes are split for SHARDING, not for geography: each is a
   // separate `?region=` target so one heavy region cannot starve the

@@ -40,12 +40,16 @@ export const PLATFORM_STATS = {
   /**
    * select count(*) from refineries — the REGISTRY, not the watched set.
    * Quote it only with a registry verb ("634 refineries" in the globe
-   * sentence, showcase-slides.ts). The WATCHED figure (431 on 2026-09-18:
-   * the refinery rows inside the FIRMS region boxes) is deliberately NOT a
-   * constant here — it moves when a box widens, so it is computed at request
-   * time by the named query in lib/marketing/watched-coverage.ts
-   * (refineriesWatched) and rendered from that. "634 refineries watched" was
-   * the defect (Reality Check rev H, PR-10).
+   * sentence, showcase-slides.ts). The WATCHED figure is deliberately NOT a
+   * constant here — it moves when a box widens or a site is re-typed, so it
+   * is computed at request time by the named query in
+   * lib/marketing/watched-coverage.ts (refineriesWatched) and rendered from
+   * that. Since migration 168 it counts crude-oil refineries only
+   * (site_type = 'refinery'): 353 inside the boxes once 168 and the 74 E
+   * ru-ua box are live (431 refinery-tagged rows on 2026-09-18, before).
+   * "634 refineries watched" was the defect (Reality Check rev H, PR-10).
+   * NOTE: after 168 this registry literal is itself stale — 650 rows, of
+   * which 554 are site_type = 'refinery' — and is left for a copy decision.
    */
   refineries: 634,
 

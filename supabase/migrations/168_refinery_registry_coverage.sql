@@ -73,11 +73,16 @@
 -- landuse=industrial polygons, parts of refineries, closed refineries) stay
 -- 'refinery': site_type says what a site IS, not whether it runs.
 --
--- WHO READS IT. Nothing yet. FIRMS and Black Marble keep observing every row
--- (their rosters do not read site_type, so no history is lost and a re-type
--- is reversible). The Reality Check board population (PR-5) and every
--- "watched refineries" figure filter site_type = 'refinery'; the funnel's
--- watched count is re-published after this merges.
+-- WHO READS IT. FIRMS and Black Marble keep observing every row (their
+-- rosters do not read site_type, so no history is lost and a re-type is
+-- reversible), and firms_rule_coverage / firms_monitored_facilities keep
+-- counting every row (alert rules and the 086 proximity prune depend on
+-- them). Every public "refineries watched" figure reads the new
+-- refinery_type_coverage() (section 4; founder decision 2026-09-19), which
+-- counts site_type = 'refinery' only: 353 watched of 554 once this file is
+-- applied and the ru-ua box (east 74) is deployed. The Reality Check board
+-- population (PR-5) filters the same way; the funnel's watched count is
+-- re-published after this merges.
 --
 -- NEW SITES START EMPTY. FIRMS history cannot be backfilled: the ingest keeps
 -- only detections within 8 km of an already-monitored facility and prunes the
@@ -291,7 +296,50 @@ INSERT INTO public.refineries (
     ('way:186584015', 'way', 186584015, 'Башнефть-УНПЗ', NULL, NULL, NULL, '1935', 'Russia', 'RU', NULL, 'https://www.wikidata.org/wiki/Q4479115', $tags${"barrier": "wall", "contact:website": "https://www.rosneft.ru/business/Downstream/refining/neftekompleksbashneft/", "industrial": "oil", "landuse": "industrial", "name": "Башнефть-УНПЗ", "name:ba": "Башнефть-ӨНЭЗ", "old_name": "Уфимский нефтеперерабатывающий завод", "start_date": "1935", "wikidata": "Q4479115", "wikipedia": "ru:Башнефть-УНПЗ"}$tags$::jsonb, 54.8467829, 56.0961959, 'refinery')
 ON CONFLICT (id) DO NOTHING;
 
--- ─── 4 · the dated follow-up, as a (manual) ledger watch item ──────────────
+-- ─── 4 · the public "refineries watched" figure counts refineries only ─────
+-- Founder decision 2026-09-19. The homepage / start / mcp / llms.txt figure
+-- (apps/web/lib/marketing/watched-coverage.ts) read firms_rule_coverage(
+-- 'refinery', NULL, NULL, <FIRMS_REGIONS>), which counts every row of
+-- refineries — after this file that includes the 96 re-typed terminals,
+-- petrochemical works, gas plants and mills. firms_rule_coverage and the
+-- firms_monitored_facilities view are NOT changed: alert-rule creation and the
+-- 086 proximity tag/prune read them, and must keep seeing every row FIRMS
+-- observes. This function is the same definition, restricted:
+--   registry_refineries = firms_rule_coverage's matching_facilities for
+--                         facility_type 'refinery' (no country / name filter)
+--   watched_refineries  = its monitored_facilities (inside p_regions, through
+--                         the same firms_point_in_regions; NULL regions → 0)
+-- both over refineries.site_type = 'refinery' only. It reads the view and
+-- joins refineries by primary key for site_type, so a later change to the
+-- view's refinery branch reaches both figures. SECURITY INVOKER: its only
+-- caller is the service-role client, which already reads both relations.
+CREATE OR REPLACE FUNCTION public.refinery_type_coverage(p_regions jsonb DEFAULT NULL)
+RETURNS TABLE (
+  watched_refineries  integer,
+  registry_refineries integer
+)
+LANGUAGE sql
+STABLE
+SET search_path = public
+AS $$
+  SELECT
+    COUNT(*) FILTER (
+      WHERE public.firms_point_in_regions(m.latitude, m.longitude, p_regions)
+    )::integer AS watched_refineries,
+    COUNT(*)::integer AS registry_refineries
+  FROM public.firms_monitored_facilities m
+  JOIN public.refineries f ON f.id = m.facility_id
+  WHERE m.facility_type = 'refinery'
+    AND f.site_type = 'refinery';
+$$;
+
+COMMENT ON FUNCTION public.refinery_type_coverage(jsonb) IS
+  'Mig 168: firms_rule_coverage(''refinery'', NULL, NULL, p_regions) restricted to refineries.site_type = ''refinery'' — watched_refineries = rows inside the FIRMS boxes, registry_refineries = all. Read by lib/marketing/watched-coverage.ts for every public "refineries watched" figure. Service role only.';
+
+REVOKE ALL ON FUNCTION public.refinery_type_coverage(jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.refinery_type_coverage(jsonb) TO service_role;
+
+-- ─── 5 · the dated follow-up, as a (manual) ledger watch item ──────────────
 -- ledger_watch_prove() (mig 147) has no predicate kind for "n nights per
 -- facility", so this item carries no proof and is flipped by hand; the query
 -- is the second one in the header.
@@ -307,6 +355,11 @@ COMMIT;
 -- lib/firms/client.ts), through the same firms_point_in_regions() the FIRMS
 -- rollup uses. Until the deploy, Omsk and ЗИиОФ are still outside ru-ua.
 -- Expected counts assume no OSM re-ingest between 2026-09-18 and the apply.
+-- Rows 15 and 16 were measured read-only on production 2026-09-19 by
+-- simulating this file (the 96 re-types by id + name guard, the 16 inserts)
+-- over the 634 live rows: 433 of them sit in the boxes after deploy, 96 of
+-- those are re-typed (all 96 are in a box), so 433 + 16 = 449 refinery-tagged
+-- and 449 − 96 = 353 site_type = 'refinery'; registry 650 and 650 − 96 = 554.
 WITH boxes(j) AS (
   SELECT '[{"west":22,"south":44,"east":74,"north":62},{"west":44,"south":22,"east":60,"north":34},{"west":-10,"south":35,"east":22,"north":60},{"west":100,"south":18,"east":146,"north":46},{"west":60,"south":5,"east":100,"north":37},{"west":95,"south":-11,"east":142,"north":20},{"west":-100,"south":24,"east":-52,"north":55},{"west":-130,"south":25,"east":-100,"north":55}]'::jsonb
 ),
@@ -378,6 +431,34 @@ checks(ord, check_name, expected, actual) AS (
   UNION ALL
   SELECT 12, 'ledger watch item seeded (manual, due ~40 days after apply)', '1',
          (SELECT count(*)::text FROM public.ledger_watch_items WHERE text LIKE 'Reality Check PR-11 (mig 168)%')
+  UNION ALL
+  SELECT 13, 'refinery_type_coverage present (signature · volatility · security)',
+         'refinery_type_coverage(p_regions jsonb) · STABLE · SECURITY INVOKER',
+         (SELECT concat_ws(' · ', p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')',
+                           CASE p.provolatile WHEN 's' THEN 'STABLE' WHEN 'i' THEN 'IMMUTABLE' ELSE 'VOLATILE' END,
+                           CASE WHEN p.prosecdef THEN 'SECURITY DEFINER' ELSE 'SECURITY INVOKER' END)
+            FROM pg_proc p WHERE p.oid = to_regprocedure('public.refinery_type_coverage(jsonb)'))
+  UNION ALL
+  SELECT 14, 'refinery_type_coverage EXECUTE grants',
+         'service_role true · anon false · authenticated false · PUBLIC false',
+         (SELECT concat_ws(' · ',
+                   'service_role '  || has_function_privilege('service_role',  p.oid, 'EXECUTE')::text,
+                   'anon '          || has_function_privilege('anon',          p.oid, 'EXECUTE')::text,
+                   'authenticated ' || has_function_privilege('authenticated', p.oid, 'EXECUTE')::text,
+                   'PUBLIC '        || (p.proacl IS NULL
+                                        OR EXISTS (SELECT 1 FROM aclexplode(p.proacl) a
+                                                    WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE'))::text)
+            FROM pg_proc p WHERE p.oid = to_regprocedure('public.refinery_type_coverage(jsonb)'))
+  UNION ALL
+  SELECT 15, 'refinery_type_coverage(boxes after deploy): watched · registry — the public figure, site_type = refinery only',
+         '353 · 554',
+         (SELECT concat_ws(' · ', c.watched_refineries, c.registry_refineries)
+            FROM public.refinery_type_coverage((SELECT j FROM boxes)) c)
+  UNION ALL
+  SELECT 16, 'firms_rule_coverage(''refinery'', boxes after deploy) unchanged: monitored · matching (every refinery-tagged row; minus 15 = the 96 re-typed)',
+         '449 · 650',
+         (SELECT concat_ws(' · ', c.monitored_facilities, c.matching_facilities)
+            FROM public.firms_rule_coverage('refinery', NULL, NULL, (SELECT j FROM boxes)) c)
   UNION ALL
   SELECT s.ord, 'site · ' || s.label || ' · ' || s.id, s.expected,
          (SELECT concat_ws(' · ', r.iso_country, r.country, r.site_type,

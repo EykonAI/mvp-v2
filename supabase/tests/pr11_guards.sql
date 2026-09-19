@@ -2,8 +2,13 @@
 --
 -- Run in the Supabase SQL Editor AFTER applying 168, the whole file. It wraps
 -- itself in BEGIN … ROLLBACK, so the writes it makes to prove each guard are
--- undone. Paste back the NOTICE lines: every one must read PASS. The first
--- FAIL raises and aborts the file (the ROLLBACK still leaves nothing behind).
+-- undone. The first FAIL raises and aborts the file (nothing is left behind).
+--
+-- PASS SIGNAL: the editor's result pane shows ONE row,
+--   result = 'PR-11 guards: all 8 assertions passed (0–7) …'
+-- It is the file's last statement and is reached only when no assertion
+-- raised; any failure shows the FAIL error instead and no row. The NOTICE
+-- lines (one PASS per assertion) are the detail, if the editor shows them.
 --
 -- What each test proves, and what would make it fail:
 --   0  the column and the CHECK exist                   (168 not applied)
@@ -14,6 +19,11 @@
 --   5  the 16 inserted rows are refineries with a country, a geom and a point
 --      inside the widened ru-ua box                     (insert or trigger lost)
 --   6  the re-typed rows left the refinery population   (re-type not applied)
+--   7  the public "refineries watched" figure (refinery_type_coverage) counts
+--      site_type = 'refinery' only: a re-typed site inside the boxes is not
+--      counted, a new refinery inserted inside the boxes is counted (and one
+--      outside only in the registry), and it equals firms_rule_coverage minus
+--      the non-refinery rows; service_role only   (filter or grants lost)
 
 BEGIN;
 
@@ -153,4 +163,93 @@ BEGIN
 END
 $$;
 
+-- 7 · the public "refineries watched" figure counts site_type = 'refinery' only.
+-- The boxes are FIRMS_REGIONS after this PR deploys (ru-ua east 74) — the
+-- jsonb lib/marketing/watched-coverage.ts passes. Checked as identities and
+-- deltas, not absolute numbers, so an OSM re-ingest cannot fail it.
+DO $$
+DECLARE
+  boxes constant jsonb := '[{"west":22,"south":44,"east":74,"north":62},{"west":44,"south":22,"east":60,"north":34},{"west":-10,"south":35,"east":22,"north":60},{"west":100,"south":18,"east":146,"north":46},{"west":60,"south":5,"east":100,"north":37},{"west":95,"south":-11,"east":142,"north":20},{"west":-100,"south":24,"east":-52,"north":55},{"west":-130,"south":25,"east":-100,"north":55}]';
+  w0 int; g0 int; w1 int; g1 int; w2 int; g2 int; w3 int; g3 int;
+  mon int; mat int; nr_box int; nr_all int;
+  lat double precision; lon double precision; pt jsonb;
+BEGIN
+  -- 7a · identity with the unchanged firms_rule_coverage
+  SELECT watched_refineries, registry_refineries INTO w0, g0
+    FROM public.refinery_type_coverage(boxes);
+  SELECT monitored_facilities, matching_facilities INTO mon, mat
+    FROM public.firms_rule_coverage('refinery', NULL, NULL, boxes);
+  SELECT count(*) FILTER (WHERE public.firms_point_in_regions(latitude, longitude, boxes)), count(*)
+    INTO nr_box, nr_all
+    FROM public.refineries WHERE site_type <> 'refinery';
+  IF w0 IS DISTINCT FROM mon - nr_box OR g0 IS DISTINCT FROM mat - nr_all OR nr_box < 96 THEN
+    RAISE EXCEPTION 'FAIL 7a · refinery_type_coverage % / % is not firms_rule_coverage % / % minus the non-refinery rows % / % (want >= 96 in the boxes)',
+      w0, g0, mon, mat, nr_box, nr_all;
+  END IF;
+
+  -- 7b · a re-typed site inside the boxes is not counted: Marysville Ethanol
+  -- (way:163834450, ethanol_biofuel since 168). A box that is exactly its
+  -- point holds it for firms_rule_coverage and not for the public figure.
+  SELECT latitude, longitude INTO lat, lon FROM public.refineries WHERE id = 'way:163834450';
+  pt := jsonb_build_array(jsonb_build_object('west', lon, 'south', lat, 'east', lon, 'north', lat));
+  SELECT monitored_facilities INTO mon
+    FROM public.firms_rule_coverage('refinery', NULL, 'Marysville Ethanol', pt);
+  SELECT watched_refineries INTO w1 FROM public.refinery_type_coverage(pt);
+  IF NOT public.firms_point_in_regions(lat, lon, boxes) OR mon IS DISTINCT FROM 1
+     OR w1 IS DISTINCT FROM 0 THEN
+    RAISE EXCEPTION 'FAIL 7b · Marysville Ethanol: in the boxes %, firms_rule_coverage sees %, refinery_type_coverage counts % (want true, 1, 0)',
+      public.firms_point_in_regions(lat, lon, boxes), mon, w1;
+  END IF;
+  -- … and putting it back to 'refinery' is exactly +1 watched, +1 registry.
+  UPDATE public.refineries SET site_type = 'refinery' WHERE id = 'way:163834450';
+  SELECT watched_refineries, registry_refineries INTO w1, g1 FROM public.refinery_type_coverage(boxes);
+  UPDATE public.refineries SET site_type = 'ethanol_biofuel' WHERE id = 'way:163834450';
+  IF (w1 - w0, g1 - g0) IS DISTINCT FROM (1, 1) THEN
+    RAISE EXCEPTION 'FAIL 7b · re-typing Marysville back to refinery moved the figure by % / % (want +1 / +1)', w1 - w0, g1 - g0;
+  END IF;
+
+  -- 7c · a new refinery inserted inside the boxes is counted (the ingest's
+  -- insert shape: no site_type, so the default applies) …
+  INSERT INTO public.refineries (id, osm_type, osm_id, refinery_name, source_tags, latitude, longitude)
+  VALUES ('node:-168000002', 'node', -168000002, 'PR-11 guard fixture, in a box (rolled back)', '{}'::jsonb, 55.1, 40.1);
+  SELECT watched_refineries, registry_refineries INTO w2, g2 FROM public.refinery_type_coverage(boxes);
+  IF (w2 - w0, g2 - g0) IS DISTINCT FROM (1, 1) THEN
+    RAISE EXCEPTION 'FAIL 7c · a new refinery inside the boxes moved the figure by % / % (want +1 / +1)', w2 - w0, g2 - g0;
+  END IF;
+  -- … one outside every box only joins the registry, and one inserted as a
+  -- terminal inside the boxes joins neither.
+  INSERT INTO public.refineries (id, osm_type, osm_id, refinery_name, source_tags, latitude, longitude)
+  VALUES ('node:-168000003', 'node', -168000003, 'PR-11 guard fixture, no box (rolled back)', '{}'::jsonb, -30.0, -60.0);
+  INSERT INTO public.refineries (id, osm_type, osm_id, refinery_name, source_tags, latitude, longitude, site_type)
+  VALUES ('node:-168000004', 'node', -168000004, 'PR-11 guard fixture, terminal (rolled back)', '{}'::jsonb, 55.2, 40.2, 'terminal');
+  SELECT watched_refineries, registry_refineries INTO w3, g3 FROM public.refinery_type_coverage(boxes);
+  IF (w3 - w2, g3 - g2) IS DISTINCT FROM (0, 1) THEN
+    RAISE EXCEPTION 'FAIL 7c · an out-of-box refinery plus an in-box terminal moved the figure by % / % (want +0 / +1)', w3 - w2, g3 - g2;
+  END IF;
+
+  -- 7d · NULL regions fail closed, as firms_point_in_regions does
+  SELECT watched_refineries INTO w1 FROM public.refinery_type_coverage(NULL);
+  IF w1 IS DISTINCT FROM 0 THEN
+    RAISE EXCEPTION 'FAIL 7d · refinery_type_coverage(NULL) watched % (want 0)', w1;
+  END IF;
+
+  -- 7e · service_role only
+  IF NOT has_function_privilege('service_role', 'public.refinery_type_coverage(jsonb)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.refinery_type_coverage(jsonb)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.refinery_type_coverage(jsonb)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'FAIL 7e · refinery_type_coverage EXECUTE: service_role %, anon %, authenticated % (want true, false, false)',
+      has_function_privilege('service_role', 'public.refinery_type_coverage(jsonb)', 'EXECUTE'),
+      has_function_privilege('anon', 'public.refinery_type_coverage(jsonb)', 'EXECUTE'),
+      has_function_privilege('authenticated', 'public.refinery_type_coverage(jsonb)', 'EXECUTE');
+  END IF;
+
+  RAISE NOTICE 'PASS 7 · refinery_type_coverage = % watched / % registry = firms_rule_coverage minus % / % non-refinery rows; Marysville (re-typed, in a box) not counted; a new in-box refinery +1/+1, out-of-box +0/+1, in-box terminal +0/+0; NULL regions 0; service_role only',
+    w0, g0, nr_box, nr_all;
+END
+$$;
+
 ROLLBACK;
+
+-- Reached only when no assertion above raised. This row is the pass signal.
+SELECT 'PR-11 guards: all 8 assertions passed (0–7: column + CHECK, vocabulary, NOT NULL, ingest upsert, default, the 16 inserts, the 96 re-types, the site_type-only watched figure); transaction rolled back, nothing written' AS result,
+       now() AS checked_at;
