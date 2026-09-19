@@ -1,0 +1,220 @@
+#!/usr/bin/env node
+// ─── REALITY CHECK PR-5: the TypeScript half, tested ─────────────────────
+//
+// The database half (migs 169 + 170) is proven by supabase/tests/pr5_guards.sql
+// in the SQL Editor. This proves what SQL cannot run:
+//   · the classifier ladder (lib/reality-check/classify.ts) on real and
+//     synthetic series — including the Maysan first-tick fixture read from
+//     production (primary LEAD 0.558, 3x3 REFUTED 0.80, KS on the baseline's
+//     halves D 0.25 / p 0.786 — the values the SQL reproduction printed);
+//   · the rolling rule (lib/reality-check/tick.ts planTick);
+//   · the claim rules (lib/reality-check/claims.ts): p = (k + 10)/(n + 20),
+//     alternate ticks, which families a verdict calls for, no banned phrase;
+//   · the scorer default (lib/predictions/resolvers/index.ts): a source with
+//     no resolver resolves VOID, never 0.5; the refinery-rc wrapper maps the
+//     SQL rule's ready / defer / void faithfully.
+//
+// Needs apps/web/node_modules (typescript), so CI runs it after `npm ci`
+// (.github/workflows/reality-check.yml, job "unit"). Run locally:
+//   node apps/web/scripts/reality-check/test-refinery-rc.mjs
+
+import { readFileSync, existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve, join } from 'node:path';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const WEB = resolve(here, '../..');
+const require = createRequire(join(WEB, 'package.json'));
+const ts = require('typescript');
+
+// ── a minimal TS loader: transpile on require, resolve '@/…' and './…' ──
+const cache = new Map();
+function resolveTs(base) {
+  for (const ext of ['.ts', '.tsx', '/index.ts']) if (existsSync(base + ext)) return base + ext;
+  return null;
+}
+function load(file) {
+  if (cache.has(file)) return cache.get(file).exports;
+  const out = ts.transpileModule(readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
+  }).outputText;
+  const m = { exports: {} };
+  cache.set(file, m);
+  const req = (id) => {
+    if (id.startsWith('@/')) { const f = resolveTs(join(WEB, id.slice(2))); if (f) return load(f); }
+    if (id.startsWith('.')) { const f = resolveTs(resolve(dirname(file), id)); if (f) return load(f); }
+    return require(id);
+  };
+  new Function('module', 'exports', 'require', out)(m, m.exports, req);
+  return m.exports;
+}
+
+const C = load(join(WEB, 'lib/reality-check/classify.ts'));
+const K = load(join(WEB, 'lib/reality-check/claims.ts'));
+const T = load(join(WEB, 'lib/reality-check/tick.ts'));
+const R = load(join(WEB, 'lib/predictions/resolvers/index.ts'));
+
+let pass = 0;
+const fails = [];
+function check(name, ok, detail) {
+  if (ok) pass += 1;
+  else fails.push(`${name}${detail === undefined ? '' : ` — ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`}`);
+}
+
+// ── fixtures ────────────────────────────────────────────────────────────
+function nights(from, n) { return Array.from({ length: n }, (_, i) => C.addDays(from, i)); }
+/** A complex whose baseline/window values and FIRMS days are given in date order. */
+function complex({ key = 'RFC-N00-E000-1', w, base, win, base3 = base, win3 = win, bf = 31, bh = 10, wf = 15, wh = 0 }) {
+  const bn = nights(w.baseline_start, base.length);
+  const wn = nights(w.window_start, win.length);
+  const heatDays = [...nights(w.baseline_start, bf), ...nights(w.window_start, wf)];
+  const heat = [...heatDays.slice(0, bf).map((_, i) => i < bh), ...heatDays.slice(bf).map((_, i) => i < wh)];
+  return {
+    cluster_key: key, members: ['way:1'], member_names: ['Test'],
+    light_nights: [...bn, ...wn],
+    radiance_median: [...base, ...win],
+    radiance_3x3_median: [...base3, ...win3],
+    heat_days: heatDays, heat_day: heat, non_refinery_members: 0,
+  };
+}
+
+// ── 1 · window arithmetic (D-6) ─────────────────────────────────────────
+{
+  const a = C.windowsFor('2026-09-01');
+  check('first tick windows: baseline 07-18..08-17, window 08-18..09-01',
+    a.baseline_start === '2026-07-18' && a.baseline_end === '2026-08-17' && a.window_start === '2026-08-18' && a.window_end === '2026-09-01', a);
+  const b = C.windowsFor('2026-09-08');
+  check('first real tick windows: baseline 07-25..08-24, window 08-25..09-08',
+    b.baseline_start === '2026-07-25' && b.baseline_end === '2026-08-24' && b.window_start === '2026-08-25' && b.window_end === '2026-09-08', b);
+}
+
+// ── 2 · the statistic ───────────────────────────────────────────────────
+check('median odd', C.median([3, 1, 2]) === 2);
+check('median even = midpoint (percentile_cont)', C.median([4, 1, 3, 2]) === 2.5);
+check('median empty = null', C.median([]) === null);
+check('light down is strict: exactly 0.60 × baseline is not down', C.lightDown(C.micro(60), C.micro(100)) === false && C.lightDown(C.micro(59.999999), C.micro(100)) === true);
+
+// ── 3 · Maysan, first-tick windows, values read from production ─────────
+{
+  const w = C.windowsFor('2026-09-01');
+  const base = [12.5, 107.53, 38.32, 21.18, 30.73, 12.15, 322.91, 814.84, 35.5, 146.37, 33.24, 31.29, 40.09, 28.57, 694.06, 418.13, 81.08, 45, 14.42, 45.47, 20.54, 14.13, 25.57, 25.94];
+  const win = [11.8, 25.26, 31.22, 14.97, 15.58, 17.89, 40.11, 11.71, 19.19, 40.83, 26.73];
+  const base3 = [232.94, 54.9, 81.49, 244.35, 135.02, 153.65, 149.25, 282.83, 98.99, 69.56, 24.68, 18.32, 68.42, 116.41, 241.07, 191.64, 43.78, 90.39, 107.84, 63.84, 220.6, 68.98, 188.26, 98.02];
+  const win3 = [191.03, 70.66, 82.48, 106.15, 73.57, 104.34, 96.88, 10.37, 117.99, 23.12, 68.46];
+  const v = C.classifyComplex(complex({ key: 'RFC-N31-E047-1', w, base, win, base3, win3, bf: 31, bh: 10, wf: 15, wh: 0 }), w);
+  check('Maysan: primary LEAD', v.verdict === 'LEAD', v);
+  check('Maysan: medians 34.37 → 19.19 (ratio 0.558)', v.baseline_median === 34.37 && v.window_median === 19.19
+    && Math.abs(v.window_median / v.baseline_median - 0.558) < 0.001, [v.baseline_median, v.window_median]);
+  check('Maysan: not robust — REFUTED on radiance_3x3 (ratio ~0.80)', v.robustness_verdict === 'REFUTED'
+    && Math.abs(v.r3_window_median / v.r3_baseline_median - 0.798) < 0.002, [v.robustness_verdict, v.r3_baseline_median, v.r3_window_median]);
+  check('Maysan: KS on the baseline halves D 0.25, p 0.786 (the SQL reproduction), tested at 24 nights',
+    v.ks_tested === true && v.ks_d === 0.25 && Math.abs(v.ks_p - 0.7864) < 0.0005, [v.ks_d, v.ks_p]);
+  check('Maysan: distributions overlap (window max 40.83 >= baseline min 12.15)', v.window_max >= v.baseline_min && v.baseline_max >= v.window_min);
+}
+
+// ── 4 · the ladder ──────────────────────────────────────────────────────
+{
+  const w = C.windowsFor('2026-09-08');
+  const flat = (n, x) => Array.from({ length: n }, (_, i) => x + (i % 5));
+  const cases = [
+    ['REFUTED: heat down, light held', { base: flat(20, 100), win: flat(8, 110) }, 'REFUTED', 'REFUTED'],
+    ['LEAD: heat down, light down, tested', { base: flat(20, 100), win: flat(8, 40) }, 'LEAD', 'LEAD'],
+    ['dual-down at 8 baseline nights → VOID_INSUFFICIENT_NIGHTS, never LEAD', { base: flat(8, 100), win: flat(5, 40) }, 'VOID_INSUFFICIENT_NIGHTS', null],
+    ['refuted at 8 baseline nights stays REFUTED (untested)', { base: flat(8, 100), win: flat(5, 110) }, 'REFUTED', 'REFUTED'],
+    ['STEADY', { base: flat(20, 100), win: flat(8, 100), wh: 7 }, 'STEADY', 'STEADY'],
+    ['LIGHT_DOWN_ONLY', { base: flat(20, 100), win: flat(8, 40), wh: 7 }, 'LIGHT_DOWN_ONLY', 'LIGHT_DOWN_ONLY'],
+    ['heat not observable (baseline 6/31 = 0.19)', { base: flat(20, 100), win: flat(8, 100), bh: 6 }, 'VOID_HEAT_NOT_OBSERVABLE', null],
+    ['a step in the baseline fails KS → VOID_BASELINE_UNSTABLE', { base: [...flat(10, 20), ...flat(10, 200)], win: flat(8, 150) }, 'VOID_BASELINE_UNSTABLE', null],
+    ['below the floors → VOID_INSUFFICIENT_NIGHTS', { base: flat(4, 100), win: flat(8, 100) }, 'VOID_INSUFFICIENT_NIGHTS', null],
+    ['no window night → VOID_NOT_OBSERVED', { base: flat(20, 100), win: [] }, 'VOID_NOT_OBSERVED', null],
+    ['LEAD, not robust: 3x3 holds the light', { base: flat(20, 100), win: flat(8, 40), base3: flat(20, 100), win3: flat(8, 90) }, 'LEAD', 'REFUTED'],
+    ['null nights are no retrieval, not darkness', { base: [...flat(20, 100), null, null], win: [null, null, 110, 110, 110] }, 'REFUTED', 'REFUTED'],
+  ];
+  for (const [name, args, want, wantR] of cases) {
+    const v = C.classifyComplex(complex({ w, ...args }), w);
+    check(`ladder: ${name}`, v.verdict === want && v.robustness_verdict === wantR, { verdict: v.verdict, robustness: v.robustness_verdict });
+  }
+  // CHECK-shape invariants the database will re-derive
+  const v = C.classifyComplex(complex({ w, base: flat(4, 100), win: flat(8, 100) }), w);
+  check('BELOW_FLOOR rows carry no KS (a failed test could not be VOID_INSUFFICIENT_NIGHTS)', v.coverage_state === 'BELOW_FLOOR' && v.ks_tested === null && v.ks_p === null);
+  const z = C.classifyComplex(complex({ w, base: [0, 0, 0, 0, 0, 0], win: [0, 0, 0] }), w);
+  check('zero radiance is a value: all-zero baseline and window read STEADY-side (ratio undefined, not down)', z.verdict === 'REFUTED' && z.baseline_median === 0);
+}
+
+// ── 5 · the rolling rule ────────────────────────────────────────────────
+{
+  const last = { id: 7, data_clock_night: '2026-09-08', baseline_start: '2026-07-25', window_end: '2026-09-08', bm_nights_used: ['2026-07-25', '2026-07-26'], firms_days_used: ['2026-07-25'] };
+  const same = { bmNow: ['2026-07-25', '2026-07-26'], firmsNow: ['2026-07-25'] };
+  check('plan: no clock → skip', T.planTick({ clock: null, last: null, bmNow: null, firmsNow: null }).kind === 'skip');
+  check('plan: first tick → new', T.planTick({ clock: '2026-09-08', last: null, bmNow: null, firmsNow: null }).kind === 'new');
+  check('plan: +6 nights, nothing late → skip', T.planTick({ clock: '2026-09-14', last, ...same }).kind === 'skip');
+  check('plan: +7 nights → new', T.planTick({ clock: '2026-09-15', last, ...same }).kind === 'new');
+  const late = T.planTick({ clock: '2026-09-10', last, bmNow: ['2026-07-25', '2026-07-26', '2026-07-27'], firmsNow: ['2026-07-25'] });
+  check('plan: a late night inside the range → superseding tick at the SAME clock', late.kind === 'supersede' && late.clock === '2026-09-08' && late.supersedes === 7, late);
+  check('plan: the clock went backwards → skip', T.planTick({ clock: '2026-09-01', last, ...same }).kind === 'skip');
+}
+
+// ── 6 · claims ──────────────────────────────────────────────────────────
+{
+  check('p = (k + 10)/(n + 20): n 0 → 0.5', K.shrunkRate(0, 0) === 0.5);
+  check('p: k 9, n 10 → 0.6333', K.shrunkRate(9, 10) === 0.6333);
+  check('p: k 100, n 100 → 0.9167', K.shrunkRate(100, 100) === 0.9167);
+  check('alternate ticks: none yet → issue', K.isIssuingTick('2026-09-08', null) === true);
+  check('alternate ticks: +7 → no', K.isIssuingTick('2026-09-15', '2026-09-08') === false);
+  check('alternate ticks: +14 → issue', K.isIssuingTick('2026-09-22', '2026-09-08') === true);
+
+  const w = C.windowsFor('2026-09-08');
+  const mk = (key, verdict) => ({ cluster_key: key, verdict, members: ['a'], member_count: 1, baseline_median: 100, window_median: 110, baseline_heat_days: 10, baseline_firms_days: 31, robustness_verdict: verdict });
+  const cands = K.candidatesFor([mk('K1', 'REFUTED'), mk('K2', 'LEAD'), mk('K3', 'STEADY'), mk('K4', 'VOID_INSUFFICIENT_NIGHTS')], w, '2026-09-19');
+  const fams = cands.map((c) => `${c.family}:${c.row.cluster_key}`).sort();
+  check('claims: REFUTED → heat + stays lit + refutation holds; LEAD → heat + lead persists; others nothing',
+    JSON.stringify(fams) === JSON.stringify(['rc_heat_dark_persists:K1', 'rc_heat_dark_persists:K2', 'rc_lead_light_persists:K2', 'rc_refutation_holds:K1', 'rc_site_stays_lit:K1']), fams);
+  const heat = cands.find((c) => c.family === 'rc_heat_dark_persists');
+  const lit = cands.find((c) => c.family === 'rc_site_stays_lit');
+  check('claims: FIRMS window = the 14 days after the FIRMS clock; light window = the 14 nights after the data clock',
+    heat.window_start === '2026-09-20' && heat.window_end === '2026-10-03' && lit.window_start === '2026-09-09' && lit.window_end === '2026-09-22');
+  const row = K.buildClaimRow({ c: lit, label: 'Test', memberNames: ['Test'], w, runId: 1, fam: { judged: 0, k: 0, status: 'calibrating' }, firmsClock: '2026-09-19', nightsOnDisk: 1, now: new Date('2026-09-20T10:22:00Z') });
+  check('claim row: machine track, source refinery-rc, hash, p 0.5, observable with the dates',
+    row.track === 'machine' && row.source === 'refinery-rc' && /^[0-9a-f]{64}$/.test(row.hash)
+    && row.predicted_distribution.mean === 0.5 && row.target_observable === 'refinery-rc:rc_site_stays_lit:K1:2026-09-09..2026-09-22'
+    && row.context.forecast_k === 0 && row.context.forecast_n === 0 && row.context.window_nights_on_disk_at_issue === 1, row);
+  const banned = /barrels offline|bpd offline|capacity offline|outage confirmed|confirmed outage|shutdown confirmed|% of capacity/i;
+  const texts = cands.map((c) => K.statementFor(c, 'Test', w));
+  check('claims: no statement carries a §6 banned phrase', texts.every((t) => !banned.test(t)), texts.find((t) => banned.test(t)));
+}
+
+// ── 7 · the scorer: no resolver, no score ───────────────────────────────
+{
+  const stub = (rpcAnswer, track = 'house') => ({
+    rpc: async () => rpcAnswer,
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { track }, error: null }) }) }) }),
+  });
+  const row = (source, extra = {}) => ({ id: 'x', feature: 'f', source, target_observable: 'o', resolves_at: '', issued_at: '', context: {}, predicted_distribution: {}, ...extra });
+  const unknown = await R.resolveBySource(row('kalshi'), stub(null));
+  check('default: a source with no resolver case → VOID "no resolver", never 0.5', unknown && unknown.void_reason && /no resolver/.test(unknown.void_reason) && unknown.observed === 0, unknown);
+  const madeUp = await R.resolveBySource(row('never-heard-of-it', { track: 'machine' }), stub(null));
+  check('default: an unknown machine source → VOID', madeUp && /no resolver/.test(madeUp.void_reason ?? ''), madeUp);
+  const manualMachine = await R.resolveBySource(row('manual'), stub(null, 'machine'));
+  check("'manual' on the machine track → VOID", manualMachine && /no resolver/.test(manualMachine.void_reason ?? ''), manualMachine);
+  const manualHouse = await R.resolveBySource(row('manual'), stub(null, 'house'));
+  check("'manual' on the house track keeps its operator placeholder", manualHouse && manualHouse.observed === 0.5 && !manualHouse.void_reason, manualHouse);
+
+  const rc = (answer) => R.resolveBySource(row('refinery-rc'), stub(answer));
+  const ready1 = await rc({ data: { state: 'ready', observed: 1 }, error: null });
+  const ready0 = await rc({ data: { state: 'ready', observed: 0 }, error: null });
+  const defer = await rc({ data: { state: 'defer' }, error: null });
+  const vd = await rc({ data: { state: 'void', void_reason: 'retired' }, error: null });
+  const err = await rc({ data: null, error: { message: 'boom' } });
+  check('refinery-rc: ready 1 / ready 0 scored as observed', ready1?.observed === 1 && !ready1.void_reason && ready0?.observed === 0 && !ready0.void_reason);
+  check('refinery-rc: defer → null (retry next tick)', defer === null);
+  check('refinery-rc: void carries the rule\'s reason', vd?.void_reason === 'retired');
+  check('refinery-rc: an RPC error → null, never a guess', err === null);
+}
+
+if (fails.length) {
+  console.error(`test-refinery-rc: ${fails.length} failed, ${pass} passed`);
+  for (const f of fails) console.error(`  ✗ ${f}`);
+  process.exit(1);
+}
+console.log(`test-refinery-rc: OK — ${pass} checks passed`);

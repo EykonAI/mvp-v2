@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { recordIssuanceRun } from '@/lib/predictions/run-records';
+import { runRefineryRealityCheck, type TickResult } from '@/lib/reality-check/tick';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -419,14 +420,31 @@ async function handle(req: NextRequest) {
         if (!fam.eligible) { nlDeclined[`${et}: ${fam.reason ?? 'not eligible'}`] = 1; continue; }
         if (fam.remaining <= 0) { nlDeclined[`${et}: daily cap reached`] = 1; continue; }
 
+        // REFINERY SITES LEFT THESE FAMILIES (mig 170, Reality Check PR-5): a
+        // refinery's light is scored once, by the refinery-rc families, from
+        // the weekly tick below — one observable, one claim. They are kept out
+        // of the candidate read (so they never take a slot under the cap) and
+        // counted into `declined` with the reason, never dropped silently; a
+        // trigger on predictions_register refuses any that slip through.
         const { data: cand, error: candErr } = await supabase
           .from('nightlights_significant_sites')
           .select('site_key, site_name, country, period, event_type, observed_radiance, baseline_mean, deviation_sigma, dark_nights, unit_rows')
           .eq('event_type', et)
           .gt('period', cutoff)
+          .not('has_refinery', 'is', true)
           .order('period', { ascending: false })
           .limit(plan.daily_cap * 3);
         if (candErr) { nlError = candErr.message; continue; }
+        {
+          const { count: refinerySites, error: refErr } = await supabase
+            .from('nightlights_significant_sites')
+            .select('site_key', { count: 'exact', head: true })
+            .eq('event_type', et)
+            .gt('period', cutoff)
+            .eq('has_refinery', true);
+          if (refErr) nlError = `refinery-site count: ${refErr.message}`;
+          else if (refinerySites) nlDeclined[`${et}: refinery site — scored by refinery-rc (mig 170)`] = refinerySites;
+        }
 
         const all = (cand ?? []) as NlEvent[];
         // ISSUE ONLY ON UNPUBLISHED WINDOWS (2026-09-09). NASA delivers nights
@@ -482,6 +500,22 @@ async function handle(req: NextRequest) {
     }
   }
 
+  // ─── The weekly Refinery Reality Check tick (PR-5, D-14) ───────────
+  // Rides this daily run (Railway, ~10:22 UTC): after the Black Marble worker
+  // (~09:44), the census refresh (:50) and the night-lights judgement (10:05).
+  // It publishes only when the data clock has advanced >= 7 nights (or a late
+  // night supersedes the last tick), so most days it answers "skipped" with
+  // the reason. A failure is an error of this run — a silent tick is the
+  // looks-alive-but-isn't failure.
+  let realityCheck: TickResult | null = null;
+  try {
+    realityCheck = await runRefineryRealityCheck(supabase, today);
+    if (realityCheck.error) errors.push(`reality-check tick: ${realityCheck.error}`);
+    if (realityCheck.claims?.error) errors.push(`reality-check claims: ${realityCheck.claims.error}`);
+  } catch (e) {
+    errors.push(`reality-check tick: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
   const ok = errors.length === 0;
 
   await recordIssuanceRun(supabase, {
@@ -522,6 +556,10 @@ async function handle(req: NextRequest) {
         declined: nlDeclined,
         error: nlError,
       },
+      // Reality Check (PR-5): what the tick did and why — published /
+      // superseding / skipped / refused / failed — with the funnel by complex
+      // (facility rows beside it) and the refinery-rc claims it issued.
+      reality_check: realityCheck,
       // events counts registry ROWS; site_events counts PHYSICAL SITES.
       // Quote site_events in anything user-facing — one plant is many
       // rows (one per generating unit) at identical coordinates.
