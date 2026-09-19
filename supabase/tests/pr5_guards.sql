@@ -39,7 +39,10 @@
 --       one elsewhere is not
 --   C1–C4  re-typed sites form no complex: a terminal never joins; a
 --       refinery re-typed later leaves and its key is retired, not deleted;
---       no current member of any complex is a non-refinery
+--       no current member of any complex is a non-refinery — checked on the
+--       LIVE registry before any fixture is written (the 2031 FIRMS fixtures
+--       move the rebuild's newest day, so every in-transaction rebuild sees
+--       only synthetic sites) and again after the synthetic re-type
 
 BEGIN;
 
@@ -56,6 +59,8 @@ DECLARE
   v_key     text;
   v_site    text;
   v_n       integer;
+  v_real_nonref integer;   -- the LIVE registry, read before any fixture (C4)
+  v_real_ticks  boolean;
   r         record;
   v_failed  text[] := '{}';
   v_total   integer := 0;
@@ -119,6 +124,17 @@ BEGIN
     RAISE EXCEPTION 'PR-5 guards: objects missing — apply 169 and 170 (whole files) first. Failed: %',
       (SELECT string_agg(x->>'id', ', ') FROM jsonb_array_elements(r_results) x WHERE NOT (x->>'ok')::boolean);
   END IF;
+
+  -- ═══ C4, first half: the LIVE registry, before any fixture ═════════════
+  -- The fixtures below write FIRMS rows in 2031, which moves the rebuild's
+  -- newest FIRMS day: every rebuild inside this transaction then sees only the
+  -- synthetic sites (all rolled back). So the real registry — the one the
+  -- tick reads after 169 — is checked here, before anything is written.
+  SELECT count(*) INTO v_real_nonref
+    FROM public.refinery_complex_members m JOIN public.refineries rf ON rf.id = m.facility_id
+   WHERE m.left_at IS NULL AND rf.site_type <> 'refinery';
+  v_real_ticks := NOT EXISTS (SELECT 1 FROM public.reality_check_tick_inputs(current_date - 46, current_date)
+                               WHERE non_refinery_members > 0);
 
   -- ═══ fixtures (all rolled back) ═══════════════════════════════════════
   -- nine synthetic complexes in cell S90/W180, far from every real one;
@@ -479,11 +495,12 @@ BEGIN
     FROM public.refinery_complex_members m JOIN public.refineries rf ON rf.id = m.facility_id
    WHERE m.left_at IS NULL AND rf.site_type <> 'refinery';
   r_results := r_results || jsonb_build_object('id', 'C4',
-    'what', 'no current member of any complex is a non-refinery; the tick inputs agree',
-    'ok', v_n = 0
+    'what', 'no current member of any complex is a non-refinery — in the LIVE registry (read before the fixtures) and after the synthetic re-type; the tick inputs agree',
+    'ok', v_real_nonref = 0 AND v_real_ticks AND v_n = 0
           AND NOT EXISTS (SELECT 1 FROM public.reality_check_tick_inputs(current_date - 46, current_date)
                            WHERE non_refinery_members > 0),
-    'detail', v_n::text);
+    'detail', format('live registry: %s non-refinery member(s), tick inputs clean %s · after the synthetic re-type: %s',
+                     v_real_nonref, v_real_ticks, v_n));
 
   -- ═══ report ═════════════════════════════════════════════════════════
   FOR r IN

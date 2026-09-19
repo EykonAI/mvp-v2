@@ -3,7 +3,8 @@ import {
   CLASSIFIER_VERSION, METHOD, classifyComplex, daysBetween, funnelOf, windowsFor,
   type ComplexInputs, type Funnel, type TickWindows, type VerdictRow,
 } from './classify';
-import { issueRefineryClaims, type ClaimsResult } from './claims';
+import { issueRefineryClaims, SOURCE, type ClaimsResult } from './claims';
+import { recordIssuanceRun } from '@/lib/predictions/run-records';
 
 /**
  * Reality Check — the weekly refinery tick (PR-5, D-6, D-14).
@@ -24,9 +25,11 @@ import { issueRefineryClaims, type ClaimsResult } from './claims';
  *                nights inside the newest tick's range have changed since it
  *                ran (a late night): the same windows, recomputed, with
  *                supersedes_run_id. Both stay; PR-6 adds immutability.
- *   otherwise    nothing is written; the response says why.
+ *   otherwise    no tick is written; the response and a run record say why.
  * A run row is written before the verdicts and completed after them; a crash
- * leaves 'running', which the next call marks failed ('abandoned').
+ * leaves 'running', which the next call marks failed ('abandoned'). Every
+ * call also leaves an issuance_runs row (source 'refinery-rc'): the issuer's
+ * on an issuing or alternate tick, recordTickRun()'s otherwise.
  *
  * The population is the complex registry (mig 160 + 169: site_type =
  * 'refinery' only). A complex still holding a re-typed member means the
@@ -301,6 +304,31 @@ export async function runRefineryRealityCheck(db: Db, now: Date = new Date()): P
     }
   } finally {
     out.duration_ms = Date.now() - t0;
+    // In `finally`, not after it: the skip and refuse paths return from
+    // inside the try, and they are exactly the days that must leave a record.
+    await recordTickRun(db, out);
   }
   return out;
+}
+
+/**
+ * RUN RECORD (R-4; the mig-138 rule "a row iff the tick ran"). A tick that
+ * reaches the issuer is recorded by it (claims.ts, source 'refinery-rc'). Every
+ * other outcome — skipped (most days), superseding, refused, or failed,
+ * including a failure before any reality_check_runs row exists — writes one
+ * issuance_runs row here, so the ledger can tell "ran and had nothing to
+ * publish" from "never ran", and a refused or failed tick carries its error
+ * into the admin monitor's issuance-error alert instead of living only in a
+ * Railway log. Additive: a failure to write it never changes the tick.
+ */
+export async function recordTickRun(db: Db, out: TickResult): Promise<string | null> {
+  if (out.claims !== null) return null;
+  const why = (out.action === 'failed' ? out.error : out.reason) ?? '';
+  return recordIssuanceRun(db as unknown as Parameters<typeof recordIssuanceRun>[0], {
+    source: SOURCE,
+    issued: 0,
+    already_present: null,
+    declined: { [`no issuing tick — tick ${out.action}: ${why}`.slice(0, 500)]: 1 },
+    error: out.action === 'failed' || out.action === 'refused' ? `reality-check tick ${out.action}: ${why}`.slice(0, 2000) : null,
+  });
 }

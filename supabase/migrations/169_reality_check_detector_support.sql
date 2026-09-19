@@ -711,8 +711,16 @@ checks(ord, check_name, expected, actual) AS (
             FROM public.refinery_complex_members m JOIN public.refineries r ON r.id = m.facility_id
            WHERE m.left_at IS NULL)
   UNION ALL
-  SELECT 5, 'latest rebuild: watched · components · merged · dissolved · left', '353 · 295 · 0 · 59 · 96',
-         (SELECT concat_ws(' · ', watched_facilities, components, merged, dissolved, members_left) FROM lr)
+  -- watched · components · merged from the latest rebuild; the 96 re-typed
+  -- memberships closed are counted from the table, not from the latest run,
+  -- so this row reads the same after a re-run of this file or a later daily
+  -- rebuild (whose own run row says left 0, dissolved 0).
+  SELECT 5, 'latest rebuild: watched · components · merged · re-typed memberships closed', '353 · 295 · 0 · 96',
+         (SELECT concat_ws(' · ', watched_facilities, components, merged,
+                           (SELECT count(*) FROM public.refinery_complex_members m
+                              JOIN public.refineries r ON r.id = m.facility_id
+                             WHERE m.left_at IS NOT NULL AND r.site_type <> 'refinery'))
+            FROM lr)
   UNION ALL
   SELECT 6, 'latest rebuild: matched · minted · joined (see header note)', '279 · 16 · 18  OR  295 · 0 · 0',
          (SELECT concat_ws(' · ', matched, minted, members_joined) FROM lr)
@@ -766,7 +774,8 @@ checks(ord, check_name, expected, actual) AS (
           OR has_function_privilege('authenticated', 'public.reality_check_tick_inputs(date,date)', 'EXECUTE')
           OR has_function_privilege('anon', 'public.refinery_rc_walkforward(integer,integer)', 'EXECUTE')
           OR has_function_privilege('authenticated', 'public.refinery_rc_walkforward(integer,integer)', 'EXECUTE')
-          OR has_function_privilege('anon', 'public.rebuild_refinery_complexes()', 'EXECUTE'))::text
+          OR has_function_privilege('anon', 'public.rebuild_refinery_complexes()', 'EXECUTE')
+          OR has_function_privilege('authenticated', 'public.rebuild_refinery_complexes()', 'EXECUTE'))::text
 )
 SELECT ord, check_name, expected, actual,
        CASE WHEN ord = 6 THEN actual IN ('279 · 16 · 18', '295 · 0 · 0')

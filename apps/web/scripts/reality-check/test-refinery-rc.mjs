@@ -155,6 +155,55 @@ check('light down is strict: exactly 0.60 × baseline is not down', C.lightDown(
   check('plan: the clock went backwards → skip', T.planTick({ clock: '2026-09-01', last, ...same }).kind === 'skip');
 }
 
+// ── 5b · a run record on every call (R-4: "a row iff the tick ran") ────────
+{
+  const rows = [];
+  const db = { from: (table) => ({ insert: async (r) => { rows.push({ table, ...r }); return { error: null }; } }) };
+  const base = { run_id: null, supersedes_run_id: null, data_clock_night: null, windows: null, funnel: null, claims: null, duration_ms: 0, error: null };
+  await T.recordTickRun(db, { ...base, action: 'skipped', reason: 'data clock 2026-09-10 is 2 night(s) past the last tick' });
+  await T.recordTickRun(db, { ...base, action: 'refused', reason: '3 complex(es) still hold a site that is not site_type refinery' });
+  await T.recordTickRun(db, { ...base, action: 'failed', reason: 'first tick', error: 'tick inputs: canceling statement due to statement timeout' });
+  await T.recordTickRun(db, { ...base, action: 'published', reason: 'first tick', claims: { issuing: true, reason: '', issued: 27, by_family: {}, declined: {}, error: null } });
+  const [skip, refused, failed] = rows;
+  check('run record: one issuance_runs row per call that does not reach the issuer (the issuer records its own)',
+    rows.length === 3 && rows.every((r) => r.table === 'issuance_runs' && r.source === 'refinery-rc' && r.issued === 0), rows);
+  check('run record: a skipped tick is recorded without an error, with its reason',
+    skip.error === null && Object.keys(skip.declined)[0].startsWith('no issuing tick — tick skipped: data clock'), skip);
+  check('run record: refused and failed ticks carry their error (the admin issuance-error alert reads it)',
+    /tick refused: 3 complex/.test(refused.error ?? '') && /tick failed: tick inputs: canceling statement/.test(failed.error ?? ''), [refused, failed]);
+
+  // …and the tick itself writes it on the paths that return early from inside
+  // its try block (skip, refuse) — a record placed after the try/finally would
+  // never run there. A chainable stand-in for the Supabase client:
+  const stubDb = (answers, written) => {
+    const chain = (result) => {
+      const b = { then: (res, rej) => Promise.resolve(result).then(res, rej) };
+      for (const m of ['select', 'update', 'eq', 'lt', 'lte', 'gte', 'order', 'limit', 'not', 'in', 'range', 'single', 'maybeSingle']) b[m] = () => b;
+      return b;
+    };
+    return {
+      from: (table) => {
+        const b = chain({ data: answers[table] ?? [], error: null });
+        b.insert = (r) => { written.push({ table, ...r }); return chain({ data: null, error: null }); };
+        return b;
+      },
+      rpc: (name) => chain({ data: answers[`rpc:${name}`] ?? [], error: null }),
+    };
+  };
+  const w1 = [];
+  const skipped = await T.runRefineryRealityCheck(stubDb({}, w1), new Date('2026-09-20T10:22:00Z'));
+  check('tick: no data clock → skipped, and the skip leaves an issuance_runs row (source refinery-rc, no error)',
+    skipped.action === 'skipped' && w1.length === 1 && w1[0].table === 'issuance_runs' && w1[0].source === 'refinery-rc'
+    && w1[0].error === null && /tick skipped: no usable Black Marble/.test(Object.keys(w1[0].declined)[0]), { skipped, w1 });
+  const w2 = [];
+  const refusedTick = await T.runRefineryRealityCheck(stubDb({
+    sensor_usable_nights: [{ night: '2026-09-08' }],
+    'rpc:reality_check_tick_inputs': [{ cluster_key: 'RFC-N00-E000-1', members: ['a'], member_names: ['A'], light_nights: [], radiance_median: [], radiance_3x3_median: [], heat_days: [], heat_day: [], non_refinery_members: 1 }],
+  }, w2), new Date('2026-09-20T10:22:00Z'));
+  check('tick: a stale registry → refused, and the refusal is recorded WITH its error',
+    refusedTick.action === 'refused' && w2.length === 1 && w2[0].table === 'issuance_runs' && /tick refused/.test(w2[0].error ?? ''), { refusedTick, w2 });
+}
+
 // ── 6 · claims ──────────────────────────────────────────────────────────
 {
   check('p = (k + 10)/(n + 20): n 0 → 0.5', K.shrunkRate(0, 0) === 0.5);

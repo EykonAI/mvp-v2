@@ -456,7 +456,7 @@ WITH checks(ord, check_name, expected, actual) AS (
   SELECT 9, 'resolution rule answers: malformed claim → void', 'void',
          (public.refinery_rc_resolution('rc_site_stays_lit', '{"cluster_key":"RFC-N00-E000-1"}'::jsonb)->>'state')
   UNION ALL
-  SELECT 10, 'refinery-rc claims in the register (none until the first tick)', '0',
+  SELECT 10, 'refinery-rc claims in the register (0 until the first issuing tick; on a re-run after it, any count)', '0',
          (SELECT count(*)::text FROM public.predictions_register WHERE source = 'refinery-rc')
   UNION ALL
   SELECT 11, 'change-log row', '1',
@@ -465,9 +465,13 @@ WITH checks(ord, check_name, expected, actual) AS (
   SELECT 12, 'anon/authenticated cannot execute the resolution rule or the scorer queue', 'false',
          (has_function_privilege('anon', 'public.refinery_rc_resolution(text,jsonb,timestamp with time zone)', 'EXECUTE')
           OR has_function_privilege('authenticated', 'public.refinery_rc_resolution(text,jsonb,timestamp with time zone)', 'EXECUTE')
-          OR has_function_privilege('anon', 'public.due_unscored_predictions(integer)', 'EXECUTE'))::text
+          OR has_function_privilege('anon', 'public.due_unscored_predictions(integer)', 'EXECUTE')
+          OR has_function_privilege('authenticated', 'public.due_unscored_predictions(integer)', 'EXECUTE'))::text
 )
 SELECT ord, check_name, expected, actual,
-       CASE WHEN ord = 7 THEN actual::int >= 21 ELSE actual = expected END AS ok
+       CASE WHEN ord = 7 THEN actual::int >= 21
+            WHEN ord = 10 THEN actual = expected
+                               OR EXISTS (SELECT 1 FROM public.reality_check_runs WHERE claims_issued IS NOT NULL)
+            ELSE actual = expected END AS ok
   FROM checks
  ORDER BY ord;
