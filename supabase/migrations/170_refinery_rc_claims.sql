@@ -26,14 +26,20 @@
 --       stays below 0.60 x the tick's baseline heat rate.
 --       VOID when fewer than 12 of the 14 days carry a usable row.
 --   rc_site_stays_lit      every REFUTED complex: over the 14 Black Marble
---       nights after the tick's data clock, the median usable clear-night
---       radiance stays at or above 0.60 x the tick's baseline median.
+--       nights of its light window, the median usable clear-night radiance
+--       stays at or above 0.60 x the tick's baseline median. The light window
+--       starts on the first night strictly after the newest night holding any
+--       Black Marble row at issue (founder, 2026-09-19), so no night of it is
+--       on disk when the claim issues (window_nights_on_disk_at_issue = 0,
+--       asserted by the issuer); never before the night after the newest light
+--       window already claimed, so windows never overlap.
 --   rc_lead_light_persists every LEAD complex: the same median stays below
 --       0.60 x the baseline median.
 --       Both light families: VOID with fewer than 3 usable clear nights that
 --       carry a retrieval (radiance NOT NULL — zero is a value, D-4).
 --   rc_refutation_holds    every REFUTED complex (near-certain): the complex
---       is not a LEAD in either of the next two published ticks.
+--       is not a LEAD in either of the next two published ticks (nominal
+--       window: the 14 nights after the tick's data clock).
 --       A tick is a LOOK only if a LEAD was possible there: a non-VOID
 --       verdict with the stability test run (ks_tested, >= 12 baseline
 --       nights — §3.1: below 12 a complex can never be a LEAD). VOID when
@@ -45,7 +51,8 @@
 -- after it ends (the data-clock rule of #482). Before that: DEFER (the
 -- scorer retries), never a verdict on a window the instrument has not
 -- finished. A claim resolves over the MEMBERS FROZEN ON IT at issue, not
--- the complex's later membership.
+-- the complex's later membership, and over the WINDOW FROZEN ON IT
+-- (context window_start..window_end), never one recomputed from a clock.
 --
 -- REFINERY SITES LEAVE THE NIGHT-LIGHTS FAMILIES (§3.5 "one observable, one
 -- claim"). The night-lights claims are issued by
@@ -407,7 +414,7 @@ CREATE TRIGGER trg_predictions_nightlights_no_refinery
 -- ─── 5 · The decision, on the record ───────────────────────────────────
 INSERT INTO public.ledger_change_log (at, pr, note)
 SELECT now(), '#540 · mig 170',
-       'refinery-rc (mig 170): four scored machine-track families issue from the first Reality Check tick — rc_heat_dark_persists, rc_site_stays_lit, rc_lead_light_persists and the near-certain rc_refutation_holds — by founder decision (2026-09-18/19) to issue before a measured record; every family counts in the machine-track headline. p = (k + 10) / (n + 20) from each family''s judged record, Calibrating until 90 judged. rc_refutation_holds is scored only on a tick that could have called a LEAD (non-VOID, >= 12 baseline nights), else VOID. Not yet measurable: refinery recall (no ground truth — recall not measured), each family''s skill (n = 0) and its split-half stability. Refinery sites leave the night-lights families; a source with no resolver now resolves VOID, never 0.5.'
+       'refinery-rc (mig 170): four scored machine-track families issue from the first Reality Check tick — rc_heat_dark_persists, rc_site_stays_lit, rc_lead_light_persists and the near-certain rc_refutation_holds — by founder decision (2026-09-18/19) to issue before a measured record; every family counts in the machine-track headline. p = (k + 10) / (n + 20) from each family''s judged record, Calibrating until 90 judged. rc_refutation_holds is scored only on a tick that could have called a LEAD (non-VOID, >= 12 baseline nights), else VOID. A light window starts after the newest Black Marble night on disk at issue, so no night of a claim window is on disk when it is claimed. Not yet measurable: refinery recall (no ground truth — recall not measured), each family''s skill (n = 0) and its split-half stability. Refinery sites leave the night-lights families; a source with no resolver now resolves VOID, never 0.5.'
  WHERE NOT EXISTS (SELECT 1 FROM public.ledger_change_log WHERE note LIKE 'refinery-rc (mig 170)%');
 
 COMMIT;

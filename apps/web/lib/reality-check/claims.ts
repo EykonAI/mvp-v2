@@ -13,28 +13,47 @@ import { addDays, daysBetween, type TickWindows, type VerdictRow } from './class
  *                          over the 14 FIRMS days after the FIRMS clock, the
  *                          heat rate stays below 0.60 × the baseline rate.
  *   rc_site_stays_lit      every REFUTED complex — over the 14 Black Marble
- *                          nights after the tick's data clock, the median
+ *                          nights of its light window (below), the median
  *                          clear-night radiance stays >= 0.60 × baseline.
  *   rc_lead_light_persists every LEAD complex — the same median stays below.
  *   rc_refutation_holds    every REFUTED complex — not a LEAD in either of
  *                          the next two published ticks (near-certain). A
  *                          tick counts only if a LEAD was possible there
  *                          (non-VOID, >= 12 baseline nights); none → VOID.
+ *                          Its nominal window is the 14 nights after the
+ *                          tick's data clock (the nights those ticks add).
+ *
+ * NOTHING OF A WINDOW IS ON DISK AT ISSUE (founder, 2026-09-19, decision C).
+ * The light window starts on the first night strictly after the newest night
+ * that holds ANY blackmarble_facility_radiance row (any facility type) when
+ * the claim issues, and runs 14 nights. The BM data clock is the newest
+ * USABLE night, so a partly ingested later night (09-09 at 405/449 rows on
+ * 09-19) would otherwise open the window. The heat window already starts the
+ * day after the FIRMS clock (the newest refinery FIRMS day on disk). Both are
+ * asserted twice: by construction (start > the instrument's newest night on
+ * disk) and by measurement — window_nights_on_disk_at_issue counts the
+ * window's nights holding a row for a member, is recorded on the claim, and
+ * must be 0, or nothing issues (the error is in issuance_runs).
  *
  * NO SELECTION. Which complexes get a claim is fixed by the tick's verdicts
  * (nights up to the data clock only); the number on the claim is the family's
  * walk-forward record, p = (k + 20 × 0.5)/(n + 20) (mig-149 shrinkage, read
- * from refinery_rc_walkforward(), mig 169), frozen with k and n. Nothing in a
- * claim's window can reach either. What the window already held at issue is
- * recorded on the claim, not hidden (window_nights_on_disk_at_issue).
+ * from refinery_rc_walkforward(), mig 169), frozen with k and n. The window
+ * dates are fixed by the calendar and the on-disk frontier, never by a value.
+ * The resolver (refinery_rc_resolution, mig 170) reads them from the claim.
  *
  * NO OVERLAP. Windows are 14 nights (two ticks) and claims issue on
  * ALTERNATE ticks: a tick issues only when its data clock is >= 14 nights past
  * the last issuing tick's (reality_check_runs.claims_issued marks issuing
- * ticks), and a superseding tick never issues. Each candidate is also checked
- * against the family's existing claims on the complex, so no two claims of
- * one family on one complex share a night even when ticks are irregular. The
- * one-claim-per-observable trigger (mig 150) is the backstop.
+ * ticks), and a superseding tick never issues. Because the light window now
+ * starts after the on-disk frontier rather than the data clock, the frontier's
+ * lead over the clock can shrink between issuing ticks (a backlog lands in
+ * full); the light window then starts the night after the newest light window
+ * already claimed, so consecutive windows touch and never overlap. Each
+ * candidate is also checked against the family's existing claims on the
+ * complex, so no two claims of one family on one complex share a night even
+ * when ticks are irregular. The one-claim-per-observable trigger (mig 150) is
+ * the backstop.
  *
  * A SUSPENDED family (negative split-half skill in both halves at >= 90
  * judged, never on an undefined skill) issues nothing, with the reason logged.
@@ -86,26 +105,77 @@ export interface Candidate {
   window_end: string;
 }
 
-/** Which claims a tick's verdicts call for (§3.5). Pure. */
-export function candidatesFor(verdicts: VerdictRow[], w: TickWindows, firmsClock: string): Candidate[] {
+export function isLightFamily(f: string): boolean {
+  return f === 'rc_site_stays_lit' || f === 'rc_lead_light_persists';
+}
+
+/** What fixes the windows at issue: the instruments' newest nights on disk and the newest light window already claimed. */
+export interface WindowClocks {
+  /** the FIRMS clock: the newest refinery FIRMS day on disk */
+  firms: string;
+  /** the newest night holding ANY blackmarble_facility_radiance row (any facility type) */
+  bmNewestOnDisk: string;
+  /** the newest window_end among the light-family claims already on the register, or null */
+  lastLightWindowEnd: string | null;
+}
+
+/**
+ * Decision C (founder, 2026-09-19): the light window starts on the first night
+ * strictly after the newest Black Marble night on disk at issue. Floors: the
+ * night after the tick's data clock (the frontier is never behind it; kept so
+ * a window can never reach back into the tick), and the night after the newest
+ * light window already claimed (the frontier's lead over the clock can shrink
+ * between issuing ticks; without this floor the two windows would share nights
+ * and the per-complex check would decline the whole family on that tick).
+ */
+export function lightWindowStart(dataClock: string, bmNewestOnDisk: string, lastLightWindowEnd: string | null): string {
+  let start = addDays(dataClock, 1);
+  const frontier = addDays(bmNewestOnDisk, 1);
+  if (frontier > start) start = frontier;
+  if (lastLightWindowEnd !== null) {
+    const after = addDays(lastLightWindowEnd, 1);
+    if (after > start) start = after;
+  }
+  return start;
+}
+
+/** Which claims a tick's verdicts call for (§3.5). Pure; throws if a window would start on a night already on disk. */
+export function candidatesFor(verdicts: VerdictRow[], w: TickWindows, clocks: WindowClocks): Candidate[] {
   const out: Candidate[] = [];
-  const lightStart = addDays(w.data_clock_night, 1);
-  const lightEnd = addDays(w.data_clock_night, CLAIM_DAYS);
-  const heatStart = addDays(firmsClock, 1);
-  const heatEnd = addDays(firmsClock, CLAIM_DAYS);
+  const lightStart = lightWindowStart(w.data_clock_night, clocks.bmNewestOnDisk, clocks.lastLightWindowEnd);
+  const lightEnd = addDays(lightStart, CLAIM_DAYS - 1);
+  const heatStart = addDays(clocks.firms, 1);
+  const heatEnd = addDays(clocks.firms, CLAIM_DAYS);
+  const ticksStart = addDays(w.data_clock_night, 1);
+  const ticksEnd = addDays(w.data_clock_night, CLAIM_DAYS);
+  // decision C, by construction: no window starts on or before its instrument's newest night on disk
+  if (lightStart <= clocks.bmNewestOnDisk) {
+    throw new Error(`light window would start ${lightStart}, on or before the newest Black Marble night on disk (${clocks.bmNewestOnDisk})`);
+  }
+  if (heatStart <= clocks.firms) {
+    throw new Error(`heat window would start ${heatStart}, on or before the FIRMS clock (${clocks.firms})`);
+  }
   for (const r of verdicts) {
     if (r.verdict === 'REFUTED' || r.verdict === 'LEAD') {
       out.push({ family: 'rc_heat_dark_persists', row: r, window_start: heatStart, window_end: heatEnd });
     }
     if (r.verdict === 'REFUTED') {
       out.push({ family: 'rc_site_stays_lit', row: r, window_start: lightStart, window_end: lightEnd });
-      out.push({ family: 'rc_refutation_holds', row: r, window_start: lightStart, window_end: lightEnd });
+      out.push({ family: 'rc_refutation_holds', row: r, window_start: ticksStart, window_end: ticksEnd });
     }
     if (r.verdict === 'LEAD') {
       out.push({ family: 'rc_lead_light_persists', row: r, window_start: lightStart, window_end: lightEnd });
     }
   }
   return out;
+}
+
+/** Decision C, by measurement: every count must be 0, or nothing issues. */
+export function assertNothingOnDisk(instrument: string, start: string, end: string, counts: Map<string, number>): void {
+  const bad = [...counts].filter(([, n]) => n !== 0);
+  if (bad.length > 0) {
+    throw new Error(`${instrument} window ${start}..${end} already holds rows at issue for ${bad.map(([k, n]) => `${k} (${n} night(s))`).join(', ')} — a claim window must start after the data on disk (decision C, 2026-09-19); nothing issued`);
+  }
 }
 
 function fmt(v: number | null): string {
@@ -130,9 +200,9 @@ export function statementFor(c: Candidate, label: string, w: TickWindows): strin
 
 export function buildClaimRow(args: {
   c: Candidate; label: string; memberNames: string[]; w: TickWindows; runId: number;
-  fam: MonitorFamily; firmsClock: string; nightsOnDisk: number | null; now: Date;
+  fam: MonitorFamily; firmsClock: string; bmNewestOnDisk: string; nightsOnDisk: number | null; now: Date;
 }): Record<string, unknown> {
-  const { c, label, memberNames, w, runId, fam, firmsClock, nightsOnDisk, now } = args;
+  const { c, label, memberNames, w, runId, fam, firmsClock, bmNewestOnDisk, nightsOnDisk, now } = args;
   const r = c.row;
   const p = shrunkRate(fam.k, fam.judged);
   const statement = statementFor(c, label, w);
@@ -142,7 +212,7 @@ export function buildClaimRow(args: {
   const nominal = new Date(`${addDays(c.window_end, 1)}T00:00:00.000Z`);
   const resolvesAt = nominal.getTime() > now.getTime() ? nominal : new Date(now.getTime() + 3_600_000);
   const hash = computePredictionHash({ statement, targetObservable, resolvesAt, issuedAt: now, predictedMean: p });
-  const light = c.family === 'rc_site_stays_lit' || c.family === 'rc_lead_light_persists';
+  const light = isLightFamily(c.family);
   return {
     feature: c.family,
     context: {
@@ -167,9 +237,13 @@ export function buildClaimRow(args: {
       baseline_firms_days: r.baseline_firms_days,
       threshold_ratio: 0.6,
       firms_clock_at_issue: c.family === 'rc_heat_dark_persists' ? firmsClock : undefined,
-      // How many of the window's nights already held a row for a member when
-      // this claim was issued. Recorded so a reader can check it, not trust it:
-      // nothing in the window feeds the verdict or the number.
+      // Decision C: the light window starts the night after this (or after
+      // the newest light window already claimed, whichever is later).
+      bm_newest_night_on_disk_at_issue: light ? bmNewestOnDisk : undefined,
+      // How many of the window's nights (FIRMS days for the heat family)
+      // already held a row for a member when this claim was issued — always 0
+      // (asserted at issue). Recorded so a reader can check it, not trust it.
+      // Null for refutation holds, whose instrument is the later ticks.
       window_nights_on_disk_at_issue: nightsOnDisk,
       forecast_basis: fam.judged === 0
         ? 'flat_prior_no_judged_claims_yet'
@@ -222,6 +296,21 @@ async function firmsDataClock(db: Db): Promise<string | null> {
   return v?.period ? String(v.period).slice(0, 10) : null;
 }
 
+/**
+ * The newest night holding ANY Black Marble row, every facility type (decision
+ * C). One index-only scan on idx_bm_radiance_period (period DESC), LIMIT 1.
+ */
+async function bmNewestNightOnDisk(db: Db): Promise<string | null> {
+  const { data, error } = await db
+    .from('blackmarble_facility_radiance')
+    .select('period')
+    .order('period', { ascending: false })
+    .limit(1);
+  if (error) throw new Error(`Black Marble frontier read: ${error.message}`);
+  const v = (data ?? [])[0] as { period?: string } | undefined;
+  return v?.period ? String(v.period).slice(0, 10) : null;
+}
+
 /** Existing refinery-rc claims whose window could touch a new one (paged, ordered — #506). */
 async function recentClaims(db: Db, since: Date): Promise<Array<{ feature: string; public_id: string; context: Record<string, unknown> }>> {
   const out: Array<{ feature: string; public_id: string; context: Record<string, unknown> }> = [];
@@ -241,15 +330,18 @@ async function recentClaims(db: Db, since: Date): Promise<Array<{ feature: strin
   return out;
 }
 
-/** Nights in [start, end] holding any Black Marble row for the members, per complex. */
-async function nightsOnDisk(db: Db, members: Map<string, string[]>, start: string, end: string): Promise<Map<string, number>> {
+/** Nights (FIRMS: days) in [start, end] holding any row of `table` for the members, per complex. Keyed index reads. */
+async function nightsOnDisk(
+  db: Db, table: 'blackmarble_facility_radiance' | 'firms_facility_observations',
+  members: Map<string, string[]>, start: string, end: string,
+): Promise<Map<string, number>> {
   const ids = [...new Set([...members.values()].flat())];
   const byFacility = new Map<string, Set<string>>();
   for (let i = 0; i < ids.length; i += 50) {
     const chunk = ids.slice(i, i + 50);
     for (let from = 0; ; from += 1000) {
       const { data, error } = await db
-        .from('blackmarble_facility_radiance')
+        .from(table)
         .select('facility_id, period')
         .eq('facility_type', 'refinery')
         .in('facility_id', chunk)
@@ -258,7 +350,7 @@ async function nightsOnDisk(db: Db, members: Map<string, string[]>, start: strin
         .order('facility_id', { ascending: true })
         .order('period', { ascending: true })
         .range(from, from + 999);
-      if (error) throw new Error(`window rows read: ${error.message}`);
+      if (error) throw new Error(`window rows read (${table}): ${error.message}`);
       const rows = (data ?? []) as Array<{ facility_id: string; period: string }>;
       for (const r of rows) {
         const s = byFacility.get(r.facility_id) ?? new Set<string>();
@@ -295,35 +387,46 @@ export async function issueRefineryClaims(
 
     const firmsClock = await firmsDataClock(db);
     if (!firmsClock) throw new Error('FIRMS clock unknown — no refinery observations');
+    const bmNewest = await bmNewestNightOnDisk(db);
+    if (!bmNewest) throw new Error('Black Marble frontier unknown — no rows on disk');
 
     const { data: mon, error: monErr } = await db.rpc('refinery_rc_walkforward');
     if (monErr || !mon) throw new Error(`monitor: ${monErr?.message ?? 'no data'}`);
     const monitor = mon as Monitor;
 
-    const candidates = candidatesFor(tick.verdicts, w, firmsClock);
-    if (candidates.length === 0) {
-      result.reason = 'issuing tick; no complex is thermally dark (REFUTED or LEAD) — nothing to claim';
-      return result;
-    }
-
-    // existing windows per (family, complex): no two claims of one family on one complex share a night
+    // existing windows per (family, complex): no two claims of one family on one complex share a night;
+    // and the newest light window already claimed (a floor for the next light window, decision C)
     const existing = await recentClaims(db, new Date(now.getTime() - 90 * 86_400_000));
     const lastEnd = new Map<string, { end: string; public_id: string }>();
+    let lastLightWindowEnd: string | null = null;
     for (const e of existing) {
       const ctx = e.context ?? {};
       const key = `${e.feature}|${String(ctx.cluster_key ?? '')}`;
       const end = String(ctx.window_end ?? '');
       const prev = lastEnd.get(key);
       if (end && (!prev || end > prev.end)) lastEnd.set(key, { end, public_id: e.public_id });
+      if (end && isLightFamily(e.feature) && (lastLightWindowEnd === null || end > lastLightWindowEnd)) lastLightWindowEnd = end;
     }
 
-    const lightMembers = new Map<string, string[]>();
-    for (const c of candidates) {
-      if (c.family === 'rc_site_stays_lit' || c.family === 'rc_lead_light_persists') lightMembers.set(c.row.cluster_key, c.row.members);
+    const candidates = candidatesFor(tick.verdicts, w, { firms: firmsClock, bmNewestOnDisk: bmNewest, lastLightWindowEnd });
+    if (candidates.length === 0) {
+      result.reason = 'issuing tick; no complex is thermally dark (REFUTED or LEAD) — nothing to claim';
+      return result;
     }
-    const onDisk = lightMembers.size
-      ? await nightsOnDisk(db, lightMembers, addDays(w.data_clock_night, 1), addDays(w.data_clock_night, CLAIM_DAYS))
-      : new Map<string, number>();
+
+    // decision C, by measurement: no window night already holds a row for a member.
+    // All light candidates share one window, all heat candidates another.
+    const light = candidates.filter((c) => isLightFamily(c.family));
+    const heat = candidates.filter((c) => c.family === 'rc_heat_dark_persists');
+    const measure = async (cs: Candidate[], table: 'blackmarble_facility_radiance' | 'firms_facility_observations', instrument: string) => {
+      if (cs.length === 0) return new Map<string, number>();
+      const { window_start: s, window_end: e } = cs[0];
+      const counts = await nightsOnDisk(db, table, new Map(cs.map((c) => [c.row.cluster_key, c.row.members])), s, e);
+      assertNothingOnDisk(instrument, s, e, counts);
+      return counts;
+    };
+    const onDiskLight = await measure(light, 'blackmarble_facility_radiance', 'Black Marble');
+    const onDiskHeat = await measure(heat, 'firms_facility_observations', 'FIRMS');
 
     const rows: Array<Record<string, unknown>> = [];
     for (const c of candidates) {
@@ -337,10 +440,10 @@ export async function issueRefineryClaims(
       }
       const names = tick.names.get(c.row.cluster_key) ?? c.row.members;
       const label = names.length <= 2 ? names.join(' / ') : `${names.slice(0, 2).join(' / ')} +${names.length - 2}`;
-      const light = c.family === 'rc_site_stays_lit' || c.family === 'rc_lead_light_persists';
+      const onDisk = isLightFamily(c.family) ? onDiskLight : c.family === 'rc_heat_dark_persists' ? onDiskHeat : null;
       rows.push(buildClaimRow({
-        c, label, memberNames: names, w, runId: tick.runId, fam, firmsClock,
-        nightsOnDisk: light ? onDisk.get(c.row.cluster_key) ?? 0 : null, now,
+        c, label, memberNames: names, w, runId: tick.runId, fam, firmsClock, bmNewestOnDisk: bmNewest,
+        nightsOnDisk: onDisk ? onDisk.get(c.row.cluster_key) ?? 0 : null, now,
       }));
     }
 

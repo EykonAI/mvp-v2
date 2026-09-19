@@ -9,7 +9,11 @@
 //     halves D 0.25 / p 0.786 — the values the SQL reproduction printed);
 //   · the rolling rule (lib/reality-check/tick.ts planTick);
 //   · the claim rules (lib/reality-check/claims.ts): p = (k + 10)/(n + 20),
-//     alternate ticks, which families a verdict calls for, no banned phrase;
+//     alternate ticks, which families a verdict calls for, no banned phrase,
+//     and decision C (founder, 2026-09-19): no claim window starts on a night
+//     already on disk at issue — driven through the real issuer on an
+//     in-memory register (a partly ingested night, a shrinking frontier lead,
+//     a row that appears inside the window);
 //   · the scorer default (lib/predictions/resolvers/index.ts): a source with
 //     no resolver resolves VOID, never 0.5; the refinery-rc wrapper maps the
 //     SQL rule's ready / defer / void faithfully.
@@ -215,22 +219,134 @@ check('light down is strict: exactly 0.60 × baseline is not down', C.lightDown(
 
   const w = C.windowsFor('2026-09-08');
   const mk = (key, verdict) => ({ cluster_key: key, verdict, members: ['a'], member_count: 1, baseline_median: 100, window_median: 110, baseline_heat_days: 10, baseline_firms_days: 31, robustness_verdict: verdict });
-  const cands = K.candidatesFor([mk('K1', 'REFUTED'), mk('K2', 'LEAD'), mk('K3', 'STEADY'), mk('K4', 'VOID_INSUFFICIENT_NIGHTS')], w, '2026-09-19');
+  // production on 2026-09-19: BM data clock 09-08, newest night with any BM row 09-09 (405/449), FIRMS clock 09-19
+  const clocks = { firms: '2026-09-19', bmNewestOnDisk: '2026-09-09', lastLightWindowEnd: null };
+  const cands = K.candidatesFor([mk('K1', 'REFUTED'), mk('K2', 'LEAD'), mk('K3', 'STEADY'), mk('K4', 'VOID_INSUFFICIENT_NIGHTS')], w, clocks);
   const fams = cands.map((c) => `${c.family}:${c.row.cluster_key}`).sort();
   check('claims: REFUTED → heat + stays lit + refutation holds; LEAD → heat + lead persists; others nothing',
     JSON.stringify(fams) === JSON.stringify(['rc_heat_dark_persists:K1', 'rc_heat_dark_persists:K2', 'rc_lead_light_persists:K2', 'rc_refutation_holds:K1', 'rc_site_stays_lit:K1']), fams);
   const heat = cands.find((c) => c.family === 'rc_heat_dark_persists');
   const lit = cands.find((c) => c.family === 'rc_site_stays_lit');
-  check('claims: FIRMS window = the 14 days after the FIRMS clock; light window = the 14 nights after the data clock',
-    heat.window_start === '2026-09-20' && heat.window_end === '2026-10-03' && lit.window_start === '2026-09-09' && lit.window_end === '2026-09-22');
-  const row = K.buildClaimRow({ c: lit, label: 'Test', memberNames: ['Test'], w, runId: 1, fam: { judged: 0, k: 0, status: 'calibrating' }, firmsClock: '2026-09-19', nightsOnDisk: 1, now: new Date('2026-09-20T10:22:00Z') });
-  check('claim row: machine track, source refinery-rc, hash, p 0.5, observable with the dates',
+  const lead = cands.find((c) => c.family === 'rc_lead_light_persists');
+  const holds = cands.find((c) => c.family === 'rc_refutation_holds');
+  check('decision C: light window = the 14 nights after the newest BM night on disk (09-09 partly ingested → 09-10..09-23), both light families',
+    lit.window_start === '2026-09-10' && lit.window_end === '2026-09-23' && lead.window_start === '2026-09-10' && lead.window_end === '2026-09-23', [lit.window_start, lit.window_end]);
+  check('heat window = the 14 FIRMS days after the FIRMS clock (09-20..10-03); refutation holds = the 14 nights after the data clock (09-09..09-22)',
+    heat.window_start === '2026-09-20' && heat.window_end === '2026-10-03' && holds.window_start === '2026-09-09' && holds.window_end === '2026-09-22');
+  check('decision C: light start = the frontier + 1 when the frontier is the clock', K.lightWindowStart('2026-09-08', '2026-09-08', null) === '2026-09-09');
+  check('decision C: light start = the frontier + 1 when a later night is partly on disk', K.lightWindowStart('2026-09-08', '2026-09-12', null) === '2026-09-13');
+  check('decision C: a shrinking frontier lead cannot overlap the last light window (09-10..09-23 claimed; clock = frontier = 09-22 → 09-24)',
+    K.lightWindowStart('2026-09-22', '2026-09-22', '2026-09-23') === '2026-09-24');
+  check('decision C: the last light window is only a floor (frontier 10-01 → 10-02)', K.lightWindowStart('2026-09-22', '2026-10-01', '2026-09-23') === '2026-10-02');
+  let threw = null;
+  try { K.assertNothingOnDisk('FIRMS', '2026-09-20', '2026-10-03', new Map([['K1', 0], ['K2', 2]])); } catch (e) { threw = e.message; }
+  check('decision C: a window night already on disk refuses the issuance (names the complex and the count)', /FIRMS window 2026-09-20\.\.2026-10-03 already holds rows at issue for K2 \(2 night/.test(threw ?? ''), threw);
+  let clear = true;
+  try { K.assertNothingOnDisk('Black Marble', '2026-09-10', '2026-09-23', new Map([['K1', 0]])); } catch { clear = false; }
+  check('decision C: all zero → issues', clear);
+  const row = K.buildClaimRow({ c: lit, label: 'Test', memberNames: ['Test'], w, runId: 1, fam: { judged: 0, k: 0, status: 'calibrating' }, firmsClock: '2026-09-19', bmNewestOnDisk: '2026-09-09', nightsOnDisk: 0, now: new Date('2026-09-20T10:22:00Z') });
+  check('claim row: machine track, source refinery-rc, hash, p 0.5, observable with the dates, nothing on disk, the frontier recorded',
     row.track === 'machine' && row.source === 'refinery-rc' && /^[0-9a-f]{64}$/.test(row.hash)
-    && row.predicted_distribution.mean === 0.5 && row.target_observable === 'refinery-rc:rc_site_stays_lit:K1:2026-09-09..2026-09-22'
-    && row.context.forecast_k === 0 && row.context.forecast_n === 0 && row.context.window_nights_on_disk_at_issue === 1, row);
+    && row.predicted_distribution.mean === 0.5 && row.target_observable === 'refinery-rc:rc_site_stays_lit:K1:2026-09-10..2026-09-23'
+    && row.context.window_start === '2026-09-10' && row.context.window_end === '2026-09-23' && row.resolves_at === '2026-09-24T00:00:00.000Z'
+    && row.context.forecast_k === 0 && row.context.forecast_n === 0 && row.context.window_nights_on_disk_at_issue === 0
+    && row.context.bm_newest_night_on_disk_at_issue === '2026-09-09' && /2026-09-10–2026-09-23/.test(row.statement), row);
   const banned = /barrels offline|bpd offline|capacity offline|outage confirmed|confirmed outage|shutdown confirmed|% of capacity/i;
   const texts = cands.map((c) => K.statementFor(c, 'Test', w));
   check('claims: no statement carries a §6 banned phrase', texts.every((t) => !banned.test(t)), texts.find((t) => banned.test(t)));
+}
+
+// ── 6b · decision C through the real issuer, on an in-memory register ──
+{
+  // A PostgREST-shaped stand-in: eq / in / gte / lte / not-null / order / limit / range / insert.
+  // `frontier` forces the one unfiltered BM read (the frontier) to a stale answer — a row landing mid-issue.
+  const memDb = (tables, rpcs, { frontier } = {}) => {
+    let nextId = 1;
+    const from = (table) => {
+      const st = { filters: [], orders: [], lim: null, off: 0, ins: null };
+      const exec = () => {
+        if (st.ins) {
+          const rows = st.ins.map((r) => { const id = nextId++; return { id, public_id: `p_${id}`, ...r }; });
+          (tables[table] ??= []).push(...rows);
+          return { data: rows, error: null };
+        }
+        if (table === 'blackmarble_facility_radiance' && frontier && st.filters.length === 0) return { data: [{ period: frontier }], error: null };
+        let rows = (tables[table] ?? []).filter((r) => st.filters.every((f) => f(r)));
+        for (const [c, asc] of [...st.orders].reverse()) rows = [...rows].sort((a, b) => (a[c] < b[c] ? -1 : a[c] > b[c] ? 1 : 0) * (asc ? 1 : -1));
+        return { data: rows.slice(st.off, st.lim === null ? undefined : st.off + st.lim), error: null };
+      };
+      const b = {
+        select: () => b,
+        eq: (c, v) => { st.filters.push((r) => r[c] === v); return b; },
+        in: (c, vs) => { st.filters.push((r) => vs.includes(r[c])); return b; },
+        gte: (c, v) => { st.filters.push((r) => r[c] >= v); return b; },
+        lte: (c, v) => { st.filters.push((r) => r[c] <= v); return b; },
+        not: (c) => { st.filters.push((r) => r[c] !== null && r[c] !== undefined); return b; },
+        order: (c, o = {}) => { st.orders.push([c, o.ascending !== false]); return b; },
+        limit: (n) => { st.lim = n; return b; },
+        range: (a, z) => { st.off = a; st.lim = z - a + 1; return b; },
+        insert: (rows) => { st.ins = Array.isArray(rows) ? rows : [rows]; return b; },
+        then: (res, rej) => Promise.resolve(exec()).then(res, rej),
+      };
+      return b;
+    };
+    return { from, rpc: (name) => ({ then: (res, rej) => Promise.resolve({ data: rpcs[name] ?? null, error: null }).then(res, rej) }) };
+  };
+  const days = (from, to) => { const out = []; for (let d = from; d <= to; d = C.addDays(d, 1)) out.push(d); return out; };
+  const bm = (type, id, from, to) => days(from, to).map((period) => ({ facility_type: type, facility_id: id, period }));
+  const fams = Object.fromEntries(K.FAMILIES.map((f) => [f, { judged: 0, k: 0, status: 'calibrating' }]));
+  const rpcs = { refinery_rc_walkforward: { families: fams } };
+  const v = { cluster_key: 'K1', verdict: 'REFUTED', members: ['a'], member_count: 1, baseline_median: 100, window_median: 110, baseline_heat_days: 10, baseline_firms_days: 31, robustness_verdict: 'REFUTED' };
+  const names = new Map([['K1', ['Alpha']]]);
+  const byFam = (t, clock) => Object.fromEntries((t.predictions_register ?? []).filter((r) => r.context.tick_data_clock === clock).map((r) => [r.feature, r]));
+
+  // first issuing tick: data clock 09-08; night 09-09 partly on disk (another facility type); FIRMS clock 09-19
+  const t = {
+    blackmarble_facility_radiance: [...bm('refinery', 'a', '2026-08-01', '2026-09-08'), ...bm('power_plant', 'pp', '2026-08-01', '2026-09-09')],
+    firms_facility_observations: bm('refinery', 'a', '2026-08-01', '2026-09-19'),
+    reality_check_runs: [], predictions_register: [], issuance_runs: [],
+  };
+  const r1 = await K.issueRefineryClaims(memDb(t, rpcs), { runId: 1, windows: C.windowsFor('2026-09-08'), verdicts: [v], names }, new Date('2026-09-20T10:22:00Z'));
+  const c1 = byFam(t, '2026-09-08');
+  check('issuer, first tick: 3 claims, nothing declined, no error', r1.issued === 3 && r1.error === null && Object.keys(r1.declined).length === 0, r1);
+  check('issuer, first tick: the light window starts after the newest night with ANY BM row (09-09, not a refinery row) → 09-10..09-23',
+    c1.rc_site_stays_lit?.context.window_start === '2026-09-10' && c1.rc_site_stays_lit?.context.window_end === '2026-09-23'
+    && c1.rc_site_stays_lit?.target_observable === 'refinery-rc:rc_site_stays_lit:K1:2026-09-10..2026-09-23', c1.rc_site_stays_lit?.context);
+  check('issuer, first tick: window_nights_on_disk_at_issue = 0 for light and heat, null for refutation holds; the frontier is on the claim',
+    c1.rc_site_stays_lit?.context.window_nights_on_disk_at_issue === 0 && c1.rc_heat_dark_persists?.context.window_nights_on_disk_at_issue === 0
+    && c1.rc_refutation_holds?.context.window_nights_on_disk_at_issue === null && c1.rc_site_stays_lit?.context.bm_newest_night_on_disk_at_issue === '2026-09-09');
+  check('issuer, first tick: heat 09-20..10-03 (after the FIRMS clock), refutation holds 09-09..09-22 (after the data clock)',
+    c1.rc_heat_dark_persists?.context.window_start === '2026-09-20' && c1.rc_heat_dark_persists?.context.window_end === '2026-10-03'
+    && c1.rc_refutation_holds?.context.window_start === '2026-09-09' && c1.rc_refutation_holds?.context.window_end === '2026-09-22');
+
+  // +7: not an issuing tick
+  t.reality_check_runs.push({ asset_class: 'refinery', status: 'complete', data_clock_night: '2026-09-08', claims_issued: 3 });
+  const r7 = await K.issueRefineryClaims(memDb(t, rpcs), { runId: 2, windows: C.windowsFor('2026-09-15'), verdicts: [v], names }, new Date('2026-09-27T10:22:00Z'));
+  check('issuer, +7: not an issuing tick, nothing written', r7.issuing === false && r7.issued === 0 && t.predictions_register.length === 3, r7);
+
+  // +14: the backlog lands in full — data clock = frontier = 09-22, so the frontier's lead shrank from 1 to 0
+  t.blackmarble_facility_radiance.push(...bm('refinery', 'a', '2026-09-09', '2026-09-22'));
+  t.firms_facility_observations.push(...bm('refinery', 'a', '2026-09-20', '2026-10-03'));
+  const r14 = await K.issueRefineryClaims(memDb(t, rpcs), { runId: 3, windows: C.windowsFor('2026-09-22'), verdicts: [v], names }, new Date('2026-10-04T10:22:00Z'));
+  const c14 = byFam(t, '2026-09-22');
+  check('issuer, +14 with a shrunken frontier lead: 3 claims, none declined for overlap', r14.issued === 3 && r14.error === null && Object.keys(r14.declined).length === 0, r14);
+  check('issuer, +14: the light window starts after the last light window (09-23), not on it → 09-24..10-07; nothing on disk',
+    c14.rc_site_stays_lit?.context.window_start === '2026-09-24' && c14.rc_site_stays_lit?.context.window_end === '2026-10-07'
+    && c14.rc_site_stays_lit?.context.window_nights_on_disk_at_issue === 0, c14.rc_site_stays_lit?.context);
+  check('issuer, +14: heat 10-04..10-17 and refutation holds 09-23..10-06 follow their own clocks, no overlap',
+    c14.rc_heat_dark_persists?.context.window_start === '2026-10-04' && c14.rc_refutation_holds?.context.window_start === '2026-09-23'
+    && c14.rc_refutation_holds?.context.window_end === '2026-10-06');
+
+  // a row lands inside the window between the frontier read and the count → nothing issues, the error is recorded
+  const t2 = {
+    blackmarble_facility_radiance: [...bm('refinery', 'a', '2026-08-01', '2026-09-08'), { facility_type: 'refinery', facility_id: 'a', period: '2026-09-12' }],
+    firms_facility_observations: bm('refinery', 'a', '2026-08-01', '2026-09-19'),
+    reality_check_runs: [], predictions_register: [], issuance_runs: [],
+  };
+  const rr = await K.issueRefineryClaims(memDb(t2, rpcs, { frontier: '2026-09-09' }), { runId: 1, windows: C.windowsFor('2026-09-08'), verdicts: [v], names }, new Date('2026-09-20T10:22:00Z'));
+  check('issuer: a window night on disk at issue → no claim at all, the error names it and lands in issuance_runs',
+    rr.issued === 0 && t2.predictions_register.length === 0 && /Black Marble window 2026-09-10\.\.2026-09-23 already holds rows at issue for K1 \(1 night/.test(rr.error ?? '')
+    && t2.issuance_runs.length === 1 && t2.issuance_runs[0].error === rr.error, { rr, runs: t2.issuance_runs });
 }
 
 // ── 7 · the scorer: no resolver, no score ───────────────────────────────
