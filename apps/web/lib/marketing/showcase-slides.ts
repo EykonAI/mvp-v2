@@ -13,20 +13,38 @@ import { PLATFORM_STATS as PS, stat } from '@/lib/marketing/platform-stats';
  * frame will letterbox as it cycles.
  */
 
-export const PILLAR_SLIDES: Slide[] = [
-  {
+/**
+ * The pillar slides. The P-01 refinery figure is the REGISTRY count of
+ * crude-oil refineries (refineries.site_type = 'refinery', 554 on
+ * 2026-09-19), passed in from the named query in
+ * lib/marketing/watched-coverage.ts (refineriesRegistry). It used to be a
+ * literal (634) that migration 168 left matching neither the 650 rows nor the
+ * 554 refineries. Until the query answers, or if it fails, the sentence names
+ * the layer without a count — never a fallback number.
+ */
+export function pillarSlides(refineriesRegistry: number | null): Slide[] {
+  return [globeSlide(refineriesRegistry), ...PILLAR_SLIDES_AFTER_GLOBE];
+}
+
+function globeSlide(refineriesRegistry: number | null): Slide {
+  const refineries =
+    refineriesRegistry == null ? 'crude-oil refineries' : `${stat(refineriesRegistry)} crude-oil refineries`;
+  return {
     code: 'P-01 · GLOBE',
     title: 'The state of the world, on one screen — free for everyone.',
     body:
       `Aircraft, conflict events, thermal anomalies, night-time radiance, chokepoint vessel ` +
       `coverage and weather, over the infrastructure that makes them interpretable: ` +
       `${stat(PS.powerPlantUnits)} power-plant units across ${stat(PS.powerPlants)} plants, ` +
-      `${stat(PS.refineries)} refineries, ${stat(PS.mineralDeposits)} mineral deposits, ` +
+      `${refineries}, ${stat(PS.mineralDeposits)} mineral deposits, ` +
       `${stat(PS.seaports)} seaports, ${stat(PS.airfields)} airports and airfields. Every layer ` +
       `carries its source and refresh timestamp inline.`,
     shot: '/marketing/p01-globe.jpg',
     alt: 'The eYKON globe with its layer menu open, showing live aircraft, vessel, conflict, thermal and night-lights counts.',
-  },
+  };
+}
+
+const PILLAR_SLIDES_AFTER_GLOBE: Slide[] = [
   {
     code: 'P-02 · AI ANALYST',
     title: 'Ask in plain English. It queries the database.',

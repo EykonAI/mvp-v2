@@ -32,9 +32,15 @@ import { FIRMS_REGIONS, firmsRegionsAsJsonb } from '@/lib/firms/client';
  *
  *   thermalDay, thermalRefineryRows, thermalPowerUnitRows
  *     the newest period in firms_facility_observations and the rows the
- *     derivation wrote for it, by facility_type.     2026-09-18 · 431 · 10,125
+ *     derivation wrote for it, by facility_type.     2026-09-19 · 353 · 10,143
+ *     Refinery rows go through refinery_roster_rows(<day>) (migration 181):
+ *     the same site_type = 'refinery' population as refineriesWatched, so
+ *     /start's roster and the homepage's "watched" agree (353 = 353 on
+ *     2026-09-19). Counting every refinery-tagged row read 449 — it included
+ *     the 96 sites 168 re-typed, which FIRMS still observes. It stays a count
+ *     of rows the derivation WROTE, so a stalled day still reads stale.
  *     Power rows are GENERATING-UNIT rows (>= 500 MW), not sites: 10,125
- *     unit rows sit on 5,808 GEM locations.
+ *     unit rows sat on 5,808 GEM locations on 2026-09-18.
  *
  *   nightlightsNight, nightlightsRows, nightlightsClearReadings
  *     the newest period in blackmarble_facility_radiance, its row count, and
@@ -112,6 +118,23 @@ async function refineryCoverage(admin: SB): Promise<{ watched: number | null; re
   }
 }
 
+/**
+ * The thermal roster's refinery rows for one derived day, crude-oil
+ * refineries only (refinery_roster_rows, migration 181). Fails soft to null —
+ * never to the unfiltered refinery-tagged count, which is the figure this
+ * replaced.
+ */
+async function refineryRosterRows(admin: SB, day: string): Promise<number | null> {
+  try {
+    const { data, error } = await admin.rpc('refinery_roster_rows', { p_period: day });
+    if (error || data == null) return null;
+    const n = Number(data);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 async function newestPeriod(admin: SB, table: string): Promise<string | null> {
   try {
     const { data, error } = await admin
@@ -156,10 +179,7 @@ export async function loadWatchedCoverage(): Promise<WatchedCoverage> {
 
   const [thermalRefineryRows, thermalPowerUnitRows, nightlightsRows, nightlightsClearReadings] =
     await Promise.all([
-      thermalDay
-        ? headCount(admin, 'firms_facility_observations', (q) =>
-            q.eq('period', thermalDay).eq('facility_type', 'refinery'))
-        : Promise.resolve(null),
+      thermalDay ? refineryRosterRows(admin, thermalDay) : Promise.resolve(null),
       thermalDay
         ? headCount(admin, 'firms_facility_observations', (q) =>
             q.eq('period', thermalDay).eq('facility_type', 'power_plant'))

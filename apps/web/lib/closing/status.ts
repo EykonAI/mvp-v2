@@ -26,8 +26,11 @@ export interface ClosingStatus {
   /** The newest published night (YYYY-MM-DD). NASA publishes ~9 days behind. */
   nightlightsNewestNight: string | null;
   /** The thermal watch roster on its newest derived day (same named query):
-   *  refinery rows and power-plant UNIT rows (>= 500 MW) inside the FIRMS
-   *  boxes. Live coverage — unlike the 183,051-row registry it replaces. */
+   *  crude-oil refinery rows (site_type = 'refinery', migration 181 — the
+   *  homepage's "refineries watched" population, 353 on 2026-09-19, not the
+   *  449 refinery-tagged rows) and power-plant UNIT rows (>= 500 MW) inside
+   *  the FIRMS boxes. Live coverage — unlike the 183,051-row registry it
+   *  replaces. */
   thermalRefineryRows: number | null;
   thermalPowerUnitRows: number | null;
   /** The derived day those roster rows belong to (YYYY-MM-DD) — shown beside

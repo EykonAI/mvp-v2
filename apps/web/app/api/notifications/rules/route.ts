@@ -281,7 +281,7 @@ export async function POST(req: NextRequest) {
           error: 'no_facilities_match_filter',
           matching_facilities: 0,
           hint: firmsConfig.country
-            ? `No monitored facility matches that filter. Note that refinery country attribution is largely absent in this dataset (populated on 3 of 634 refineries), so country-scoped refinery rules resolve to nothing. Country filters are reliable for power plants.`
+            ? `No monitored facility matches that filter. Country matches the facility's full English country name, case-insensitively (e.g. "Russia", "United States"), for refineries and power plants alike — an ISO code such as "RU" matches nothing.`
             : 'No monitored facility matches that filter.',
         },
         { status: 400 },
