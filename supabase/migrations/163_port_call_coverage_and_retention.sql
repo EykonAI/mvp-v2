@@ -66,12 +66,17 @@
 --   270.6 B/row (heap 114, indexes 156, of which 62 is the duplicate index
 --   in (b)). → ~1.8–1.9 GB of live data.
 --   Against mig 078's budget (~2 GB / ~4.4 M rows): INSIDE the byte budget with
---   ~5 % margin, OVER the row figure by ~50–60 %. Proposed, for the founder to
---   decide — NOT done in this file:
+--   ~5 % margin, OVER the row figure by ~50–60 %. Options put to the founder:
 --     (a) name the budget: ≤ 7.5 M rows / ≤ 2.0 GB total relation size;
---     (b) drop idx_ais_history_mmsi_time (mmsi, recorded_at DESC): 693 MB today,
---         a duplicate of the unique (mmsi, recorded_at) index, which a btree can
---         scan in either direction → ~1.4–1.5 GB at 14 days;
+--     (b) drop idx_ais_history_mmsi_time (mmsi, recorded_at DESC): 701 MB on
+--         2026-09-19, a duplicate of the unique (mmsi, recorded_at) index, which
+--         a btree can scan in either direction → ~1.4–1.5 GB at 14 days;
+--         ▶ DECIDED by the founder on 2026-09-19 — done in §5 of this file.
+--           Every reader of the table filters one mmsi and orders by
+--           recorded_at in a single direction (shadow-fleet track + evidence
+--           pack, refresh_vessel_cadence, derive_port_calls, mig 162's
+--           previous/next-fix lookups), so the unique index serves them all;
+--           nothing orders mmsi ASC, recorded_at DESC or uses DISTINCT ON (mmsi).
 --     (c) or narrow the stored fleet (vessel_profiles, 45,579 rows; ~33k
 --         vessels sampled a day) — a product decision.
 --   On disk: DELETE frees space for reuse; the table file stops growing but
@@ -319,6 +324,18 @@ SELECT cron.unschedule(jobid) FROM cron.job WHERE jobname = 'prune-ais-history';
 SELECT cron.schedule('prune-ais-history', '44 * * * *',
                      $job$ SELECT public.prune_ais_position_history(14, 1, 7) $job$);
 
+-- ─── 5 · Drop the duplicate AIS history index (founder decision, 2026-09-19) ─
+-- idx_ais_history_mmsi_time (mmsi, recorded_at DESC; mig 078) duplicates the
+-- unique ais_position_history_mmsi_recorded_at_key (mmsi, recorded_at): a btree
+-- scans both ways, and no reader orders in mixed directions (see header, (b)).
+-- ~701 MB freed. Last statement before COMMIT so the ACCESS EXCLUSIVE lock is
+-- held only for the drop itself; lock_timeout makes it give up rather than
+-- queue behind a long reader — if it times out, the whole file rolls back and
+-- is simply re-run (idempotent). Not CONCURRENTLY: that cannot run inside the
+-- transaction this file needs, nor inside a multi-statement editor run.
+SET LOCAL lock_timeout = '10s';
+DROP INDEX IF EXISTS public.idx_ais_history_mmsi_time;
+
 COMMIT;
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -357,6 +374,11 @@ UNION ALL
 SELECT 'cron job prune-ais-history', j.active AND j.schedule = '44 * * * *',
        j.schedule || ' · ' || j.command
   FROM cron.job j WHERE j.jobname = 'prune-ais-history'
+UNION ALL
+SELECT 'duplicate index idx_ais_history_mmsi_time dropped; unique (mmsi, recorded_at) index kept',
+       to_regclass('public.idx_ais_history_mmsi_time') IS NULL
+       AND to_regclass('public.ais_position_history_mmsi_recorded_at_key') IS NOT NULL,
+       NULL
 UNION ALL
 SELECT 'cron job prune-ais-history is unique',
        (SELECT count(*) FROM cron.job WHERE jobname = 'prune-ais-history') = 1, NULL
