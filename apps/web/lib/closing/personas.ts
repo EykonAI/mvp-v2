@@ -15,6 +15,32 @@
  */
 export type PersonaId = 'trader' | 'analyst' | 'journalist' | 'risk' | 'citizen';
 
+/**
+ * Step-3's week-one question, asked as free text instead of chips.
+ *
+ * The OSINT one-pager ends on an offer — "Send us a claim: a facility and
+ * a date" — and /start had nowhere to put one. Rather than add a seventh
+ * question, the persona that receives that offer answers the SAME step-3
+ * question in prose (Reality Check build prompt rev H §10, PR-9).
+ *
+ * The typed text is what lands in closing_leads.need; that column is
+ * plain nullable text with no CHECK (migration 108, re-read in production
+ * 2026-09-20), so prose stores where a slug used to. One shape, one
+ * column, no migration.
+ *
+ * This is also the API's source of truth: POST /api/closing/lead reads
+ * claimFieldFor(persona) to decide whether `need` is a slug or free text,
+ * and how long it may be. A second copy of that rule would drift.
+ */
+export interface ClaimField {
+  /** Accessible name of the input — also its visible <label>. */
+  label: string;
+  placeholder: string;
+  hint: string;
+  /** Enforced on BOTH sides: maxLength on the input, slice() in the route. */
+  maxLength: number;
+}
+
 export interface Persona {
   id: PersonaId;
   /** Step-1 card */
@@ -30,6 +56,8 @@ export interface Persona {
   marketsLabel: string;
   cta: string;
   fine: string;
+  /** Present only where step 3 asks for prose. Absent = the chip list. */
+  claim?: ClaimField;
 }
 
 export const PERSONAS: Persona[] = [
@@ -86,6 +114,15 @@ export const PERSONAS: Persona[] = [
     marketsLabel: 'What do you cover?',
     cta: 'Start free as Observer',
     fine: 'No card · no time limit · the founding rate is there whenever you’re ready',
+    // The OSINT one-pager's closing offer, made answerable on the page
+    // itself. Wording fixed by rev H §10 — if the one-pager is re-issued
+    // with different words, this string moves with it.
+    claim: {
+      label: 'A claim you want checked — a facility and a date',
+      placeholder: 'Kirishi refinery — 14 September 2026',
+      hint: 'One line is enough. We run it against the thermal, night-lights and vessel feeds — and when a site sits outside what we watch, we say so rather than guess.',
+      maxLength: 280,
+    },
   },
   {
     id: 'journalist',
@@ -175,4 +212,18 @@ export const PERSONA_BY_ID = Object.fromEntries(
 
 export function isPersonaId(v: string | null | undefined): v is PersonaId {
   return !!v && v in PERSONA_BY_ID;
+}
+
+/**
+ * The step-3 free-text prompt for a persona slug, or null when that
+ * persona answers with chips.
+ *
+ * Read by BOTH the form and POST /api/closing/lead. The route must not
+ * trust the client about which shape `need` arrives in — it re-derives
+ * it from the persona slug it is about to store, so a forged free-text
+ * `need` on a chip persona is still rejected to null exactly as before.
+ */
+export function claimFieldFor(persona: string | null | undefined): ClaimField | null {
+  if (!isPersonaId(persona)) return null;
+  return PERSONA_BY_ID[persona].claim ?? null;
 }
