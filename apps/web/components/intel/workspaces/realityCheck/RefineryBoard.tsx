@@ -1,5 +1,5 @@
 'use client';
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import {
   KNOWN_LIMITS, MAINTENANCE_DISCLOSURE, VERDICTS, HEAT_STATES,
   claimsLine, eliminationShare, funnelSteps, heatStrip, lightStrip,
@@ -102,6 +102,15 @@ function Board({
   const liveLine = claimsLine(t.claims.live);
   const active = rows.find((r) => r.cluster_key === selected) ?? rows[0] ?? null;
 
+  // Open on the first row of the sorted board — which, because REFUTED
+  // outranks everything, is a refutation. The refusal is the product, so it
+  // is what a subscriber should be reading when the page settles, and it is
+  // also what puts the drill-down's ?cluster= in the URL so the view they
+  // are looking at is the view they can send someone.
+  useEffect(() => {
+    if (!selected && active) onSelect(active.cluster_key);
+  }, [selected, active, onSelect]);
+
   return (
     <>
       {/* 1 · the tick band */}
@@ -152,7 +161,7 @@ function Board({
           {steps.map((s) => (
             <div key={s.key} className={s.hero ? 'rc-step rc-step-hero' : 'rc-step'}>
               <span className="rc-step-n">{s.complexes}</span>
-              <span className="rc-step-rows">{s.rows} facility rows</span>
+              <span className="rc-step-rows">({s.rows} facility rows)</span>
               <span className="rc-step-l">{s.label}</span>
               <span className="rc-step-note">{s.note}</span>
             </div>
