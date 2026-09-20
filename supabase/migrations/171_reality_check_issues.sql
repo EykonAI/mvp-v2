@@ -182,17 +182,30 @@ BEGIN
     ALTER TABLE public.reality_check_issues ADD CONSTRAINT rci_claims_sane
       CHECK (claims_issued IS NULL OR claims_issued >= 0);
   END IF;
-  -- the counts are an object over the D-2 vocabulary, with no state missing
+  -- The counts are an object over the D-2 vocabulary, with no state missing
+  -- and no ninth state invented. Asserted WITHOUT a sub-SELECT, because a
+  -- CHECK constraint may not contain one: PostgreSQL refuses the whole
+  -- statement with 0A000 "cannot use subquery in check constraint", and in
+  -- a one-transaction migration that aborts the entire file.
+  --   ?&  — all eight keys are present
+  --   - ARRAY[…] = '{}' — removing those eight leaves nothing, so there is
+  --                       no ninth key
+  -- Together those two are exactly "these eight keys and no others", the
+  -- same assertion the count + eight ? tests made. The CASE is not
+  -- decoration: AND is not guaranteed to short-circuit, and `jsonb - text[]`
+  -- raises on a scalar, so the object test has to gate the other two rather
+  -- than sit beside them.
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'rci_counts_vocabulary') THEN
     ALTER TABLE public.reality_check_issues ADD CONSTRAINT rci_counts_vocabulary
-      CHECK (jsonb_typeof(counts_by_verdict) = 'object'
-             AND (SELECT count(*) FROM jsonb_object_keys(counts_by_verdict)) = 8
-             AND counts_by_verdict ? 'STEADY' AND counts_by_verdict ? 'LIGHT_DOWN_ONLY'
-             AND counts_by_verdict ? 'REFUTED' AND counts_by_verdict ? 'LEAD'
-             AND counts_by_verdict ? 'VOID_NOT_OBSERVED'
-             AND counts_by_verdict ? 'VOID_INSUFFICIENT_NIGHTS'
-             AND counts_by_verdict ? 'VOID_BASELINE_UNSTABLE'
-             AND counts_by_verdict ? 'VOID_HEAT_NOT_OBSERVABLE');
+      CHECK (CASE WHEN jsonb_typeof(counts_by_verdict) = 'object' THEN
+                    counts_by_verdict ?& ARRAY['STEADY','LIGHT_DOWN_ONLY','REFUTED','LEAD',
+                                               'VOID_NOT_OBSERVED','VOID_INSUFFICIENT_NIGHTS',
+                                               'VOID_BASELINE_UNSTABLE','VOID_HEAT_NOT_OBSERVABLE']::text[]
+                AND counts_by_verdict -  ARRAY['STEADY','LIGHT_DOWN_ONLY','REFUTED','LEAD',
+                                               'VOID_NOT_OBSERVED','VOID_INSUFFICIENT_NIGHTS',
+                                               'VOID_BASELINE_UNSTABLE','VOID_HEAT_NOT_OBSERVABLE']::text[]
+                    = '{}'::jsonb
+                  ELSE false END);
   END IF;
 END $$;
 
