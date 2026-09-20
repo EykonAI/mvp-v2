@@ -16,6 +16,13 @@ import type { AisCoverageClause } from '@/lib/closing/ais-coverage';
  * next (migration 108 / PR G) and this component obeys it — the client
  * copy of the rule below is only an offline fallback.
  *
+ * The week-one question has two shapes. Most personas pick a chip. The
+ * OSINT analyst types instead — its one-pager ends on "send us a claim:
+ * a facility and a date", and that offer needed somewhere to land (rev H
+ * §10, PR-9). Same question, same column (closing_leads.need), no new
+ * field and no migration. Which shape applies is decided by the persona
+ * record, not here, so the API can re-derive it server-side.
+ *
  * The payment question is asked out loud on purpose. We only take crypto
  * today, and the answer is honoured rather than merely collected — it
  * decides which SECONDARY path is offered next to the founding rate.
@@ -135,6 +142,7 @@ export function QualifyForm({
   const [markets, setMarkets] = useState<string[]>([]);
   const [theatres, setTheatres] = useState<string[]>([]);
   const [need, setNeed] = useState<string[]>([]);
+  const [claim, setClaim] = useState('');
   const [pay, setPay] = useState<string[]>([]);
   const [publishes, setPublishes] = useState<string[]>([]);
   const [phase, setPhase] = useState<Phase>('idle');
@@ -143,6 +151,10 @@ export function QualifyForm({
   const tokenRef = useRef<string | null>(null);
   const turnstileRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
+
+  /** Set only for the persona whose one-pager ends on "send us a claim"
+   *  (lib/closing/personas.ts). Null = the chip list, unchanged. */
+  const claimField = persona.claim ?? null;
 
   function markStarted() {
     if (started.current) return;
@@ -188,7 +200,18 @@ export function QualifyForm({
       form.reportValidity();
       return;
     }
-    if (need.length === 0) {
+    // The claim personas answer the same question in prose. `required`
+    // catches a genuinely empty box, but HTML's required is satisfied by
+    // a run of spaces — and the body below sends `claim.trim() || null`,
+    // so " " would have passed a REQUIRED field and stored nothing. That
+    // is the exact "looks alive, saves nothing" failure this field was
+    // added to avoid, so the trim is checked here, not just sent.
+    if (claimField && !claim.trim()) {
+      setError('Name a facility and a date — one line is enough.');
+      setPhase('error');
+      return;
+    }
+    if (!claimField && need.length === 0) {
       setError('Pick what would make eYKON useful in week 1.');
       setPhase('error');
       return;
@@ -211,7 +234,10 @@ export function QualifyForm({
           persona: persona.id,
           markets,
           theatres,
-          need: need[0] ?? null,
+          // One field, one column. A claim persona sends the typed text,
+          // everyone else the chosen slug — both land on closing_leads.need
+          // (migration 108: plain nullable text, no CHECK).
+          need: claimField ? claim.trim() || null : need[0] ?? null,
           pay: pay[0] ?? null,
           publishes: publishes[0] ?? null,
           wants_daily_brief: data.get('wants_daily_brief') === 'on',
@@ -286,10 +312,31 @@ export function QualifyForm({
           </p>
         </div>
 
-        <div className="cs-field cs-fgroup">
-          <label>What would make eYKON useful in week 1? *</label>
-          <Chips options={NEEDS} value={need} onToggle={single(setNeed)} max={1} label="Week-one need" />
-        </div>
+        {claimField ? (
+          <div className="cs-field cs-fgroup">
+            <label htmlFor="cs-claim">{claimField.label} *</label>
+            <input
+              id="cs-claim"
+              name="claim"
+              type="text"
+              required
+              className="cs-inp"
+              maxLength={claimField.maxLength}
+              placeholder={claimField.placeholder}
+              value={claim}
+              onChange={(e) => {
+                markStarted();
+                setClaim(e.target.value);
+              }}
+            />
+            <p className="cs-hint">{claimField.hint}</p>
+          </div>
+        ) : (
+          <div className="cs-field cs-fgroup">
+            <label>What would make eYKON useful in week 1? *</label>
+            <Chips options={NEEDS} value={need} onToggle={single(setNeed)} max={1} label="Week-one need" />
+          </div>
+        )}
 
         <div className="cs-field cs-fgroup">
           <label>How would you pay, honestly? *</label>
