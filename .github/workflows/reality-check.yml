@@ -1,6 +1,7 @@
 name: reality-check
 
 # Reality Check programme guards that can run without a database.
+# (Job "guards" needs no install; job "unit", PR-5, installs apps/web.)
 #
 # The schema guards themselves (build prompt §3.2) live in the database as
 # CHECKs, views and triggers, and are exercised by supabase/tests/<pr>_guards.sql
@@ -32,3 +33,22 @@ jobs:
           node-version: '20'
       - name: No mean over radiance in the Reality Check path (hard gate)
         run: node apps/web/scripts/reality-check/check-no-mean.mjs
+
+  # PR-5: the TypeScript half of the detector, claims and scorer default
+  # (classifier ladder on the Maysan production fixture, rolling rule, claim
+  # rules, "no resolver → VOID"). Needs typescript from apps/web, hence npm ci.
+  # The SQL half is supabase/tests/pr5_guards.sql, run in the SQL Editor.
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install
+        working-directory: apps/web
+        run: npm ci
+      - name: Reality Check tick, claims and resolver default (hard gate)
+        run: node apps/web/scripts/reality-check/test-refinery-rc.mjs

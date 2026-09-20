@@ -36,6 +36,8 @@ export interface PredictionRow {
   issued_at: string;
   context: Record<string, unknown> | null;
   predicted_distribution: Record<string, unknown> | null;
+  /** house | machine | creator — optional: due_unscored_predictions() does not return it. */
+  track?: string | null;
 }
 
 export type SupabaseAny = SupabaseClient;
