@@ -276,9 +276,13 @@ r_results := r_results || jsonb_build_object('id', 'P4',
 
 r_results := r_results || jsonb_build_object('id', 'P5',
   'what', 'the parameter block is copied from the run, and carries "recall: not measured" (D-10)',
+  -- compared numerically, not as text: the run row may carry 0.6 or 0.60
+  -- depending on how the tick wrote it, and both are the pinned threshold
   'ok', (SELECT parameters->>'statistic' = 'median'
               AND parameters->>'light_column' = 'radiance'
-              AND parameters->>'light_down_ratio' = '0.60'
+              AND (parameters->>'light_down_ratio')::numeric = 0.60
+              AND (parameters->>'heat_down_ratio')::numeric = 0.60
+              AND (parameters->>'heat_observable_floor')::numeric = 0.20
               AND parameters->>'recall' = 'not measured'
            FROM public.reality_check_issues WHERE run_id = v_run1),
   'detail', (SELECT parameters::text FROM public.reality_check_issues WHERE run_id = v_run1));
