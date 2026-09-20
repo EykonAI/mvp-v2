@@ -52,3 +52,9 @@ jobs:
         run: npm ci
       - name: Reality Check tick, claims and resolver default (hard gate)
         run: node apps/web/scripts/reality-check/test-refinery-rc.mjs
+      # PR-6: the board's presentation rules — a treatment for every row
+      # state, the refutation as the hero, a gap that is never a zero, the
+      # §3.4 standing copy verbatim and the §6 banned strings over every
+      # string the board can render. The database half is pr6_guards.sql.
+      - name: Reality Check board rules (hard gate)
+        run: node apps/web/scripts/reality-check/test-rc-board.mjs

@@ -39,6 +39,14 @@ import { recordIssuanceRun } from '@/lib/predictions/run-records';
 
 export type TickAction = 'published' | 'superseding' | 'skipped' | 'refused' | 'failed';
 
+/** One row of reality_check_publish_tick()'s report (PR-6, mig 171). */
+export interface PublishedIssue {
+  run_id: number;
+  tick: string;
+  revision: number;
+  content_hash: string;
+}
+
 export interface TickResult {
   action: TickAction;
   reason: string;
@@ -48,6 +56,9 @@ export interface TickResult {
   windows: TickWindows | null;
   funnel: Funnel | null;
   claims: ClaimsResult | null;
+  /** PR-6: the ticks this call turned into frozen, citable issues. */
+  issues: PublishedIssue[] | null;
+  issue_error: string | null;
   duration_ms: number;
   error: string | null;
 }
@@ -150,7 +161,8 @@ export async function runRefineryRealityCheck(db: Db, now: Date = new Date()): P
   const t0 = Date.now();
   const out: TickResult = {
     action: 'skipped', reason: '', run_id: null, supersedes_run_id: null, data_clock_night: null,
-    windows: null, funnel: null, claims: null, duration_ms: 0, error: null,
+    windows: null, funnel: null, claims: null, issues: null, issue_error: null,
+    duration_ms: 0, error: null,
   };
   let runId: number | null = null;
   try {
@@ -303,12 +315,36 @@ export async function runRefineryRealityCheck(db: Db, now: Date = new Date()): P
         .eq('status', 'running');
     }
   } finally {
+    // PR-6 (mig 171): publication is what FREEZES a tick — from the moment an
+    // issue row exists, the run, its verdicts and the issue refuse UPDATE and
+    // DELETE for every role. So it runs last, after the verdicts are written
+    // and after the issuer has set claims_issued, and it runs in `finally`
+    // for the same reason the run record does: on a skipped day it publishes
+    // any complete tick that failed to publish earlier, which is what makes
+    // a transient failure self-healing rather than permanent.
+    await publishIssues(db, out);
     out.duration_ms = Date.now() - t0;
     // In `finally`, not after it: the skip and refuse paths return from
     // inside the try, and they are exactly the days that must leave a record.
     await recordTickRun(db, out);
   }
   return out;
+}
+
+/**
+ * Publish every complete, unpublished tick as a frozen reality_check_issues
+ * row (mig 171). Additive: a failure here is reported and never changes the
+ * tick — the verdicts are already written, and the next cron run retries.
+ */
+export async function publishIssues(db: Db, out: TickResult): Promise<void> {
+  try {
+    const { data, error } = await db.rpc('reality_check_publish_tick');
+    if (error) throw new Error(error.message);
+    const report = (data ?? {}) as { published?: PublishedIssue[] };
+    out.issues = Array.isArray(report.published) ? report.published : [];
+  } catch (e) {
+    out.issue_error = e instanceof Error ? e.message : String(e);
+  }
 }
 
 /**

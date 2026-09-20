@@ -31,6 +31,7 @@ const ADVANCED_DESCRIPTIONS: Record<ModuleSlug, string> = {
   // so the Record<ModuleSlug, string> typecheck stays honest.
   calibration: '',
   commodities: '',
+  'reality-check': '',
   minerals: '',
   'regime-shifts': '',
   'shadow-fleet': '',

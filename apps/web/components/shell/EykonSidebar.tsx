@@ -155,7 +155,7 @@ export function EykonSidebar() {
               </SidebarMenuItem>
             ))}
 
-            {/* Intel — collapsible with the nine workspaces */}
+            {/* Intel — collapsible with the ten workspaces */}
             <Collapsible asChild defaultOpen={intelOpen} className="group/collapsible">
               <SidebarMenuItem>
                 <CollapsibleTrigger asChild>

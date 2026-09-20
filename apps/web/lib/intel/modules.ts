@@ -18,6 +18,7 @@ export const MODULE_SLUGS = [
   'commodities',
   'minerals',
   'precursor-analogs',
+  'reality-check',
   'regime-shifts',
   'sanctions',
   'shadow-fleet',
@@ -31,6 +32,7 @@ export const MODULE_LABELS: Record<ModuleSlug, string> = {
   commodities: 'Commodities Workspace',
   minerals: 'Critical Minerals',
   'precursor-analogs': 'Precursor Analogs',
+  'reality-check': 'Reality Check',
   'regime-shifts': 'Regime Shifts',
   sanctions: 'Sanctions Wargame',
   'shadow-fleet': 'Shadow Fleet',
@@ -45,6 +47,11 @@ export const MODULE_TIER_REQUIREMENTS: Record<ModuleSlug, Tier> = {
   commodities: 'pro',
   minerals: 'pro',
   'precursor-analogs': 'pro',
+  // D-12: /start sells Pro at the founding rate, and every buyer who arrives
+  // from a promotional asset must land in INTEL -> Reality Check with the full
+  // drill-down. Founding seats therefore include it for life; excluding it
+  // would put a paywall behind the paywall.
+  'reality-check': 'pro',
   'regime-shifts': 'pro',
   sanctions: 'pro',
   'shadow-fleet': 'pro',
@@ -62,6 +69,7 @@ export type ModuleTier = 'hero' | 'visible' | 'advanced';
 
 export const MODULE_TIERS: Record<ModuleSlug, ModuleTier> = {
   calibration: 'hero',
+  'reality-check': 'hero',
   'shadow-fleet': 'hero',
   'regime-shifts': 'hero',
   commodities: 'visible',
@@ -150,8 +158,8 @@ export const WATCHLIST_LIMITS: Record<Tier, number> = {
 
 // ─── Citizen Intelligence Center access (trial-mechanism brief §5.2) ───
 // Citizens see one live workspace (Calibration Ledger, read-only) and
-// eight visible-but-inert tiles. Any click on an inert tile routes to
-// /pricing?from=intel_<slug>. Pro+ users see all nine live.
+// nine visible-but-inert tiles. Any click on an inert tile routes to
+// /pricing?from=intel_<slug>. Pro+ users see all ten live.
 export const MODULE_PREVIEW_FOR_CITIZEN: readonly ModuleSlug[] = ['calibration'];
 export const MODULE_INERT_FOR_CITIZEN: readonly ModuleSlug[] = MODULE_SLUGS.filter(
   slug => !MODULE_PREVIEW_FOR_CITIZEN.includes(slug),

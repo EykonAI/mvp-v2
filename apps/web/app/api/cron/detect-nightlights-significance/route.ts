@@ -515,6 +515,10 @@ async function handle(req: NextRequest) {
     // is a failure of this run, not a quiet skip — say so in `errors`.
     if (realityCheck.action === 'refused') errors.push(`reality-check tick refused: ${realityCheck.reason}`);
     if (realityCheck.claims?.error) errors.push(`reality-check claims: ${realityCheck.claims.error}`);
+    // PR-6: an unpublished tick is an invisible tick — the board renders its
+    // empty state while the verdicts sit in the database. That is a failure
+    // of this run, not a quiet success.
+    if (realityCheck.issue_error) errors.push(`reality-check publish: ${realityCheck.issue_error}`);
   } catch (e) {
     errors.push(`reality-check tick: ${e instanceof Error ? e.message : String(e)}`);
   }
