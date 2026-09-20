@@ -200,9 +200,17 @@ export function QualifyForm({
       form.reportValidity();
       return;
     }
-    // The claim personas answer the same question in prose; `required` on
-    // the input means checkValidity() above has already caught an empty
-    // one, so only the chip branch needs its own message.
+    // The claim personas answer the same question in prose. `required`
+    // catches a genuinely empty box, but HTML's required is satisfied by
+    // a run of spaces — and the body below sends `claim.trim() || null`,
+    // so " " would have passed a REQUIRED field and stored nothing. That
+    // is the exact "looks alive, saves nothing" failure this field was
+    // added to avoid, so the trim is checked here, not just sent.
+    if (claimField && !claim.trim()) {
+      setError('Name a facility and a date — one line is enough.');
+      setPhase('error');
+      return;
+    }
     if (!claimField && need.length === 0) {
       setError('Pick what would make eYKON useful in week 1.');
       setPhase('error');

@@ -117,10 +117,19 @@ export const PERSONAS: Persona[] = [
     // The OSINT one-pager's closing offer, made answerable on the page
     // itself. Wording fixed by rev H §10 — if the one-pager is re-issued
     // with different words, this string moves with it.
+    //
+    // The hint is the one-pager's own promise, word for word, and no
+    // wider. It says "we will show you", future, because nothing reads
+    // closing_leads.need yet — a claim is answered by hand. An earlier
+    // draft said "we run it against the thermal, night-lights and vessel
+    // feeds": present tense for a process that does not run, over a
+    // third sensor the offer never included. Maritime publishes
+    // refutations only (rev H §4.2) and a facility-and-a-date claim is
+    // checked on the two NASA products, so AIS had no business here.
     claim: {
       label: 'A claim you want checked — a facility and a date',
       placeholder: 'Kirishi refinery — 14 September 2026',
-      hint: 'One line is enough. We run it against the thermal, night-lights and vessel feeds — and when a site sits outside what we watch, we say so rather than guess.',
+      hint: 'One line is enough. We will show you what both NASA products recorded — FIRMS thermal detections and Black Marble night radiance — including the nights neither had a clear view. When a site sits outside what we watch, we say so rather than guess.',
       maxLength: 280,
     },
   },
