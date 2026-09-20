@@ -246,7 +246,8 @@ const scored = B.claimsLine({
     b: fam({ issued: 100, judged: 95, skill: 0.1, status: 'scored' }),
   },
 });
-check('C7 skill is shown only when every family has one', scored.label === 'skill +0.150', scored);
+check('C7 skill is shown only when every family has one, and named as the mean it is',
+  scored.label === 'mean skill +0.150', scored);
 const undef = B.claimsLine({
   families: {
     a: fam({ issued: 100, judged: 95, skill: null, status: 'scored' }),

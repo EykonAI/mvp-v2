@@ -15,7 +15,9 @@
 --
 --   2 · FROZEN TICKS (§3.3, "a cited board must never silently change"). Once
 --       an issue row exists for a run, that run, its verdicts and its issue
---       can never be updated or deleted, and no verdict can be added to it.
+--       can never be updated or deleted, no verdict can be added to it, and
+--       none of the three tables can be TRUNCATEd (the one delete path a
+--       FOR EACH ROW trigger never sees, and one service_role holds).
 --       Enforced by triggers, for every role including service_role — a guard
 --       that lives in application code is a comment.
 --
@@ -101,17 +103,40 @@ CREATE TABLE IF NOT EXISTS public.reality_check_issues (
   claims_issued              integer,                -- NULL = not an issuing tick
   claims                     jsonb       NOT NULL,   -- refinery_rc_walkforward() AS AT publication
   content_hash               text        NOT NULL,
+  -- the column names the hash was taken over, frozen with it. A LATER
+  -- migration that adds a column to reality_check_runs or
+  -- reality_check_site_verdicts must not make every published tick read
+  -- "DOES NOT MATCH": the row data did not change, the table did. The digest
+  -- projects each row down to these keys, so a column added after
+  -- publication is outside the tick and a column REMOVED after publication
+  -- still breaks the hash, which is the honest answer in both directions.
+  digest_keys                jsonb       NOT NULL,
   published_at               timestamptz NOT NULL DEFAULT now()
 );
 
+-- idempotency for a re-run after a partial apply (the table above is only
+-- created once, so this is the path that adds the column to an existing one)
+ALTER TABLE public.reality_check_issues ADD COLUMN IF NOT EXISTS digest_keys jsonb;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema = 'public' AND table_name = 'reality_check_issues'
+                AND column_name = 'digest_keys' AND is_nullable = 'YES')
+     AND NOT EXISTS (SELECT 1 FROM public.reality_check_issues WHERE digest_keys IS NULL) THEN
+    ALTER TABLE public.reality_check_issues ALTER COLUMN digest_keys SET NOT NULL;
+  END IF;
+END $$;
+
 COMMENT ON TABLE public.reality_check_issues IS
-  'Reality Check PR-6 (mig 171). One row per PUBLISHED tick — the object the board, the BRIEFS issue and the analyst tool all read through reality_check_tick(). Frozen: an issue row, its run and its verdicts can never be updated or deleted once this row exists (triggers below). A late night publishes a NEW issue that supersedes this one; being superseded is derived at read time, never stored, because storing it would edit a frozen row. No capacity column, no mean, ever (D-11, §6, §3.2).';
+  'Reality Check PR-6 (mig 171). One row per PUBLISHED tick — the object the board, the BRIEFS issue and the analyst tool all read through reality_check_tick(). Frozen: an issue row, its run and its verdicts can never be updated, deleted or truncated once this row exists (triggers below). A late night publishes a NEW issue that supersedes this one; being superseded is derived at read time, never stored, because storing it would edit a frozen row. No capacity column, no mean, ever (D-11, §6, §3.2).';
 COMMENT ON COLUMN public.reality_check_issues.tick_slug IS
   'The citable tick id: ISO week of the data-clock night (2026-W38), with -r<revision> on a superseding tick. Stable across a republish — PR-7''s public URL is built from it.';
 COMMENT ON COLUMN public.reality_check_issues.claims IS
   'refinery_rc_walkforward() read AT PUBLICATION and frozen, so a cited tick keeps the claims line it published. The accessor also returns the live monitor beside it, labelled with its own as-of; the content hash covers the frozen block only.';
 COMMENT ON COLUMN public.reality_check_issues.content_hash IS
-  'sha256 over the run row, every verdict row ordered by cluster_key, and the frozen claims block. reality_check_tick() recomputes it on every read and reports hash_matches: a published tick that is not byte-identical on re-read is a defect, not a new number.';
+  'sha256 over the run row, every verdict row ordered by cluster_key, and the frozen claims block — each row projected onto digest_keys. reality_check_tick() recomputes it on every read and reports hash_matches: a published tick that is not byte-identical on re-read is a defect, not a new number.';
+COMMENT ON COLUMN public.reality_check_issues.digest_keys IS
+  'The column names the content hash was taken over: {"run": [...], "verdicts": [...]}, read from the rows themselves at publication and frozen with the hash. Without it, one ALTER TABLE ... ADD COLUMN on reality_check_runs or reality_check_site_verdicts would make EVERY published tick report hash_matches = false, and the board would cry tampering over a schema change. A column dropped after publication still breaks the hash — that data really did go.';
 
 DO $$
 BEGIN
@@ -186,10 +211,27 @@ GRANT SELECT, INSERT ON public.reality_check_issues TO service_role;
 -- triggers below freeze all of it, so hashing everything is both stronger and
 -- impossible to get subtly wrong. jsonb serialises its keys in a canonical
 -- order, so ::text is deterministic.
+--
+-- WHAT p_keys IS FOR. The triggers freeze the ROWS; they cannot freeze the
+-- TABLE. `ALTER TABLE reality_check_runs ADD COLUMN …` in some later
+-- migration changes to_jsonb() of every existing row, and a digest taken over
+-- the whole row would then stop matching for every tick ever published — the
+-- board would read "DOES NOT MATCH — report this" on a schema change that
+-- altered no measurement. So each row is projected onto the column names the
+-- tick published with, stored beside the hash in digest_keys. This is not an
+-- exclusion list: it is the set that existed at publication, read from the
+-- rows themselves. A column added later is outside the tick; a column removed
+-- later still breaks the hash, because that data really is gone.
+--
+-- p_keys NULL means "every key these rows have right now", which is what
+-- publication passes (and then stores). Passing the stored keys and passing
+-- NULL give the same hash on an unchanged schema.
+DROP FUNCTION IF EXISTS public.reality_check_issue_digest(bigint, jsonb, integer);
 CREATE OR REPLACE FUNCTION public.reality_check_issue_digest(
   p_run_id        bigint,
   p_claims        jsonb,
-  p_claims_issued integer
+  p_claims_issued integer,
+  p_keys          jsonb DEFAULT NULL
 )
 RETURNS text
 LANGUAGE sql
@@ -198,8 +240,19 @@ SET search_path = public
 AS $function$
 SELECT encode(sha256(convert_to(jsonb_build_object(
          'digest_version', 1,
-         'run',            (SELECT to_jsonb(r) FROM public.reality_check_runs r WHERE r.id = p_run_id),
-         'verdicts',       coalesce((SELECT jsonb_agg(to_jsonb(v) ORDER BY v.cluster_key)
+         'run',            (SELECT CASE
+                                     WHEN p_keys ? 'run' THEN
+                                       (SELECT jsonb_object_agg(k, coalesce(to_jsonb(r) -> k, 'null'::jsonb))
+                                          FROM jsonb_array_elements_text(p_keys -> 'run') k)
+                                     ELSE to_jsonb(r)
+                                   END
+                              FROM public.reality_check_runs r WHERE r.id = p_run_id),
+         'verdicts',       coalesce((SELECT jsonb_agg(CASE
+                                                        WHEN p_keys ? 'verdicts' THEN
+                                                          (SELECT jsonb_object_agg(k, coalesce(to_jsonb(v) -> k, 'null'::jsonb))
+                                                             FROM jsonb_array_elements_text(p_keys -> 'verdicts') k)
+                                                        ELSE to_jsonb(v)
+                                                      END ORDER BY v.cluster_key)
                                        FROM public.reality_check_site_verdicts v
                                       WHERE v.run_id = p_run_id), '[]'::jsonb),
          'claims',         coalesce(p_claims, 'null'::jsonb),
@@ -207,11 +260,11 @@ SELECT encode(sha256(convert_to(jsonb_build_object(
        )::text, 'UTF8')), 'hex');
 $function$;
 
-COMMENT ON FUNCTION public.reality_check_issue_digest(bigint, jsonb, integer) IS
-  'Reality Check PR-6 (mig 171). The tick''s content hash: sha256 over the run row, every verdict row ordered by cluster_key, and the claims block. Pure in its arguments, so publication and verification compute it the same way. Service role only.';
+COMMENT ON FUNCTION public.reality_check_issue_digest(bigint, jsonb, integer, jsonb) IS
+  'Reality Check PR-6 (mig 171). The tick''s content hash: sha256 over the run row, every verdict row ordered by cluster_key, and the claims block, each row projected onto p_keys (the column names the tick published with, NULL = whatever the rows have now). Pure in its arguments, so publication and verification compute it the same way, and a column added to either table after publication cannot turn a frozen tick into a false alarm. Service role only.';
 
-REVOKE EXECUTE ON FUNCTION public.reality_check_issue_digest(bigint, jsonb, integer) FROM PUBLIC, anon, authenticated;
-GRANT  EXECUTE ON FUNCTION public.reality_check_issue_digest(bigint, jsonb, integer) TO service_role;
+REVOKE EXECUTE ON FUNCTION public.reality_check_issue_digest(bigint, jsonb, integer, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.reality_check_issue_digest(bigint, jsonb, integer, jsonb) TO service_role;
 
 -- ─── 3 · Publication ───────────────────────────────────────────────────
 -- Publishes every COMPLETE run that has no issue yet, oldest first (or one
@@ -231,6 +284,7 @@ DECLARE
   v_rev      integer;
   v_slug     text;
   v_hash     text;
+  v_keys     jsonb;
   v_done     jsonb := '[]'::jsonb;
   v_already  jsonb := '[]'::jsonb;
 BEGIN
@@ -264,7 +318,21 @@ BEGIN
       v_claims := jsonb_build_object('error', SQLERRM, 'as_of', now(), 'families', '{}'::jsonb);
     END;
 
-    v_hash := public.reality_check_issue_digest(r.id, v_claims, r.claims_issued);
+    -- the column names this tick is hashed over, read from the rows
+    -- themselves and frozen beside the hash (see the digest's header)
+    SELECT jsonb_build_object(
+             'run', (SELECT jsonb_agg(k ORDER BY k)
+                       FROM jsonb_object_keys((SELECT to_jsonb(x)
+                                                 FROM public.reality_check_runs x
+                                                WHERE x.id = r.id)) k),
+             'verdicts', coalesce((SELECT jsonb_agg(k ORDER BY k)
+                                     FROM jsonb_object_keys((SELECT to_jsonb(y)
+                                                               FROM public.reality_check_site_verdicts y
+                                                              WHERE y.run_id = r.id
+                                                              ORDER BY y.cluster_key LIMIT 1)) k),
+                                  '[]'::jsonb))
+      INTO v_keys;
+    v_hash := public.reality_check_issue_digest(r.id, v_claims, r.claims_issued, v_keys);
 
     INSERT INTO public.reality_check_issues (
       run_id, tick_slug, revision, asset_class, data_clock_night,
@@ -275,7 +343,7 @@ BEGIN
       thermally_dark_complexes, thermally_dark_rows,
       refuted_complexes, refuted_rows, lead_complexes, lead_rows,
       withheld_complexes, withheld_rows,
-      counts_by_verdict, robustness, claims_issued, claims, content_hash)
+      counts_by_verdict, robustness, claims_issued, claims, content_hash, digest_keys)
     SELECT
       r.id, v_slug, v_rev, r.asset_class, r.data_clock_night,
       r.window_start, r.window_end, r.baseline_start, r.baseline_end, r.supersedes_run_id,
@@ -305,7 +373,7 @@ BEGIN
       f.watched_c, f.watched_r, f.observed_c, f.observed_r,
       f.hobs_c, f.hobs_r, f.dark_c, f.dark_r,
       f.ref_c, f.ref_r, f.lead_c, f.lead_r, f.wh_c, f.wh_r,
-      f.counts, f.robustness, r.claims_issued, v_claims, v_hash
+      f.counts, f.robustness, r.claims_issued, v_claims, v_hash, v_keys
     FROM (
       SELECT
         count(*)::int                                                                   AS watched_c,
@@ -429,6 +497,8 @@ BEGIN
 END;
 $function$;
 
+REVOKE EXECUTE ON FUNCTION public.reality_check_refuse_mutation() FROM PUBLIC, anon, authenticated;
+
 COMMENT ON FUNCTION public.reality_check_refuse_mutation() IS
   'Reality Check PR-6 (mig 171). Refuses any UPDATE or DELETE against a published tick — its run, its verdicts and its issue — and any INSERT of a verdict into one. Fires for every role including service_role: a published tick is frozen, and a correction is a new superseding tick.';
 
@@ -454,6 +524,50 @@ CREATE TRIGGER reality_check_verdicts_sealed
 CREATE TRIGGER reality_check_issues_frozen
   BEFORE UPDATE OR DELETE ON public.reality_check_issues
   FOR EACH ROW EXECUTE FUNCTION public.reality_check_refuse_mutation();
+
+-- TRUNCATE is a DELETE path that no FOR EACH ROW trigger sees. service_role
+-- holds TRUNCATE on reality_check_runs and reality_check_site_verdicts (and
+-- the owner holds it on all three), so without this a single statement would
+-- empty a published tick's verdicts, and the freeze above would never fire.
+-- Statement-level, and unconditional once anything is published: a published
+-- tick is corrected by a superseding tick, never by emptying the table.
+CREATE OR REPLACE FUNCTION public.reality_check_refuse_truncate()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+AS $function$
+DECLARE
+  v_n integer;
+BEGIN
+  SELECT count(*) INTO v_n FROM public.reality_check_issues;
+  IF v_n > 0 THEN
+    RAISE EXCEPTION
+      'TRUNCATE on % is refused: % published tick(s) are frozen, and TRUNCATE is the one delete path a row trigger never sees. A correction is a NEW tick that supersedes the old one (build prompt 3.3).',
+      TG_TABLE_NAME, v_n
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NULL;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.reality_check_refuse_truncate() FROM PUBLIC, anon, authenticated;
+
+COMMENT ON FUNCTION public.reality_check_refuse_truncate() IS
+  'Reality Check PR-6 (mig 171). Refuses TRUNCATE on reality_check_runs, reality_check_site_verdicts and reality_check_issues once any tick is published. TRUNCATE bypasses FOR EACH ROW triggers, so without this the frozen-tick rule had a one-statement hole for every role that holds the privilege, service_role included.';
+
+DROP TRIGGER IF EXISTS reality_check_runs_no_truncate     ON public.reality_check_runs;
+DROP TRIGGER IF EXISTS reality_check_verdicts_no_truncate ON public.reality_check_site_verdicts;
+DROP TRIGGER IF EXISTS reality_check_issues_no_truncate   ON public.reality_check_issues;
+
+CREATE TRIGGER reality_check_runs_no_truncate
+  BEFORE TRUNCATE ON public.reality_check_runs
+  FOR EACH STATEMENT EXECUTE FUNCTION public.reality_check_refuse_truncate();
+CREATE TRIGGER reality_check_verdicts_no_truncate
+  BEFORE TRUNCATE ON public.reality_check_site_verdicts
+  FOR EACH STATEMENT EXECUTE FUNCTION public.reality_check_refuse_truncate();
+CREATE TRIGGER reality_check_issues_no_truncate
+  BEFORE TRUNCATE ON public.reality_check_issues
+  FOR EACH STATEMENT EXECUTE FUNCTION public.reality_check_refuse_truncate();
 
 -- ─── 5 · The ONE read accessor ─────────────────────────────────────────
 -- Everything the board renders comes from here, with the §5 field mask
@@ -537,7 +651,10 @@ BEGIN
     FROM public.reality_check_issues x WHERE x.run_id = i.supersedes_run_id;
 
   -- ── integrity: recompute the hash over the frozen rows ──────────────
-  v_hash := public.reality_check_issue_digest(i.run_id, i.claims, i.claims_issued);
+  -- projected onto the columns the tick published with, so a column added to
+  -- either table by a later migration cannot turn a frozen tick into a false
+  -- alarm, while a column removed still breaks the hash
+  v_hash := public.reality_check_issue_digest(i.run_id, i.claims, i.claims_issued, i.digest_keys);
 
   -- ── the live monitor, beside the frozen claims line (D-7) ───────────
   BEGIN
@@ -585,7 +702,7 @@ BEGIN
               'multi_country', s.iso_countries > 1,
               'latitude', round(c.centroid_lat::numeric, 4),
               'longitude', round(c.centroid_lon::numeric, 4),
-              'note', 'ISO country and city come from the registry (migration 158); the coordinates are the complex centroid frozen at mint. No other place name is invented.') END,
+              'note', 'ISO country and city are read from the refinery registry (migration 158) on each request, so a re-geocoded site changes its label here even on a frozen tick; the coordinates are the complex centroid, written once at mint and never updated. No other place name is invented, and no measurement, threshold or verdict is outside the content hash.') END,
           'verdict', v.verdict,
           'coverage_state', v.coverage_state,
           'heat_state', v.heat_state,
@@ -682,7 +799,12 @@ BEGIN
       'content_hash', i.content_hash,
       'recomputed', v_hash,
       'hash_matches', v_hash = i.content_hash,
-      'frozen', true),
+      'frozen', true,
+      'digest_keys', i.digest_keys,
+      -- say exactly what the hash does and does not cover, so "verified on
+      -- read" is not read as more than it is
+      'covers', 'The run row, every verdict row and the claims block as published — every measurement, threshold, window and verdict on this board.',
+      'not_covered', 'Site names, city, country and US state are read from the refinery registry on each request, not frozen with the tick: if a site is renamed or re-geocoded in the registry, the label on a cited tick follows it. The complex centroid IS frozen — it is written once at mint and never updated. No measurement, threshold or verdict is outside the hash.'),
     'supersession', jsonb_build_object(
       'current', v_sup_by IS NULL,
       'superseded_by', v_sup_by,
@@ -760,7 +882,7 @@ GRANT  EXECUTE ON FUNCTION public.reality_check_tick(text, text, text, text) TO 
 -- ─── 6 · The decision on the record (D-5 / R-2) ────────────────────────
 INSERT INTO public.ledger_change_log (at, pr, note)
 SELECT now(), '#PR6 · mig 171',
-       'Reality Check surface (mig 171): a tick becomes a PUBLISHED OBJECT. reality_check_issues freezes the five funnel terms by complex (with facility rows), the pinned parameter block, the counts by verdict, the 3x3 robustness funnel, the claims line as at publication and a sha256 content hash over the run and every verdict row. From the moment an issue row exists the run, its verdicts and the issue refuse UPDATE and DELETE for every role including service_role, and no verdict may be inserted into it: a late night publishes a SUPERSEDING tick (revision 2 of the same ISO week, …-r2) and the old tick stays readable and citable. Which tick is current is derived at read time, never stored, because storing it would edit a frozen row. reality_check_tick() is the single accessor the board, the BRIEFS issue (PR-7) and query_reality_check (PR-8) read, with the section-5 field mask inside it (lead names and the drill-down are Pro, D-12). No parameter, threshold, column or window changed: PR-6 publishes what PR-5 computes. No capacity figure anywhere — every row carries the constant ''Capacity not established'' cell with its reason until CAP-3 (D-11, section 6). Recall is not measured, and says so on every refinery figure (D-10).'
+       'Reality Check surface (mig 171): a tick becomes a PUBLISHED OBJECT. reality_check_issues freezes the five funnel terms by complex (with facility rows), the pinned parameter block, the counts by verdict, the 3x3 robustness funnel, the claims line as at publication and a sha256 content hash over the run and every verdict row, each row projected onto the column names the tick published with (digest_keys) so that a later ALTER TABLE cannot turn every frozen tick into a false tampering alarm. From the moment an issue row exists the run, its verdicts and the issue refuse UPDATE, DELETE and TRUNCATE for every role including service_role, and no verdict may be inserted into it: a late night publishes a SUPERSEDING tick (revision 2 of the same ISO week, …-r2) and the old tick stays readable and citable. Which tick is current is derived at read time, never stored, because storing it would edit a frozen row. reality_check_tick() is the single accessor the board, the BRIEFS issue (PR-7) and query_reality_check (PR-8) read, with the section-5 field mask inside it (lead names and the drill-down are Pro, D-12). No parameter, threshold, column or window changed: PR-6 publishes what PR-5 computes. No capacity figure anywhere — every row carries the constant ''Capacity not established'' cell with its reason until CAP-3 (D-11, section 6). Recall is not measured, and says so on every refinery figure (D-10).'
  WHERE NOT EXISTS (SELECT 1 FROM public.ledger_change_log WHERE note LIKE 'Reality Check surface (mig 171)%');
 
 COMMIT;
@@ -769,20 +891,26 @@ COMMIT;
 -- VERIFY — read-only. Paste these rows back.
 -- ═══════════════════════════════════════════════════════════════════════
 
--- V1 · objects exist (expect every present = true, 6 rows)
+-- V1 · objects exist (expect every present = true, 8 rows)
 SELECT 'table reality_check_issues' AS object, to_regclass('public.reality_check_issues') IS NOT NULL AS present
-UNION ALL SELECT 'fn reality_check_issue_digest',  EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = 'reality_check_issue_digest')
+UNION ALL SELECT 'column reality_check_issues.digest_keys', EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'reality_check_issues' AND column_name = 'digest_keys' AND is_nullable = 'NO')
+UNION ALL SELECT 'fn reality_check_issue_digest(4 args)', EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = 'reality_check_issue_digest' AND p.pronargs = 4)
 UNION ALL SELECT 'fn reality_check_publish_tick',  EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = 'reality_check_publish_tick')
 UNION ALL SELECT 'fn reality_check_tick',          EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = 'reality_check_tick')
 UNION ALL SELECT 'fn reality_check_refuse_mutation', EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = 'reality_check_refuse_mutation')
+UNION ALL SELECT 'fn reality_check_refuse_truncate', EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = 'reality_check_refuse_truncate')
 UNION ALL SELECT 'ledger_change_log row',          EXISTS (SELECT 1 FROM public.ledger_change_log WHERE note LIKE 'Reality Check surface (mig 171)%');
 
--- V2 · the four immutability triggers (expect exactly 4 rows)
+-- V2 · the seven immutability triggers — four per-row, three per-statement
+--      against TRUNCATE, the one delete path a row trigger never sees
+--      (expect exactly 7 rows)
 SELECT c.relname AS on_table, t.tgname, pg_get_triggerdef(t.oid) AS def
   FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
  WHERE NOT t.tgisinternal
    AND t.tgname IN ('reality_check_runs_frozen', 'reality_check_verdicts_frozen',
-                    'reality_check_verdicts_sealed', 'reality_check_issues_frozen')
+                    'reality_check_verdicts_sealed', 'reality_check_issues_frozen',
+                    'reality_check_runs_no_truncate', 'reality_check_verdicts_no_truncate',
+                    'reality_check_issues_no_truncate')
  ORDER BY 1, 2;
 
 -- V3 · every named CHECK on the issues table (expect 8 rows)
@@ -813,9 +941,9 @@ UNION ALL SELECT 'fn reality_check_publish_tick',
        has_function_privilege('authenticated', 'public.reality_check_publish_tick(bigint)', 'EXECUTE'),
        has_function_privilege('service_role', 'public.reality_check_publish_tick(bigint)', 'EXECUTE')
 UNION ALL SELECT 'fn reality_check_issue_digest',
-       has_function_privilege('anon', 'public.reality_check_issue_digest(bigint,jsonb,integer)', 'EXECUTE'),
-       has_function_privilege('authenticated', 'public.reality_check_issue_digest(bigint,jsonb,integer)', 'EXECUTE'),
-       has_function_privilege('service_role', 'public.reality_check_issue_digest(bigint,jsonb,integer)', 'EXECUTE')
+       has_function_privilege('anon', 'public.reality_check_issue_digest(bigint,jsonb,integer,jsonb)', 'EXECUTE'),
+       has_function_privilege('authenticated', 'public.reality_check_issue_digest(bigint,jsonb,integer,jsonb)', 'EXECUTE'),
+       has_function_privilege('service_role', 'public.reality_check_issue_digest(bigint,jsonb,integer,jsonb)', 'EXECUTE')
 UNION ALL SELECT 'table reality_check_runs UPDATE (still granted; the TRIGGER refuses published rows)',
        has_table_privilege('anon', 'public.reality_check_runs', 'UPDATE'),
        has_table_privilege('authenticated', 'public.reality_check_runs', 'UPDATE'),

@@ -128,7 +128,14 @@ export interface TickPayload {
     calendar_nights: number;
     note: string;
   };
-  integrity: { content_hash: string; recomputed: string; hash_matches: boolean; frozen: boolean };
+  integrity: {
+    content_hash: string; recomputed: string; hash_matches: boolean; frozen: boolean;
+    /** The columns the hash was taken over, frozen with it (migration 171). */
+    digest_keys?: { run: string[]; verdicts: string[] };
+    /** What the hash does, and does not, put beyond change. */
+    covers?: string;
+    not_covered?: string;
+  };
   supersession: {
     current: boolean;
     superseded_by: { tick: string; published_at: string } | null;
@@ -347,8 +354,11 @@ export function claimsLine(block: WalkforwardBlock | null | undefined): ClaimsLi
   let label: string;
   let status: string;
   if (scored.length === fams.length && scored.every((f) => f.skill !== null)) {
-    const mean = scored.reduce((s, f) => s + (f.skill as number), 0) / scored.length;
-    label = `skill ${mean >= 0 ? '+' : ''}${mean.toFixed(3)}`;
+    // The ledger publishes skill PER FAMILY. This is the unweighted mean over
+    // the families, which is a different number and must never be read as one
+    // the ledger holds — so it says "mean skill", never "skill".
+    const meanSkill = scored.reduce((s, f) => s + (f.skill as number), 0) / scored.length;
+    label = `mean skill ${meanSkill >= 0 ? '+' : ''}${meanSkill.toFixed(3)}`;
     status = 'scored';
   } else {
     label = 'Calibrating';

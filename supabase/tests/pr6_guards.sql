@@ -26,18 +26,25 @@
 --           no hash), the parameter block carrying "recall: not measured",
 --           and the sweep with no argument picking up an unpublished
 --           complete run
---   H1–H4   the content hash: recomputed from the frozen rows it is identical,
+--   H1–H6   the content hash: recomputed from the frozen rows it is identical,
 --           two reads of the same tick return the same hash and the same
---           rows, and the hash covers the verdicts (a changed verdict would
---           change it — proven on a SECOND, unpublished run)
+--           rows, the hash covers the verdicts (a changed verdict would
+--           change it — proven on a SECOND, unpublished run), digest_keys
+--           names every column it was taken over, and a column ADDED to the
+--           verdicts table after publication leaves the tick verified —
+--           which it would not, without the projection
+--   T1–T3   TRUNCATE, the delete path no FOR EACH ROW trigger sees, is
+--           refused BY NAME on the verdicts and on the issues, and the
+--           statement trigger is present on all three tables
 --   F1–F8   the FUNNEL the accessor publishes equals a direct count over
 --           reality_check_site_verdicts for the same tick, term by term, and
 --           the outcome terms sum to the thermally dark term
 --   M1–M8   FROZEN: UPDATE and DELETE against a published run, its verdicts
 --           and its issue are all refused, a verdict cannot be INSERTed into
---           a published tick (on a real, unused cluster key, so the assertion
---           tests the trigger and not a foreign key), and after seven refused
---           mutations the tick is byte-for-byte what it published
+--           a published tick (M5 uses v_key4 — a REAL active complex the tick
+--           never scored — so it tests the seal and not the cluster_key
+--           foreign key), and after seven refused mutations the tick is
+--           byte-for-byte what it published
 --   S1–S6   SUPERSEDING: a late night writes a new run and publishes it as
 --           revision 2 (…-r2); the old tick's rows, funnel and hash are
 --           untouched; the accessor makes the new one current and links both
@@ -89,11 +96,12 @@ r_results := r_results || jsonb_build_object('id', 'E1',
   'ok', to_regclass('public.reality_check_issues') IS NOT NULL);
 
 r_results := r_results || jsonb_build_object('id', 'E2',
-  'what', 'the three functions of 171 exist',
+  'what', 'the five functions of 171 exist',
   'ok', (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
           WHERE n.nspname = 'public'
             AND p.proname IN ('reality_check_issue_digest', 'reality_check_publish_tick',
-                              'reality_check_tick', 'reality_check_refuse_mutation')) = 4);
+                              'reality_check_tick', 'reality_check_refuse_mutation',
+                              'reality_check_refuse_truncate')) = 5);
 
 SELECT count(*) INTO v_n FROM pg_trigger t
  WHERE NOT t.tgisinternal
@@ -113,13 +121,13 @@ r_results := r_results || jsonb_build_object('id', 'E6',
   'what', 'service_role can execute the accessor, the publisher and the digest',
   'ok', has_function_privilege('service_role', 'public.reality_check_tick(text,text,text,text)', 'EXECUTE')
     AND has_function_privilege('service_role', 'public.reality_check_publish_tick(bigint)', 'EXECUTE')
-    AND has_function_privilege('service_role', 'public.reality_check_issue_digest(bigint,jsonb,integer)', 'EXECUTE'));
+    AND has_function_privilege('service_role', 'public.reality_check_issue_digest(bigint,jsonb,integer,jsonb)', 'EXECUTE'));
 r_results := r_results || jsonb_build_object('id', 'E7',
   'what', 'anon and authenticated cannot execute the publisher or the digest',
   'ok', NOT has_function_privilege('anon', 'public.reality_check_publish_tick(bigint)', 'EXECUTE')
     AND NOT has_function_privilege('authenticated', 'public.reality_check_publish_tick(bigint)', 'EXECUTE')
-    AND NOT has_function_privilege('anon', 'public.reality_check_issue_digest(bigint,jsonb,integer)', 'EXECUTE')
-    AND NOT has_function_privilege('authenticated', 'public.reality_check_issue_digest(bigint,jsonb,integer)', 'EXECUTE'));
+    AND NOT has_function_privilege('anon', 'public.reality_check_issue_digest(bigint,jsonb,integer,jsonb)', 'EXECUTE')
+    AND NOT has_function_privilege('authenticated', 'public.reality_check_issue_digest(bigint,jsonb,integer,jsonb)', 'EXECUTE'));
 r_results := r_results || jsonb_build_object('id', 'E8',
   'what', 'anon and authenticated can read neither the issues nor the verdicts',
   'ok', NOT has_table_privilege('anon', 'public.reality_check_issues', 'SELECT')
@@ -290,7 +298,7 @@ r_results := r_results || jsonb_build_object('id', 'P5',
 -- ═══ H · the content hash ═════════════════════════════════════════════
 r_results := r_results || jsonb_build_object('id', 'H1',
   'what', 'the stored hash is the digest recomputed from the frozen rows',
-  'ok', (SELECT content_hash = public.reality_check_issue_digest(run_id, claims, claims_issued)
+  'ok', (SELECT content_hash = public.reality_check_issue_digest(run_id, claims, claims_issued, digest_keys)
            FROM public.reality_check_issues WHERE run_id = v_run1));
 
 v_t  := public.reality_check_tick('pro', v_slug1);
@@ -408,10 +416,14 @@ r_results := r_results || jsonb_build_object('id', 'C2',
   'ok', v_n = 3, 'detail', format('%s', v_n));
 
 -- ═══ M · FROZEN ═══════════════════════════════════════════════════════
+-- Each of these asserts on the MESSAGE, not merely that something raised.
+-- "Some error occurred" is satisfied by a CHECK or a foreign key and would
+-- still pass with the trigger dropped — which is not a test. Both refusal
+-- messages contain the word "frozen"; nothing else on these tables does.
 v_ok := false;
 BEGIN
   UPDATE public.reality_check_runs SET verdicts_written = 99 WHERE id = v_run1;
-EXCEPTION WHEN OTHERS THEN v_ok := true; v_txt := SQLERRM;
+EXCEPTION WHEN OTHERS THEN v_txt := SQLERRM; v_ok := v_txt ILIKE '%frozen%';
 END;
 r_results := r_results || jsonb_build_object('id', 'M1',
   'what', 'UPDATE against a published run is refused', 'ok', v_ok, 'detail', v_txt);
@@ -419,7 +431,7 @@ r_results := r_results || jsonb_build_object('id', 'M1',
 v_ok := false;
 BEGIN
   DELETE FROM public.reality_check_runs WHERE id = v_run1;
-EXCEPTION WHEN OTHERS THEN v_ok := true; v_txt := SQLERRM;
+EXCEPTION WHEN OTHERS THEN v_txt := SQLERRM; v_ok := v_txt ILIKE '%frozen%';
 END;
 r_results := r_results || jsonb_build_object('id', 'M2',
   'what', 'DELETE against a published run is refused', 'ok', v_ok, 'detail', v_txt);
@@ -428,7 +440,7 @@ v_ok := false;
 BEGIN
   UPDATE public.reality_check_site_verdicts SET window_median = 1.000000
    WHERE run_id = v_run1 AND cluster_key = v_key1;
-EXCEPTION WHEN OTHERS THEN v_ok := true; v_txt := SQLERRM;
+EXCEPTION WHEN OTHERS THEN v_txt := SQLERRM; v_ok := v_txt ILIKE '%frozen%';
 END;
 r_results := r_results || jsonb_build_object('id', 'M3',
   'what', 'UPDATE against a published verdict is refused', 'ok', v_ok, 'detail', v_txt);
@@ -436,7 +448,7 @@ r_results := r_results || jsonb_build_object('id', 'M3',
 v_ok := false;
 BEGIN
   DELETE FROM public.reality_check_site_verdicts WHERE run_id = v_run1 AND cluster_key = v_key1;
-EXCEPTION WHEN OTHERS THEN v_ok := true; v_txt := SQLERRM;
+EXCEPTION WHEN OTHERS THEN v_txt := SQLERRM; v_ok := v_txt ILIKE '%frozen%';
 END;
 r_results := r_results || jsonb_build_object('id', 'M4',
   'what', 'DELETE against a published verdict is refused', 'ok', v_ok, 'detail', v_txt);
@@ -450,11 +462,14 @@ BEGIN
     r3_baseline_nights, r3_window_nights, r3_baseline_median, r3_window_median, robustness_verdict,
     baseline_firms_days, baseline_heat_days, window_firms_days, window_heat_days, heat_state,
     ks_tested, ks_d, ks_p)
-  VALUES (v_run1, v_key1 || '-extra', ARRAY['x'], 1, 'STEADY', 'OBSERVED',
+  -- v_key4: a REAL, active complex that this tick never scored. A made-up
+  -- key would trip reality_check_site_verdicts_cluster_key_fkey and this
+  -- assertion would pass with the seal removed — which is not a test.
+  VALUES (v_run1, v_key4, ARRAY['x'], 1, 'STEADY', 'OBSERVED',
           20, 10, 93.200000, 111.500000, 67.200000, 121.300000, 94.000000, 112.700000,
           8, 5, 93.700000, 95.860000, 'STEADY',
           30, 8, 15, 8, 'HEAT_STEADY', true, 0.250000, 0.786000);
-EXCEPTION WHEN OTHERS THEN v_ok := true; v_txt := SQLERRM;
+EXCEPTION WHEN OTHERS THEN v_txt := SQLERRM; v_ok := v_txt ILIKE '%frozen%';
 END;
 r_results := r_results || jsonb_build_object('id', 'M5',
   'what', 'a verdict cannot be ADDED to a published tick', 'ok', v_ok, 'detail', v_txt);
@@ -462,7 +477,7 @@ r_results := r_results || jsonb_build_object('id', 'M5',
 v_ok := false;
 BEGIN
   UPDATE public.reality_check_issues SET refuted_complexes = 99 WHERE run_id = v_run1;
-EXCEPTION WHEN OTHERS THEN v_ok := true; v_txt := SQLERRM;
+EXCEPTION WHEN OTHERS THEN v_txt := SQLERRM; v_ok := v_txt ILIKE '%frozen%';
 END;
 r_results := r_results || jsonb_build_object('id', 'M6',
   'what', 'UPDATE against a published issue is refused', 'ok', v_ok, 'detail', v_txt);
@@ -470,7 +485,7 @@ r_results := r_results || jsonb_build_object('id', 'M6',
 v_ok := false;
 BEGIN
   DELETE FROM public.reality_check_issues WHERE run_id = v_run1;
-EXCEPTION WHEN OTHERS THEN v_ok := true; v_txt := SQLERRM;
+EXCEPTION WHEN OTHERS THEN v_txt := SQLERRM; v_ok := v_txt ILIKE '%frozen%';
 END;
 r_results := r_results || jsonb_build_object('id', 'M7',
   'what', 'DELETE against a published issue is refused', 'ok', v_ok, 'detail', v_txt);
@@ -647,6 +662,74 @@ r_results := r_results || jsonb_build_object('id', 'D6',
   'what', 'the drill-down ships the legend that names every night state',
   'ok', (SELECT count(*) FROM jsonb_object_keys(v_dd#>'{drilldown,legend}')) = 8);
 
+-- ═══ T · TRUNCATE, the delete path a row trigger never sees ═══════════
+-- These statements are inside this DO block and inside BEGIN … ROLLBACK, and
+-- by this point a tick IS published, so the statement triggers refuse them.
+-- Each assertion checks the MESSAGE, not merely that something raised: a
+-- guard that passes on any error is not a guard (the lesson of M5).
+v_ok := false; v_txt := NULL;
+BEGIN
+  TRUNCATE public.reality_check_site_verdicts;
+EXCEPTION WHEN OTHERS THEN v_ok := SQLERRM ILIKE '%refused%'; v_txt := SQLERRM;
+END;
+r_results := r_results || jsonb_build_object('id', 'T1',
+  'what', 'TRUNCATE on the verdicts of a published tick is refused, by name',
+  'ok', v_ok, 'detail', v_txt);
+
+v_ok := false; v_txt := NULL;
+BEGIN
+  TRUNCATE public.reality_check_issues;
+EXCEPTION WHEN OTHERS THEN v_ok := SQLERRM ILIKE '%refused%'; v_txt := SQLERRM;
+END;
+r_results := r_results || jsonb_build_object('id', 'T2',
+  'what', 'TRUNCATE on the published issues is refused, by name',
+  'ok', v_ok, 'detail', v_txt);
+
+-- reality_check_runs is FK-referenced by both other tables, so a bare
+-- TRUNCATE of it can raise the foreign-key message rather than the trigger's,
+-- and TRUNCATE … CASCADE would empty all three if the triggers were missing —
+-- not a statement to put in a file anyone might run a fragment of. Its guard
+-- is asserted by definition instead: the same statement-level BEFORE TRUNCATE
+-- trigger, calling the same function, on that table.
+SELECT count(*) INTO v_n
+  FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+ WHERE NOT t.tgisinternal
+   AND t.tgname IN ('reality_check_runs_no_truncate', 'reality_check_verdicts_no_truncate',
+                    'reality_check_issues_no_truncate')
+   AND (t.tgtype & 32) = 32     -- TRUNCATE
+   AND (t.tgtype & 2)  = 2      -- BEFORE
+   AND (t.tgtype & 1)  = 0      -- FOR EACH STATEMENT
+   AND t.tgfoid = 'public.reality_check_refuse_truncate()'::regprocedure;
+r_results := r_results || jsonb_build_object('id', 'T3',
+  'what', 'all three tables carry the BEFORE TRUNCATE statement trigger, runs included',
+  'ok', v_n = 3, 'detail', format('%s of 3', v_n));
+
+-- ═══ H5–H6 · the hash survives a SCHEMA change, not a data change ═════
+-- The triggers freeze the rows; they cannot freeze the table. digest_keys
+-- records the columns the tick published with, so a column added later is
+-- outside the tick instead of making every published board read
+-- "DOES NOT MATCH". H6 does the ALTER, so it is LAST: the ACCESS EXCLUSIVE
+-- lock it takes is held only to the ROLLBACK a moment later.
+SELECT count(*)::int INTO v_n FROM information_schema.columns
+ WHERE table_schema = 'public' AND table_name = 'reality_check_site_verdicts';
+r_results := r_results || jsonb_build_object('id', 'H5',
+  'what', 'digest_keys names every column of the verdict rows the tick hashed',
+  'ok', (SELECT jsonb_array_length(digest_keys->'verdicts')
+           FROM public.reality_check_issues WHERE run_id = v_run1) = v_n
+    AND (SELECT jsonb_array_length(digest_keys->'run') > 10
+           FROM public.reality_check_issues WHERE run_id = v_run1),
+  'detail', format('%s verdict columns', v_n));
+
+ALTER TABLE public.reality_check_site_verdicts ADD COLUMN pr6_guard_probe text;
+v_t := public.reality_check_tick('pro', v_slug1);
+r_results := r_results || jsonb_build_object('id', 'H6',
+  'what', 'a column ADDED to the verdicts table after publication leaves the frozen tick verified — and would not have, without the projection',
+  'ok', (v_t#>>'{integrity,hash_matches}')::boolean IS TRUE
+    AND v_t#>>'{integrity,content_hash}' = v_hash1
+    AND (SELECT public.reality_check_issue_digest(run_id, claims, claims_issued, NULL) <> v_hash1
+           FROM public.reality_check_issues WHERE run_id = v_run1),
+  'detail', format('hash_matches %s', v_t#>>'{integrity,hash_matches}'));
+
 -- ═══ report ═══════════════════════════════════════════════════════════
 FOR r IN
   SELECT x->>'id' AS id, x->>'what' AS what, (x->>'ok')::boolean AS ok, x->>'detail' AS detail
@@ -674,5 +757,5 @@ $guards$;
 ROLLBACK;
 
 -- Reached only when the block above raised nothing. Paste this row back.
-SELECT 'PR-6 guards: all assertions passed — E1–E8, N1–N3, X1–X3, P1–P6, H1–H4, F1–F8, C1–C2, M1–M8, S1–S6, K1–K6, D1–D6 (the board''s presentation rules are proven by test-rc-board.mjs)' AS result,
+SELECT 'PR-6 guards: all assertions passed — E1–E8, N1–N3, X1–X3, P1–P6, H1–H6, F1–F8, C1–C2, M1–M8, S1–S6, K1–K6, D1–D6, T1–T3 (the board''s presentation rules are proven by test-rc-board.mjs)' AS result,
        now() AS checked_at;

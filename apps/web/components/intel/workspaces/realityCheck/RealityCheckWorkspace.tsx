@@ -97,6 +97,8 @@ function Workspace() {
   }, [asset, tick, cluster]);
 
   const state = useMemo(() => ASSET_STATES[asset], [asset]);
+  /** Is there already something on screen for this asset? */
+  const ready = asset === 'refineries' ? data !== null : gates !== null;
 
   return (
     <div className="rc-wrap">
@@ -131,13 +133,24 @@ function Workspace() {
         </div>
       )}
 
-      {!error && loading && (
+      {/* The first read of an asset has nothing to show, so it says so. A
+          LATER read does — opening a row writes ?cluster= and re-reads the
+          same tick — and unmounting the board for it would blank the page a
+          beat after it painted, on every single click. So the board stays up
+          and announces that it is refreshing. */}
+      {!error && loading && !ready && (
         <div className="rc-empty">
           <p className="rc-p">Reading the {ASSET_LABELS[asset].toLowerCase()} tick…</p>
         </div>
       )}
 
-      {!error && !loading && asset === 'refineries' && data && (
+      {!error && loading && ready && (
+        <p className="rc-p rc-refreshing" role="status" aria-live="polite">
+          Refreshing — the figures below are the ones already read, until the new ones arrive.
+        </p>
+      )}
+
+      {!error && asset === 'refineries' && data && (
         <RefineryBoard
           data={data}
           selected={cluster}
@@ -146,8 +159,18 @@ function Workspace() {
         />
       )}
 
-      {!error && !loading && asset !== 'refineries' && gates && (
+      {!error && asset !== 'refineries' && gates && (
         <GateChecklist asset={asset} gates={gates} state={state.state} />
+      )}
+
+      {!error && !loading && !ready && (
+        <div className="rc-empty">
+          <div className="rc-empty-t">Nothing came back</div>
+          <p className="rc-p">
+            The request for the {ASSET_LABELS[asset].toLowerCase()} view returned no payload at all.
+            That is a fault to report, not an empty week — an unreadable board is not an empty one.
+          </p>
+        </div>
       )}
     </div>
   );

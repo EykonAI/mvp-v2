@@ -537,6 +537,12 @@ body.intel-view {
 .rc-rail-sublabel { flex: 1; }
 .rc-rail-substate { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-ghost); }
 .rc-p-top { margin-top: 10px; }
+/* Opening a row re-reads the same tick. The board stays on screen while that
+   happens and says so here, rather than blanking a beat after it painted. */
+.rc-refreshing {
+  font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--ink-dim); margin: 10px 0 0;
+}
 .rc-strip-svg { display: block; max-height: 64px; width: 100%; }
 .rc-strip { margin-bottom: 14px; }
 .rc-strip-t { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim); margin-bottom: 5px; }

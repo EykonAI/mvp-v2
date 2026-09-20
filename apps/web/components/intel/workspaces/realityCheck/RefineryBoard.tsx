@@ -678,9 +678,19 @@ function Method({ t }: { t: TickPayload }) {
         {t.integrity.hash_matches
           ? 'recomputed on this read and identical'
           : 'RECOMPUTED AND DIFFERENT — this tick is not intact, please report it'}
-        . A published tick is frozen in the database: its rows refuse updates and deletes, and a
-        late-arriving night produces a new superseding tick rather than an edit.
+        . A published tick is frozen in the database: its rows refuse updates, deletes and
+        truncation for every role, and a late-arriving night produces a new superseding tick rather
+        than an edit.
       </p>
+
+      {/* What the hash does and does not cover, so "verified on read" is not
+          read as more than it is. Both strings come from the accessor. */}
+      {(t.integrity.covers || t.integrity.not_covered) && (
+        <p className="rc-p">
+          <strong>The hash covers</strong> {t.integrity.covers} <strong>It does not cover</strong>{' '}
+          {t.integrity.not_covered}
+        </p>
+      )}
 
       {t.archive.length > 1 && (
         <>
