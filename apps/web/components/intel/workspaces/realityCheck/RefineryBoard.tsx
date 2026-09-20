@@ -37,7 +37,9 @@ export default function RefineryBoard({
 }: {
   data: TickResponse | { published: false; error?: string };
   selected: string | null;
-  onSelect: (key: string) => void;
+  /** `auto` marks a selection the BOARD made, not the reader — see the
+      opening effect in Board(). The workspace uses it to stay silent. */
+  onSelect: (key: string, auto?: boolean) => void;
   onTick: (tick: string) => void;
 }) {
   if (!data || data.published !== true) {
@@ -73,7 +75,8 @@ function EmptyBoard({
       </p>
       {(data.runs_total ?? 0) > 0 && (
         <p className="rc-p">
-          <strong>{data.runs_total}</strong> tick run(s) recorded, <strong>{data.runs_complete}</strong>{' '}
+          <strong>{data.runs_total}</strong> tick {data.runs_total === 1 ? 'run' : 'runs'} recorded,{' '}
+          <strong>{data.runs_complete}</strong>{' '}
           complete. A complete run that is not published is a defect, not a quiet day — the next
           cron run publishes it, and the run reports the failure if it cannot.
         </p>
@@ -90,7 +93,7 @@ function Board({
 }: {
   t: TickPayload;
   selected: string | null;
-  onSelect: (key: string) => void;
+  onSelect: (key: string, auto?: boolean) => void;
   onTick: (tick: string) => void;
 }) {
   const rows = useMemo(() => sortRows(t.rows ?? []), [t.rows]);
@@ -108,7 +111,7 @@ function Board({
   // also what puts the drill-down's ?cluster= in the URL so the view they
   // are looking at is the view they can send someone.
   useEffect(() => {
-    if (!selected && active) onSelect(active.cluster_key);
+    if (!selected && active) onSelect(active.cluster_key, true);
   }, [selected, active, onSelect]);
 
   return (
@@ -309,7 +312,7 @@ function Row({
 }: {
   r: BoardRow;
   selected: boolean;
-  onSelect: (key: string) => void;
+  onSelect: (key: string, auto?: boolean) => void;
 }) {
   const v = VERDICTS[r.verdict];
   const loc = r.location;
@@ -317,20 +320,32 @@ function Row({
     ? [loc.city, loc.us_state, loc.country ?? loc.iso_country].filter(Boolean).join(', ')
     : null;
 
+  const name = r.site_name ?? 'Name withheld below Pro';
+
+  // The activatable thing is a BUTTON in the Site cell, not the <tr>.
+  // aria-selected is only allowed on a row inside a grid or treegrid; on a
+  // plain role="table" it is invalid ARIA, and a bare tabIndex on a <tr>
+  // gives a keyboard user a stop with no role and no name — 295 of them.
+  // The row keeps its click as a mouse convenience; selection state moves
+  // to a data attribute, which is a styling hook and claims nothing.
   return (
-    <tr
-      aria-selected={selected}
-      tabIndex={0}
-      onClick={() => onSelect(r.cluster_key)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onSelect(r.cluster_key);
-        }
-      }}
-    >
+    <tr data-selected={selected ? 'true' : undefined} onClick={() => onSelect(r.cluster_key)}>
       <td>
-        <span className="rc-site">{r.site_name ?? 'Name withheld below Pro'}</span>
+        <button
+          type="button"
+          className="rc-rowbtn"
+          aria-current={selected || undefined}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect(r.cluster_key);
+          }}
+        >
+          <span className="rc-site">{name}</span>
+          <span className="sr-only">
+            {' '}
+            — verdict {v.label}. Open the night-by-night drill-down for this complex.
+          </span>
+        </button>
         <span className="rc-sub">
           {r.cluster_key}
           {r.member_count > 1 && ` · ${r.member_count} sites, counted once`}
@@ -383,7 +398,10 @@ function Row({
       </td>
       <td>
         <span className="rc-cap">{r.capacity.label}</span>
-        <span className="rc-sub">chain not built</span>
+        {/* The reason comes from the tick, not from a literal here: once
+            CAP-3 establishes a figure, `established` flips and a hardcoded
+            "chain not built" would sit under a real number. */}
+        {!r.capacity.established && <span className="rc-sub">chain not built</span>}
       </td>
       <td>
         <span className={`rc-v rc-v-${v.tone}`}>{v.label}</span>
@@ -451,18 +469,19 @@ function Drilldown({ t, r }: { t: TickPayload; r: BoardRow }) {
                 />
               </div>
 
+              {/* One hue per instrument, phase carried by weight. The
+                  strips encode two different measurements, so a legend that
+                  named a colour once had to be wrong on one of them. */}
               <div className="rc-strip-legend">
                 <span className="rc-key">
-                  <span className="rc-swatch rc-swatch-base" aria-hidden="true" />
-                  baseline night
+                  <span className="rc-swatch rc-swatch-lightbase" aria-hidden="true" />
+                  <span className="rc-swatch rc-swatch-light" aria-hidden="true" />
+                  radiance · baseline / window
                 </span>
                 <span className="rc-key">
-                  <span className="rc-swatch rc-swatch-win" aria-hidden="true" />
-                  window night
-                </span>
-                <span className="rc-key">
+                  <span className="rc-swatch rc-swatch-heatbase" aria-hidden="true" />
                   <span className="rc-swatch rc-swatch-heat" aria-hidden="true" />
-                  thermal detection
+                  thermal detections · baseline / window
                 </span>
                 <span className="rc-key">
                   <span className="rc-swatch rc-swatch-gap" aria-hidden="true" />

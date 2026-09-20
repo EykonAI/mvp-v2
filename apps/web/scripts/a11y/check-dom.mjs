@@ -42,7 +42,7 @@ const BASE = process.env.A11Y_BASE_URL || 'http://localhost:3000';
 // so it is the homepage wearing a different URL. The pricing SURFACE is
 // covered by '/'. Adding it back would double-count '/' — see header.
 const PUBLIC_ROUTES = ['/', '/start', '/terms', '/privacy'];
-const APP_ROUTES = ['/app', '/intel', '/analyst', '/intel/cascade', '/intel/sanctions', '/intel/shadow-fleet'];
+const APP_ROUTES = ['/app', '/intel', '/analyst', '/intel/cascade', '/intel/sanctions', '/intel/shadow-fleet', '/intel/reality-check'];
 const routes = process.argv.includes('--app') ? [...PUBLIC_ROUTES, ...APP_ROUTES] : PUBLIC_ROUTES;
 
 // Routes that cannot render without a database. CI builds with a

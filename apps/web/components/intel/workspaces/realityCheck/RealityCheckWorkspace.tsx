@@ -49,6 +49,12 @@ function Workspace() {
   const [gates, setGates] = useState<GatesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // The board opens itself on its first row, which writes ?cluster= and
+  // re-reads the tick. That refresh is the page's own doing, so it must not
+  // speak: an aria-live region that announces on page load talks over the
+  // heading a screen-reader user is still on. Only a refresh the USER asked
+  // for is announced.
+  const [userDriven, setUserDriven] = useState(false);
 
   /** URL is the state. Replace, never push: the board is not a history trail. */
   const setParams = useCallback(
@@ -111,7 +117,10 @@ function Workspace() {
               type="button"
               className="rc-asset"
               aria-pressed={a === asset}
-              onClick={() => setParams({ asset: a, cluster: null })}
+              onClick={() => {
+                setUserDriven(true);
+                setParams({ asset: a, cluster: null });
+              }}
             >
               <span>{ASSET_LABELS[a]}</span>
               <span className="rc-asset-state">{ASSET_STATES[a].state}</span>
@@ -144,8 +153,8 @@ function Workspace() {
         </div>
       )}
 
-      {!error && loading && ready && (
-        <p className="rc-p rc-refreshing" role="status" aria-live="polite">
+      {!error && loading && ready && userDriven && (
+        <p className="rc-p rc-refreshing" role="status">
           Refreshing — the figures below are the ones already read, until the new ones arrive.
         </p>
       )}
@@ -154,8 +163,14 @@ function Workspace() {
         <RefineryBoard
           data={data}
           selected={cluster}
-          onSelect={(key) => setParams({ cluster: key })}
-          onTick={(t) => setParams({ tick: t, cluster: null })}
+          onSelect={(key, auto) => {
+            setUserDriven(!auto);
+            setParams({ cluster: key });
+          }}
+          onTick={(t) => {
+            setUserDriven(true);
+            setParams({ tick: t, cluster: null });
+          }}
         />
       )}
 

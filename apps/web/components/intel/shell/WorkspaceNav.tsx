@@ -52,8 +52,9 @@ const RAIL_SUBMENU: { slug: ModuleSlug; items: { asset: Asset; label: string; st
   items: ASSETS.map(a => ({ asset: a, label: ASSET_LABELS[a], state: ASSET_STATES[a].state })),
 };
 
-// Render order is fixed (not derived from MODULE_SLUGS sort) so the
-// hero strip always reads Calibration → Shadow Fleet → Regime Shifts.
+// Render order is fixed (not derived from MODULE_SLUGS sort) so the hero
+// strip always reads Calibration → Reality Check → Shadow Fleet → Regime
+// Shifts.
 const HERO_WORKSPACES = HERO_ORDER.map(slug => ({
   slug,
   label: MODULE_LABELS[slug],

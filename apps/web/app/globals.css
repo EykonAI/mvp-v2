@@ -454,11 +454,15 @@ body.intel-view {
 .rc-table td { padding: 9px 12px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; color: var(--ink-dim); }
 .rc-table tbody tr { cursor: pointer; }
 .rc-table tbody tr:hover td { background: var(--bg-raised); }
-.rc-table tbody tr[aria-selected='true'] td { background: var(--bg-hover); }
+.rc-table tbody tr[data-selected='true'] td { background: var(--bg-hover); }
+.rc-rowbtn {
+  display: block; width: 100%; text-align: left; background: none; border: 0;
+  padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer;
+}
 .rc-site { color: var(--ink); font-weight: 500; }
 .rc-sub { display: block; font-family: var(--f-mono); font-size: 10px; color: var(--ink-faint); margin-top: 2px; }
 .rc-pair { font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.rc-pair .to { color: var(--ink-ghost); margin: 0 5px; }
+.rc-pair .to { color: var(--ink-faint); margin: 0 5px; }
 .rc-none { color: var(--ink-faint); font-style: italic; }
 .rc-cap { font-family: var(--f-mono); font-size: 10px; color: var(--ink-faint); letter-spacing: 0.04em; }
 .rc-flag {
@@ -482,8 +486,10 @@ body.intel-view {
 .rc-strip-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; font-family: var(--f-mono); font-size: 9.5px; color: var(--ink-faint); letter-spacing: 0.06em; }
 .rc-key { display: inline-flex; align-items: center; gap: 5px; }
 .rc-swatch { width: 10px; height: 10px; border-radius: 1px; display: inline-block; }
-.rc-swatch-base { background: var(--teal-deep); }
-.rc-swatch-win { background: var(--teal); }
+/* One hue per instrument; phase is weight, not a second hue. */
+.rc-swatch-lightbase { background: var(--teal); opacity: 0.45; }
+.rc-swatch-light { background: var(--teal); }
+.rc-swatch-heatbase { background: var(--amber); opacity: 0.45; }
 .rc-swatch-heat { background: var(--amber); }
 .rc-swatch-gap { border: 1px dashed var(--rule-strong); background: transparent; }
 
@@ -491,7 +497,11 @@ body.intel-view {
 .rc-gate { width: 100%; border-collapse: collapse; font-size: 12px; }
 .rc-gate th, .rc-gate td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
 .rc-gate th { font-family: var(--f-mono); font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-faint); font-weight: 500; border-bottom: 1px solid var(--rule); }
-.rc-gate td:first-child { color: var(--ink); width: 190px; }
+.rc-gate tbody th {
+  color: var(--ink); width: 190px; font-family: var(--f-body); font-size: 12px;
+  font-weight: 500; letter-spacing: normal; text-transform: none;
+  border-bottom: 1px solid var(--rule-soft);
+}
 .rc-gate td:last-child { color: var(--ink-dim); }
 .rc-st {
   display: inline-block; padding: 2px 8px; border-radius: 2px; white-space: nowrap;
@@ -502,7 +512,7 @@ body.intel-view {
 .rc-st-warn    { color: var(--amber); border-color: var(--amber); }
 .rc-st-fail    { color: var(--coral); border-color: var(--coral); }
 .rc-st-pending { color: var(--violet); border-color: var(--violet); }
-.rc-src { display: block; font-family: var(--f-mono); font-size: 9.5px; color: var(--ink-ghost); margin-top: 4px; letter-spacing: 0.04em; }
+.rc-src { display: block; font-family: var(--f-mono); font-size: 9.5px; color: var(--ink-faint); margin-top: 4px; letter-spacing: 0.04em; }
 
 /* ── empty state ────────────────────────────────────────────────────── */
 .rc-empty { padding: 40px 24px; max-width: 78ch; }
@@ -535,7 +545,7 @@ body.intel-view {
 .rc-rail-sublink:hover { color: var(--teal); background: rgba(25, 208, 184, 0.04); }
 .rc-rail-subdot { color: var(--ink-ghost); }
 .rc-rail-sublabel { flex: 1; }
-.rc-rail-substate { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-ghost); }
+.rc-rail-substate { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); }
 .rc-p-top { margin-top: 10px; }
 /* Opening a row re-reads the same tick. The board stays on screen while that
    happens and says so here, rather than blanking a beat after it painted. */
@@ -546,7 +556,7 @@ body.intel-view {
 .rc-strip-svg { display: block; max-height: 64px; width: 100%; }
 .rc-strip { margin-bottom: 14px; }
 .rc-strip-t { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim); margin-bottom: 5px; }
-.rc-strip-ax { display: flex; justify-content: space-between; font-family: var(--f-mono); font-size: 9px; color: var(--ink-ghost); margin-top: 3px; }
+.rc-strip-ax { display: flex; justify-content: space-between; font-family: var(--f-mono); font-size: 9px; color: var(--ink-faint); margin-top: 3px; }
 .rc-linkbtn {
   background: none; border: 0; padding: 0; cursor: pointer;
   font: inherit; color: var(--teal); text-decoration: underline;
@@ -557,8 +567,13 @@ body.intel-view {
 .rc-cov { display: flex; flex-wrap: wrap; gap: 2px; margin: 6px 0 8px; }
 .rc-covcell {
   width: 12px; height: 14px; border-radius: 1px;
-  background: repeating-linear-gradient(135deg, var(--bg-raised) 0 3px, transparent 3px 6px);
-  border: 1px solid var(--rule-soft);
+  /* Both states of this cell are graphical objects that carry the strip's
+     meaning, so both clear 1.4.11's 3:1 against --bg-navy: the hatch reads
+     5.91:1 in --ink-faint, the usable fill 5.35:1 in --teal-dim. The pair
+     it replaced was --bg-raised on --bg-navy (1.16:1) and --teal-deep
+     (2.45:1) — a strip whose "not looked at" cell was invisible. */
+  background: repeating-linear-gradient(135deg, var(--ink-faint) 0 1px, transparent 1px 4px);
+  border: 1px solid var(--rule-strong);
 }
-.rc-covcell.rc-cov-bm { background: var(--teal-deep); border-color: var(--teal-deep); }
+.rc-covcell.rc-cov-bm { background: var(--teal-dim); border-color: var(--teal-dim); }
 .rc-covcell.rc-cov-fr { border-color: var(--amber); }

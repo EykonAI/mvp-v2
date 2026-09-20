@@ -41,8 +41,17 @@ export default function SensorStrip({
   const H = 64;
   const bw = 7;
   const scale = (v: number) => (max && max > 0 ? Math.max(1, (v / max) * (H - 10)) : 1);
+  // One hue per INSTRUMENT (teal = light, amber = thermal), phase carried by
+  // weight, not by a second hue. The previous pair drew a thermal BASELINE
+  // day in teal-deep, the same mark the light strip uses for a baseline
+  // night — so the legend's "thermal detection · amber" was true of half the
+  // thermal strip only. The palette is status, and an instrument is a status.
   const colour = tone === 'heat' ? 'var(--amber)' : 'var(--teal)';
-  const baseColour = tone === 'heat' ? 'var(--teal-deep)' : 'var(--teal-deep)';
+  const baseColour = colour;
+  const baseOpacity = 0.45;
+  // Where the window begins. -1 means no bar falls inside it, and a divider
+  // pinned to x=0 would say the opposite: that every bar is a window night.
+  const windowIndex = bars.findIndex((b) => b.night >= windowFrom);
 
   return (
     <ChartFigure
@@ -100,18 +109,23 @@ export default function SensorStrip({
               width={bw}
               height={h}
               fill={b.phase === 'window' ? colour : baseColour}
+              fillOpacity={b.phase === 'window' ? 1 : baseOpacity}
             />
           );
         })}
-        <line
-          x1={Math.max(0, bars.findIndex((b) => b.night >= windowFrom) * 9 - 1)}
-          y1="0"
-          x2={Math.max(0, bars.findIndex((b) => b.night >= windowFrom) * 9 - 1)}
-          y2={H - 4}
-          stroke="var(--ink-ghost)"
-          strokeWidth="1"
-          strokeDasharray="3 3"
-        />
+        {windowIndex >= 0 && (
+          <line
+            x1={Math.max(0, windowIndex * 9 - 1)}
+            y1="0"
+            x2={Math.max(0, windowIndex * 9 - 1)}
+            y2={H - 4}
+            /* --ink-ghost is a 1.77:1 disabled tint; this divider carries
+               meaning, so it needs 1.4.11's 3:1, which --ink-faint clears. */
+            stroke="var(--ink-faint)"
+            strokeWidth="1"
+            strokeDasharray="3 3"
+          />
+        )}
         <line x1="0" y1={H - 5} x2={W} y2={H - 5} stroke="var(--rule)" strokeWidth="1" />
       </svg>
     </ChartFigure>
