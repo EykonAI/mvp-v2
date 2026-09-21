@@ -1,4 +1,5 @@
 'use client';
+import { Fragment } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -7,14 +8,16 @@ import {
   modulesByTier,
   type ModuleSlug,
 } from '@/lib/intel/modules';
+import { ASSETS, ASSET_LABELS, ASSET_STATES, type Asset } from '@/lib/reality-check/board';
 
 // Workspace nav for the Intelligence Center. Three surfaced regions:
-//   • Primary strip (hero)     — Calibration Ledger · Shadow Fleet · Regime Shifts.
+//   • Primary strip (hero)     — Calibration Ledger · Reality Check ·
+//     Shadow Fleet · Regime Shifts.
 //   • Secondary strip (visible) — Commodities · Critical Minerals.
 //   • Right-aligned entry      — Advanced Scenarios → /intel/advanced
 //     (a 4-card landing for Chokepoint, Sanctions, Cascade, Precursor).
 //
-// All nine workspaces remain accessible at /intel/<slug>; the four
+// All ten workspaces remain accessible at /intel/<slug>; the four
 // advanced ones are also reachable directly via deep links and via
 // the 4 cards on /intel/advanced. Tier-gating semantics unchanged
 // (every workspace stays Pro+).
@@ -25,11 +28,33 @@ import {
 //   • The Advanced Scenarios entry is active when the pathname is
 //     /intel/advanced OR any of the four advanced /intel/<slug> routes.
 
-const HERO_ORDER: ModuleSlug[] = ['calibration', 'shadow-fleet', 'regime-shifts'];
+// Reality Check sits SECOND, immediately after the Calibration Ledger
+// (build prompt §3.3, decision 6). Two reasons, both structural rather than
+// aesthetic: /start sells Pro and every buyer who arrives from a promotional
+// asset must find this board without hunting (D-12); and every verdict it
+// publishes is a scored claim in the ledger beside it (D-7), so the two read
+// as one argument — the check, and the record of the check.
+const HERO_ORDER: ModuleSlug[] = ['calibration', 'reality-check', 'shadow-fleet', 'regime-shifts'];
 const VISIBLE_ORDER: ModuleSlug[] = ['commodities', 'minerals'];
 
-// Render order is fixed (not derived from MODULE_SLUGS sort) so the
-// hero strip always reads Calibration → Shadow Fleet → Regime Shifts.
+// The workspace's asset switcher, mirrored in the vertical rail as a
+// sub-menu (build prompt §3.3). The shell has no sub-menu mechanism, so this
+// is new UI here rather than a change to the shell: three links that carry
+// the same ?asset= parameter the in-page switcher writes, which keeps a view
+// shareable from either control. Power and Maritime render their admission
+// checklist, never data — an asset that has not cleared admission shows the
+// evidence for why.
+const RAIL_SUBMENU: { slug: ModuleSlug; items: { asset: Asset; label: string; state: string }[] } = {
+  slug: 'reality-check',
+  // One source of truth for the three labels and their admission states:
+  // lib/reality-check/board.ts, which the workspace's own switcher reads.
+  // Two copies of a label is how a rail and a tab start disagreeing.
+  items: ASSETS.map(a => ({ asset: a, label: ASSET_LABELS[a], state: ASSET_STATES[a].state })),
+};
+
+// Render order is fixed (not derived from MODULE_SLUGS sort) so the hero
+// strip always reads Calibration → Reality Check → Shadow Fleet → Regime
+// Shifts.
 const HERO_WORKSPACES = HERO_ORDER.map(slug => ({
   slug,
   label: MODULE_LABELS[slug],
@@ -89,7 +114,28 @@ export default function WorkspaceNav({
       <ul className="flex flex-col" style={{ gap: 0 }}>
         <VerticalSectionHeading>Hero</VerticalSectionHeading>
         {HERO_WORKSPACES.map(w => (
-          <VerticalItem key={w.slug} workspace={w} active={isActive(pathname, w.path)} />
+          <Fragment key={w.slug}>
+            <VerticalItem workspace={w} active={isActive(pathname, w.path)} />
+            {w.slug === RAIL_SUBMENU.slug && (
+              <li className="rc-rail-sub">
+                <ul className="rc-rail-sublist">
+                  {RAIL_SUBMENU.items.map(a => (
+                    <li key={a.asset}>
+                      <Link
+                        href={`${w.path}?asset=${a.asset}`}
+                        className="rc-rail-sublink"
+                        aria-label={`Reality Check — ${a.label} (${a.state})`}
+                      >
+                        <span className="rc-rail-subdot" aria-hidden="true">·</span>
+                        <span className="rc-rail-sublabel">{a.label}</span>
+                        <span className="rc-rail-substate">{a.state}</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            )}
+          </Fragment>
         ))}
         <VerticalSectionHeading>Visible</VerticalSectionHeading>
         {VISIBLE_WORKSPACES.map(w => (

@@ -12,6 +12,7 @@ const SHORT_DESC: Record<ModuleSlug, string> = {
   commodities: 'Supply / demand balance and chokepoint exposure per commodity.',
   minerals: 'Critical-minerals supply chains, mines, and refining geography.',
   'precursor-analogs': 'Historical analogs for emerging crises, with caveats.',
+  'reality-check': 'Which apparent outages are real — two sensors, and the refusals are the product.',
   'regime-shifts': 'Detection of structural changes in conflict and trade patterns.',
   sanctions: 'Wargame the second-order effects of new sanctions packages.',
   'shadow-fleet': 'Vessels evading AIS, sanctioned-port calls, ownership opacity.',

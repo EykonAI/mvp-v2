@@ -187,7 +187,7 @@ export function denialCopy(
     case 'suspended':
       return {
         error: 'This test plan is paused.',
-        detail: 'Your access is paused by the eYKON team. Everything else on the platform still works — the globe, all nine INTEL workspaces, BRIEFS and COMM are unaffected.',
+        detail: 'Your access is paused by the eYKON team. Everything else on the platform still works — the globe, all ten INTEL workspaces, BRIEFS and COMM are unaffected.',
       };
     case 'deep_exhausted':
       return {
@@ -199,7 +199,7 @@ export function denialCopy(
     default:
       return {
         error: 'Analyst balance used up.',
-        detail: `You have used ${fmt(wallet.spentUsd)} of your ${fmt(wallet.budgetUsd)} plan. The analyst is paused until it is topped up — everything else stays open: the globe and all live layers, all nine INTEL workspaces, BRIEFS, COMM, and every insight you have already saved.`,
+        detail: `You have used ${fmt(wallet.spentUsd)} of your ${fmt(wallet.budgetUsd)} plan. The analyst is paused until it is topped up — everything else stays open: the globe and all live layers, all ten INTEL workspaces, BRIEFS, COMM, and every insight you have already saved.`,
       };
   }
 }

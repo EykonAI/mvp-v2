@@ -275,7 +275,7 @@ export function ClosingPage({
                       LIMIT 1<em>Data feeds</em>
                     </div>
                     <div className="cs-lsay">
-                      The feeds are not all there yet. Four of nine INTEL workspaces are models,
+                      The feeds are not all there yet. Four of ten INTEL workspaces are models,
                       badged ILLUSTRATIVE, and vessel coverage is uneven — {aisLimit}. The roadmap to
                       full coverage runs about twelve months.
                     </div>

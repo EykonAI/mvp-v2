@@ -33,6 +33,16 @@ jobs:
           node-version: '20'
       - name: No mean over radiance in the Reality Check path (hard gate)
         run: node apps/web/scripts/reality-check/check-no-mean.mjs
+      # Migration 171 was reviewed by three agents and passed four CI jobs,
+      # and still could not be applied: PostgreSQL refuses a sub-SELECT
+      # inside a CHECK constraint (0A000), and a migration is one
+      # transaction, so that one statement aborted the whole file in the
+      # founder's SQL Editor. This is the only job wired to
+      # supabase/migrations/**, and the check needs no database, so the
+      # fence lives here. It covers every migration, not only the
+      # programme's band.
+      - name: No sub-SELECT inside a CHECK constraint (hard gate)
+        run: node apps/web/scripts/sql/check-no-subquery-in-check.mjs
 
   # PR-5: the TypeScript half of the detector, claims and scorer default
   # (classifier ladder on the Maysan production fixture, rolling rule, claim
@@ -52,3 +62,9 @@ jobs:
         run: npm ci
       - name: Reality Check tick, claims and resolver default (hard gate)
         run: node apps/web/scripts/reality-check/test-refinery-rc.mjs
+      # PR-6: the board's presentation rules — a treatment for every row
+      # state, the refutation as the hero, a gap that is never a zero, the
+      # §3.4 standing copy verbatim and the §6 banned strings over every
+      # string the board can render. The database half is pr6_guards.sql.
+      - name: Reality Check board rules (hard gate)
+        run: node apps/web/scripts/reality-check/test-rc-board.mjs

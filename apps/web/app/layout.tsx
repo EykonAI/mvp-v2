@@ -12,7 +12,10 @@ export const metadata: Metadata = {
     // the site-wide description used in search results and social cards,
     // so it was the most-syndicated false claim on the site. Same class
     // as the #368 homepage truth pass.
-    'Real-time situational awareness for a complex world. Live aircraft, vessel, conflict, and infrastructure data on an interactive map and nine deep-dive workspaces.',
+    // The workspace count is quoted here too, and PR-6 adds the tenth
+    // (Reality Check). This string is syndicated on every page, so a stale
+    // count here outlives every other place it is written.
+    'Real-time situational awareness for a complex world. Live aircraft, vessel, conflict, and infrastructure data on an interactive map and ten deep-dive workspaces.',
   // No manual icons entry: app/icon.svg is the App Router file
   // convention and Next emits the <link rel="icon"> for it. The line
   // that used to live here pointed at /favicon.ico, which 404'd —

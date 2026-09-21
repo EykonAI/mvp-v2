@@ -329,3 +329,251 @@ body.intel-view {
   }
   .pulse-dot, .typing-dot { animation: none !important; opacity: 1 !important; }
 }
+
+/* ── Reality Check — the 10th INTEL workspace (PR-6) ──────────────────
+ * These live here as CSS classes rather than inline styles for the reason
+ * stated above: a media query, a hover state and an SVG <pattern> have no
+ * inline form — and the board is a dense table that has to reflow to a
+ * phone. Every colour is an existing token from :root; no new token, and
+ * no new signal colour, is introduced.
+ *
+ * THE PALETTE IS STATUS, NOT CATEGORICAL. --red is deliberately unused on
+ * this board: nothing here is a confirmed outage, and red would say one.
+ *   refuted  --green   an apparent disruption that does not hold (the hero)
+ *   lead     --amber   a shortlist entry — investigate, never conclude
+ *   watch    --violet  one instrument moved and the other did not
+ *   steady   --teal    both instruments within the site's own baseline
+ *   void     --ink-faint + a hatch  silence, which is not a verdict
+ */
+
+.rc-wrap { display: flex; flex-direction: column; }
+.rc-section { border-bottom: 1px solid var(--rule-soft); padding: 16px 24px; }
+.rc-section:last-child { border-bottom: 0; }
+.rc-h {
+  font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.22em;
+  text-transform: uppercase; color: var(--ink-faint); margin-bottom: 10px;
+}
+.rc-p { font-size: 12px; color: var(--ink-dim); max-width: 96ch; }
+.rc-p + .rc-p { margin-top: 8px; }
+.rc-p strong { color: var(--ink); font-weight: 600; }
+.rc-mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+
+/* ── asset switcher (state lives in the URL, so a view is shareable) ── */
+.rc-assets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.rc-asset {
+  display: inline-flex; align-items: baseline; gap: 8px;
+  padding: 6px 14px; border-radius: 16px; cursor: pointer;
+  background: transparent; border: 1px solid var(--rule-strong);
+  color: var(--ink-dim); font-family: var(--f-mono); font-size: 11px;
+  letter-spacing: 0.12em; text-transform: uppercase;
+}
+.rc-asset:hover { border-color: var(--teal-dim); color: var(--ink); }
+.rc-asset[aria-pressed='true'] { background: var(--teal); border-color: var(--teal); color: var(--bg-void); }
+.rc-asset-state { font-size: 9px; letter-spacing: 0.14em; opacity: 0.8; }
+
+/* ── the tick header band ───────────────────────────────────────────── */
+.rc-tickbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px;
+  padding: 10px 24px; background: var(--bg-panel);
+  border-bottom: 1px solid var(--rule-soft);
+}
+.rc-tickid {
+  font-family: var(--f-mono); font-size: 13px; font-weight: 600;
+  letter-spacing: 0.1em; color: var(--ink);
+}
+.rc-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 9px; border-radius: 3px; font-family: var(--f-mono);
+  font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  border: 1px solid var(--rule-strong); color: var(--ink-dim);
+}
+.rc-chip-frozen { border-color: var(--teal-deep); color: var(--teal); }
+.rc-chip-super { border-color: var(--amber); color: var(--amber); }
+.rc-fact { font-family: var(--f-mono); font-size: 10.5px; color: var(--ink-faint); letter-spacing: 0.04em; }
+.rc-fact b { color: var(--ink-dim); font-weight: 500; }
+
+/* ── the funnel ─────────────────────────────────────────────────────── */
+.rc-funnel { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; background: var(--rule-soft); }
+.rc-step { background: var(--bg-navy); padding: 14px 14px 12px; display: flex; flex-direction: column; gap: 4px; }
+.rc-step-n { font-family: var(--f-mono); font-size: 26px; font-weight: 600; line-height: 1; color: var(--ink); font-variant-numeric: tabular-nums; }
+.rc-step-rows { font-family: var(--f-mono); font-size: 10px; color: var(--ink-faint); }
+.rc-step-l { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-dim); }
+.rc-step-note { font-size: 11px; color: var(--ink-faint); line-height: 1.35; }
+.rc-step-hero { background: var(--bg-raised); border-top: 2px solid var(--green); }
+.rc-step-hero .rc-step-n { color: var(--green); font-size: 34px; }
+@media (max-width: 1100px) { .rc-funnel { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 680px)  { .rc-funnel { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.rc-outcome { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 12px; }
+.rc-outcome-item { font-family: var(--f-mono); font-size: 11px; color: var(--ink-dim); }
+.rc-outcome-item b { font-size: 15px; color: var(--ink); margin-right: 5px; }
+
+/* ── verdict pills: loud, one per state, in their own column ─────────── */
+.rc-v {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 132px; padding: 6px 12px; border-radius: 3px;
+  font-family: var(--f-mono); font-size: 11px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase; text-align: center;
+  border: 1px solid transparent;
+}
+.rc-v-refuted { background: rgba(74, 191, 138, 0.16); color: var(--green); border-color: var(--green); }
+.rc-v-lead    { background: rgba(212, 162, 76, 0.16); color: var(--amber); border-color: var(--amber); }
+.rc-v-watch   { background: rgba(139, 127, 216, 0.14); color: var(--violet); border-color: var(--violet); }
+.rc-v-steady  { background: rgba(25, 208, 184, 0.10); color: var(--teal); border-color: var(--teal-deep); }
+.rc-v-void {
+  color: var(--ink-faint); border-color: var(--rule-strong); border-style: dashed;
+  background: repeating-linear-gradient(135deg, var(--bg-raised) 0 5px, transparent 5px 10px);
+}
+
+/* full-width verdict banner, on every drill-down */
+.rc-banner { padding: 14px 18px; border-left: 4px solid var(--rule-strong); background: var(--bg-panel); }
+.rc-banner-t { font-family: var(--f-display); font-size: 17px; letter-spacing: 0.03em; font-weight: 500; color: var(--ink); }
+.rc-banner-g { font-size: 12px; color: var(--ink-dim); margin-top: 5px; max-width: 92ch; }
+.rc-vb-refuted { border-left-color: var(--green); background: rgba(74, 191, 138, 0.07); }
+.rc-vb-refuted .rc-banner-t { color: var(--green); }
+.rc-vb-lead    { border-left-color: var(--amber); background: rgba(212, 162, 76, 0.07); }
+.rc-vb-lead    .rc-banner-t { color: var(--amber); }
+.rc-vb-watch   { border-left-color: var(--violet); background: rgba(139, 127, 216, 0.07); }
+.rc-vb-watch   .rc-banner-t { color: var(--violet); }
+.rc-vb-steady  { border-left-color: var(--teal); background: rgba(25, 208, 184, 0.06); }
+.rc-vb-steady  .rc-banner-t { color: var(--teal); }
+.rc-vb-void {
+  border-left-color: var(--rule-strong);
+  background: repeating-linear-gradient(135deg, var(--bg-raised) 0 6px, var(--bg-panel) 6px 12px);
+}
+.rc-vb-void .rc-banner-t { color: var(--ink-dim); }
+
+/* ── the board table ────────────────────────────────────────────────── */
+.rc-scroll { overflow-x: auto; }
+.rc-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 1020px; }
+.rc-table th {
+  text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--rule);
+  font-family: var(--f-mono); font-size: 9.5px; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--ink-faint); font-weight: 500; white-space: nowrap;
+}
+.rc-table td { padding: 9px 12px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; color: var(--ink-dim); }
+.rc-table tbody tr { cursor: pointer; }
+.rc-table tbody tr:hover td { background: var(--bg-raised); }
+.rc-table tbody tr[data-selected='true'] td { background: var(--bg-hover); }
+.rc-rowbtn {
+  display: block; width: 100%; text-align: left; background: none; border: 0;
+  padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer;
+}
+.rc-site { color: var(--ink); font-weight: 500; }
+.rc-sub { display: block; font-family: var(--f-mono); font-size: 10px; color: var(--ink-faint); margin-top: 2px; }
+.rc-pair { font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rc-pair .to { color: var(--ink-faint); margin: 0 5px; }
+.rc-none { color: var(--ink-faint); font-style: italic; }
+.rc-cap { font-family: var(--f-mono); font-size: 10px; color: var(--ink-faint); letter-spacing: 0.04em; }
+.rc-flag {
+  display: inline-block; margin-top: 4px; padding: 1px 6px; border-radius: 2px;
+  font-family: var(--f-mono); font-size: 9px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--amber); border: 1px solid var(--amber);
+}
+.rc-rowsep td {
+  background: var(--bg-void); color: var(--ink-faint); font-family: var(--f-mono);
+  font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; padding: 10px 12px;
+}
+.rc-rowsep td { border-bottom: 1px solid var(--rule); }
+
+/* ── drill-down ─────────────────────────────────────────────────────── */
+.rc-dd { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 1px; background: var(--rule-soft); }
+.rc-dd > * { background: var(--bg-navy); padding: 14px 18px; min-width: 0; }
+@media (max-width: 1000px) { .rc-dd { grid-template-columns: minmax(0, 1fr); } }
+.rc-kv { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 14px; font-size: 11.5px; }
+.rc-kv dt { color: var(--ink-faint); }
+.rc-kv dd { font-family: var(--f-mono); color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
+.rc-strip-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; font-family: var(--f-mono); font-size: 9.5px; color: var(--ink-faint); letter-spacing: 0.06em; }
+.rc-key { display: inline-flex; align-items: center; gap: 5px; }
+.rc-swatch { width: 10px; height: 10px; border-radius: 1px; display: inline-block; }
+/* One hue per instrument; phase is weight, not a second hue. */
+.rc-swatch-lightbase { background: var(--teal); opacity: 0.45; }
+.rc-swatch-light { background: var(--teal); }
+.rc-swatch-heatbase { background: var(--amber); opacity: 0.45; }
+.rc-swatch-heat { background: var(--amber); }
+.rc-swatch-gap { border: 1px dashed var(--rule-strong); background: transparent; }
+
+/* ── gate checklists (Power, Maritime) ──────────────────────────────── */
+.rc-gate { width: 100%; border-collapse: collapse; font-size: 12px; }
+.rc-gate th, .rc-gate td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+.rc-gate th { font-family: var(--f-mono); font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-faint); font-weight: 500; border-bottom: 1px solid var(--rule); }
+.rc-gate tbody th {
+  color: var(--ink); width: 190px; font-family: var(--f-body); font-size: 12px;
+  font-weight: 500; letter-spacing: normal; text-transform: none;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.rc-gate td:last-child { color: var(--ink-dim); }
+.rc-st {
+  display: inline-block; padding: 2px 8px; border-radius: 2px; white-space: nowrap;
+  font-family: var(--f-mono); font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase;
+  border: 1px solid var(--rule-strong); color: var(--ink-dim);
+}
+.rc-st-ok      { color: var(--green); border-color: var(--green); }
+.rc-st-warn    { color: var(--amber); border-color: var(--amber); }
+.rc-st-fail    { color: var(--coral); border-color: var(--coral); }
+.rc-st-pending { color: var(--violet); border-color: var(--violet); }
+.rc-src { display: block; font-family: var(--f-mono); font-size: 9.5px; color: var(--ink-faint); margin-top: 4px; letter-spacing: 0.04em; }
+
+/* ── empty state ────────────────────────────────────────────────────── */
+.rc-empty { padding: 40px 24px; max-width: 78ch; }
+.rc-empty-t { font-family: var(--f-display); font-size: 19px; letter-spacing: 0.03em; color: var(--ink); margin-bottom: 10px; }
+
+/* ── standing maintenance disclosure (§3.4) ─────────────────────────── */
+.rc-standing {
+  border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule);
+  background: var(--bg-panel); padding: 14px 24px;
+}
+.rc-standing p { font-size: 12.5px; color: var(--ink-dim); max-width: 100ch; line-height: 1.5; }
+.rc-standing p b { color: var(--ink); }
+
+/* ── method block ───────────────────────────────────────────────────── */
+.rc-params { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 1px; background: var(--rule-soft); }
+.rc-param { background: var(--bg-navy); padding: 9px 12px; }
+.rc-param dt { font-family: var(--f-mono); font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); }
+.rc-param dd { font-family: var(--f-mono); font-size: 12px; color: var(--ink); margin-top: 3px; word-break: break-word; }
+.rc-limits { margin: 0; padding-left: 18px; }
+.rc-limits li { font-size: 12px; color: var(--ink-dim); margin-bottom: 7px; line-height: 1.45; max-width: 104ch; }
+
+/* ── the rail sub-menu under Reality Check (vertical WorkspaceNav) ───── */
+.rc-rail-sub { border-bottom: 1px solid var(--rule-soft); background: var(--bg-void); }
+.rc-rail-sublist { list-style: none; margin: 0; padding: 2px 0 4px; }
+.rc-rail-sublink {
+  display: flex; align-items: center; gap: 7px; padding: 5px 14px 5px 26px;
+  text-decoration: none; font-family: var(--f-mono); font-size: 10px;
+  letter-spacing: 0.08em; color: var(--ink-faint);
+}
+.rc-rail-sublink:hover { color: var(--teal); background: rgba(25, 208, 184, 0.04); }
+.rc-rail-subdot { color: var(--ink-ghost); }
+.rc-rail-sublabel { flex: 1; }
+.rc-rail-substate { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); }
+.rc-p-top { margin-top: 10px; }
+/* Opening a row re-reads the same tick. The board stays on screen while that
+   happens and says so here, rather than blanking a beat after it painted. */
+.rc-refreshing {
+  font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--ink-dim); margin: 10px 0 0;
+}
+.rc-strip-svg { display: block; max-height: 64px; width: 100%; }
+.rc-strip { margin-bottom: 14px; }
+.rc-strip-t { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim); margin-bottom: 5px; }
+.rc-strip-ax { display: flex; justify-content: space-between; font-family: var(--f-mono); font-size: 9px; color: var(--ink-faint); margin-top: 3px; }
+.rc-linkbtn {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  font: inherit; color: var(--teal); text-decoration: underline;
+}
+.rc-linkbtn:hover { color: var(--ink); }
+/* Coverage strip: one cell per calendar night in the tick's range. A night
+ * with no usable look is an empty cell, not a zero. */
+.rc-cov { display: flex; flex-wrap: wrap; gap: 2px; margin: 6px 0 8px; }
+.rc-covcell {
+  width: 12px; height: 14px; border-radius: 1px;
+  /* Both states of this cell are graphical objects that carry the strip's
+     meaning, so both clear 1.4.11's 3:1 against --bg-navy: the hatch reads
+     5.91:1 in --ink-faint, the usable fill 5.35:1 in --teal-dim. The pair
+     it replaced was --bg-raised on --bg-navy (1.16:1) and --teal-deep
+     (2.45:1) — a strip whose "not looked at" cell was invisible. */
+  background: repeating-linear-gradient(135deg, var(--ink-faint) 0 1px, transparent 1px 4px);
+  border: 1px solid var(--rule-strong);
+}
+.rc-covcell.rc-cov-bm { background: var(--teal-dim); border-color: var(--teal-dim); }
+.rc-covcell.rc-cov-fr { border-color: var(--amber); }

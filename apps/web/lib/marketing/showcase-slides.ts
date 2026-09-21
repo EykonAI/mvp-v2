@@ -57,14 +57,16 @@ const PILLAR_SLIDES_AFTER_GLOBE: Slide[] = [
   },
   {
     code: 'P-03 · INTEL',
-    title: 'Nine workspaces where signals become decisions.',
+    title: 'Ten workspaces where signals become decisions.',
     body:
-      `Calibration Ledger, Shadow Fleet, Regime Shifts, Chokepoint Simulator, Sanctions ` +
-      `Wargame, Cascade Propagation, Precursor Analogs, Commodities and Critical Minerals — ` +
+      `Calibration Ledger, Reality Check, Shadow Fleet, Regime Shifts, Chokepoint Simulator, ` +
+      `Sanctions Wargame, Cascade Propagation, Precursor Analogs, Commodities and Critical Minerals — ` +
       `compound signals computed on eYKON infrastructure, with posture scores for ` +
       `${PS.postureTheatres} named theatres refreshed every 30 minutes.`,
     shot: '/marketing/p03-intel.jpg',
-    alt: 'The Intelligence Center dashboard with the nine workspaces listed in the sidebar.',
+    // The shot still shows the pre-PR-6 sidebar, so the alt does not claim a
+    // count the image cannot support; retake it and the count can return.
+    alt: 'The Intelligence Center dashboard with the workspaces listed in the sidebar.',
   },
   {
     code: 'P-04 · NOTIF',

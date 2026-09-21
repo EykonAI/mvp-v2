@@ -979,7 +979,7 @@ export function Landing() {
           <code>AIS</code> chokepoint coverage on a free tier we are upgrading. Every data
           point carries its source, license and ingestion timestamp — and a degraded feed
           says so on the layer instead of pretending. Paid tiers differ on the intelligence
-          layer — AI Analyst budget, the nine INTEL workspaces, alerts and exports — never
+          layer — AI Analyst budget, the ten INTEL workspaces, alerts and exports — never
           on the rawness of the map.
         </Faq>
         <Faq q="How does the crypto discount work in practice?">
