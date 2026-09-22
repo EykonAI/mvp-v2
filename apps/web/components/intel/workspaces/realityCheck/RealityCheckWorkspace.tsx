@@ -183,7 +183,7 @@ function Workspace() {
           <div className="rc-empty-t">Nothing came back</div>
           <p className="rc-p">
             The request for the {ASSET_LABELS[asset].toLowerCase()} view returned no payload at all.
-            That is a fault to report, not an empty week — an unreadable board is not an empty one.
+            That is a fault to report, not a quiet tick — an unreadable board is not an empty one.
           </p>
         </div>
       )}

@@ -40,7 +40,12 @@ export interface TickLocation {
   iso_country: string | null;
   country: string | null;
   city: string | null;
-  us_state: string | null;
+  /**
+   * Not printed (migration 182). The one-pagers print no US state, and §3.3's
+   * Location is ISO country, city where the registry holds one, and
+   * coordinates. A payload from before 182 may still carry it; nothing reads it.
+   */
+  us_state?: string | null;
   multi_country: boolean;
   latitude: number | null;
   longitude: number | null;
@@ -48,9 +53,18 @@ export interface TickLocation {
 }
 
 export interface BoardRow {
-  cluster_key: string;
+  /**
+   * The row's identity on the page. The cluster key where it may be shown;
+   * an opaque 'withheld-lead-<n>' for a lead below Pro (migration 182), whose
+   * key is withheld because a cluster key is a coordinate cell.
+   */
+  row_key?: string;
+  /** null below Pro on a lead row (§5, D-12). */
+  cluster_key: string | null;
   site_name: string | null;
   name_masked: boolean;
+  /** Where a sourced display name came from (migration 182); null when every name is the registry's own. */
+  name_sources?: string[] | null;
   member_count: number;
   member_names: string[] | null;
   members: string[] | null;
@@ -115,12 +129,31 @@ export interface TickPayload {
     column: string; min_px_hq: number;
     observed: number; heat_observable: number; thermally_dark: number;
     refuted: number; lead: number;
-    not_robust: Array<{ cluster_key: string; verdict: Verdict; robustness_verdict: Verdict }>;
+    /** A lead's key is null below Pro (migration 182), with name_masked set. */
+    not_robust: Array<{ cluster_key: string | null; verdict: Verdict; robustness_verdict: Verdict; name_masked?: boolean }>;
+  };
+  /**
+   * What "heat not observable" is made of, counted from the tick's verdicts
+   * (migration 182): observed complexes whose baseline heat-detection RATE is
+   * at or below the floor — many of them with detection days.
+   */
+  heat_not_observable?: {
+    complexes: number; rows: number;
+    with_baseline_detection: number; without_baseline_detection: number;
+    /**
+     * Heat not observable for want of a usable FIRMS day (none in the
+     * baseline, or none in the window), not for a low rate: no rate to
+     * report. The two counts above cover only rates at or below the floor.
+     */
+    without_usable_firms_days?: number;
+    floor: number | string | null; rule: string;
   };
   claims: {
     issued_on_this_tick: number | null;
     at_publication: WalkforwardBlock | null;
     live: WalkforwardBlock | null;
+    /** The claims this tick put on the ledger's register (migration 182). */
+    on_register?: { claims: number; complexes: number; verdicts_without_claims: number; rule: string };
   };
   coverage: {
     bm_nights_used: string[] | null;
@@ -147,8 +180,8 @@ export interface TickPayload {
     refuted: number; lead: number; current: boolean;
   }>;
   rows: BoardRow[];
-  mask: { tier: MaskTier; lead_names: string; drilldown: string; archive: string };
-  drilldown?: { cluster_key: string; nights?: DrilldownNight[]; withheld?: boolean; reason?: string };
+  mask: { tier: MaskTier; lead_names: string; lead_identity?: string; drilldown: string; archive: string };
+  drilldown?: { cluster_key: string | null; nights?: DrilldownNight[]; withheld?: boolean; reason?: string };
   as_of: string;
 }
 
@@ -201,7 +234,7 @@ export const VERDICTS: Record<Verdict, VerdictPresentation> = {
   REFUTED: {
     label: 'Refuted',
     banner: 'Refuted — the apparent outage does not hold',
-    gloss: 'Thermal went quiet while the site stayed lit. A heat-only monitor raises this as an outage; two instruments refuse it.',
+    gloss: 'Heat detections fell while the site stayed lit. A heat-only monitor raises this as an outage; two instruments refuse it.',
     tone: 'refuted', rank: 0, withheld: false,
   },
   LEAD: {
@@ -242,8 +275,8 @@ export const VERDICTS: Record<Verdict, VerdictPresentation> = {
   },
   VOID_HEAT_NOT_OBSERVABLE: {
     label: 'Heat not observable',
-    banner: 'Withheld — no thermal baseline to fall from',
-    gloss: 'The baseline heat rate is at or below the observability floor, so there is no heat to lose. Reported as not observable, never as heat steady.',
+    banner: 'Withheld — too little baseline heat to fall from',
+    gloss: 'The baseline heat-detection rate is at or below the observability floor. The site may have had detection days, but too few for a fall to mean anything. Reported as not observable, never as heat steady.',
     tone: 'void', rank: 7, withheld: true,
   },
 };
@@ -254,13 +287,65 @@ export const HEAT_STATES: Record<string, string> = {
   HEAT_NOT_OBSERVABLE: 'Heat not observable',
 };
 
+/**
+ * A row's identity on the page: the accessor's row_key, else the cluster key
+ * (a payload from before migration 182). Never empty, so React keys and the
+ * selection never collide on a masked row.
+ */
+export function rowKey(r: Pick<BoardRow, 'row_key' | 'cluster_key'>): string {
+  return r.row_key ?? r.cluster_key ?? 'withheld';
+}
+
 /** The board order: refuted first, lead after it, silence last, then by key. */
-export function sortRows(rows: BoardRow[]): BoardRow[] {
+export function sortRows<T extends Pick<BoardRow, 'verdict' | 'row_key' | 'cluster_key'>>(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
     const r = VERDICTS[a.verdict].rank - VERDICTS[b.verdict].rank;
     if (r !== 0) return r;
-    return a.cluster_key < b.cluster_key ? -1 : a.cluster_key > b.cluster_key ? 1 : 0;
+    const ka = rowKey(a);
+    const kb = rowKey(b);
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
   });
+}
+
+/**
+ * The Location cell: city where the registry holds one, then the country.
+ * No US state, for any row (migration 182): the one-pagers print none, and
+ * §3.3's Location is ISO country, city and coordinates — so the board prints
+ * the state for none rather than for some.
+ */
+export function placeLabel(loc: TickLocation | null | undefined): string | null {
+  if (!loc) return null;
+  const parts = [loc.city, loc.country ?? loc.iso_country].filter((p): p is string => !!p);
+  return parts.length ? parts.join(', ') : null;
+}
+
+/**
+ * The Location cell's coordinates, in the pages' form and the form an
+ * unnamed site's name already uses ("Unnamed site (35.065 N, 106.652 W)"):
+ * hemisphere letters, never a signed decimal, so one row never prints the
+ * same point two ways. Four decimals — the precision the accessor sends —
+ * so nothing is rounded twice. Null when either coordinate is missing.
+ */
+export function coordLabel(lat: number | null | undefined, lon: number | null | undefined): string | null {
+  const la = Number(lat);
+  const lo = Number(lon);
+  if (lat === null || lat === undefined || lon === null || lon === undefined
+      || !Number.isFinite(la) || !Number.isFinite(lo)) return null;
+  return `${Math.abs(la).toFixed(4)} ${la < 0 ? 'S' : 'N'}, ${Math.abs(lo).toFixed(4)} ${lo < 0 ? 'W' : 'E'}`;
+}
+
+/**
+ * A stored threshold, ratio or floor, printed the way the one-pagers print it
+ * (0.20, 0.60) everywhere on the board — the tick band, the funnel, the
+ * drill-down and the method — so one page never shows 0.6 and 0.60 for the
+ * same parameter. Never rounded away: a value stored with more decimals
+ * keeps them. An em dash when the tick does not carry it.
+ */
+export function paramNum(v: unknown): string {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  if (!Number.isFinite(n)) return '—';
+  const frac = String(n).split('.')[1] ?? '';
+  return n.toFixed(Math.min(6, Math.max(2, frac.length)));
 }
 
 // ─── numbers ─────────────────────────────────────────────────────────────
@@ -277,6 +362,73 @@ export function num2(v: number | null | undefined): string {
 /** A rate as a whole percent, or an em dash. */
 export function pct(v: number | null | undefined): string {
   return v === null || v === undefined || !Number.isFinite(Number(v)) ? '—' : `${Math.round(Number(v) * 100)}%`;
+}
+
+/** A parameter as a number, whatever shape the JSON carried it in. */
+function num(v: unknown, fallback: number): number {
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * The heat-not-observable sentence, every number from the tick. The rule is a
+ * baseline heat-detection RATE at or below the floor — many of these sites DO
+ * have baseline detection days, so "no thermal baseline" would be false
+ * (tick 2026-W37: 63 of 141). Null when nothing is in that state.
+ */
+export function heatNotObservableText(t: TickPayload): string | null {
+  const floor = paramNum(num(t.heat_not_observable?.floor ?? t.parameters.heat_observable_floor, 0.2));
+  const h = t.heat_not_observable;
+  const n = h ? h.complexes : t.funnel.observed.complexes - t.funnel.heat_observable.complexes;
+  if (!n) return null;
+  // A complex with no usable FIRMS day has no rate at all: it is never
+  // counted under "a rate of 0.20 or less" (tick 2026-W37 has none).
+  const noRate = h?.without_usable_firms_days ?? 0;
+  const noRateLine = noRate > 0
+    ? `${plural(noRate, 'observed complex', 'observed complexes')} had no usable FIRMS day in the baseline or the window, so no heat-detection rate to read: also reported as heat not observable, never as heat steady.`
+    : '';
+  const rated = n - noRate;
+  if (rated <= 0) return noRateLine;
+  const head = `${plural(rated, 'observed complex has', 'observed complexes have')} a baseline heat-detection rate of ${floor} or less`;
+  const tail = 'too little heat to fall from: reported as heat not observable, never as heat steady.';
+  if (!h) return `${head} — ${tail}`;
+  const split = h.with_baseline_detection === 0
+    ? 'none of them had a detection day in the baseline'
+    : h.without_baseline_detection === 0
+      ? `every one of them had detection days in the baseline, just not enough`
+      : `${h.with_baseline_detection} of them had detection days in the baseline and ${h.without_baseline_detection} had none`;
+  return `${head} — ${split}. Either way that is ${tail}${noRateLine ? ` ${noRateLine}` : ''}`;
+}
+
+/**
+ * The claims sentence, every number from the tick and the register. Claims
+ * issue only on the thermally dark complexes, and only on alternate ticks,
+ * so "every verdict is a claim" would be false (tick 2026-W37: 55 claims on
+ * 19 complexes; 276 of 295 verdicts carry none).
+ */
+export function claimsCoverageText(t: TickPayload): string {
+  const watched = t.funnel.watched.complexes;
+  const issued = t.claims.issued_on_this_tick;
+  if (issued === null || issued === undefined) {
+    // A superseding tick never issues (lib/reality-check/tick.ts issues on
+    // plan.kind 'new' only): "alternate ticks" would be the wrong reason, on
+    // the very tick a late night produces (e.g. 2026-W37-r2).
+    const prev = t.supersession?.supersedes;
+    if (prev) {
+      return `Tick ${t.tick} supersedes tick ${prev} and, like every superseding tick, issues no claims of its own. Its ${plural(watched, 'verdict is', 'verdicts are')} published without one.`;
+    }
+    return `Tick ${t.tick} issued no claims: claims issue on alternate ticks only, so that no two claims of one family on one complex share a night. Its ${plural(watched, 'verdict is', 'verdicts are')} published without one.`;
+  }
+  const reg = t.claims.on_register;
+  if (!reg) {
+    return `Tick ${t.tick} issued ${plural(issued, 'claim', 'claims')}, on its thermally dark complexes only; its other verdicts carry none.`;
+  }
+  const mismatch = reg.claims !== issued ? ` (the register holds ${reg.claims})` : '';
+  return `Claims are issued only on the thermally dark complexes. Tick ${t.tick} issued ${plural(issued, 'claim', 'claims')}${mismatch} on ${plural(reg.complexes, 'complex', 'complexes')}; the other ${reg.verdicts_without_claims} of its ${plural(watched, 'verdict', 'verdicts')} carry none.`;
 }
 
 /** "07-18 → 08-17", from two ISO dates. Explicit dates, never "30-day". */
@@ -296,9 +448,9 @@ export function funnelSteps(t: TickPayload): FunnelStep[] {
     { key: 'observed', label: 'observed', complexes: f.observed.complexes, rows: f.observed.rows,
       note: `${t.parameters.min_baseline_nights ?? 5}+ baseline and ${t.parameters.min_window_nights ?? 3}+ window usable clear nights carrying a retrieval`, hero: false },
     { key: 'heat_observable', label: 'heat-observable', complexes: f.heat_observable.complexes, rows: f.heat_observable.rows,
-      note: `baseline heat rate above ${t.parameters.heat_observable_floor ?? 0.2} — the rest have too little heat to fall from`, hero: false },
+      note: `baseline heat-detection rate above ${paramNum(num(t.parameters.heat_observable_floor, 0.2))} — the rest have too little heat to fall from`, hero: false },
     { key: 'thermally_dark', label: 'thermally dark', complexes: f.thermally_dark.complexes, rows: f.thermally_dark.rows,
-      note: `window heat rate below ${t.parameters.heat_down_ratio ?? 0.6} × baseline`, hero: false },
+      note: `window heat-detection rate below ${paramNum(num(t.parameters.heat_down_ratio, 0.6))} × baseline`, hero: false },
     { key: 'refuted', label: 'refuted', complexes: f.refuted.complexes, rows: f.refuted.rows,
       note: 'thermally dark, but the site stayed lit — the product', hero: true },
   ];
@@ -323,14 +475,62 @@ export function eliminationShare(t: TickPayload): number | null {
   return t.funnel.refuted.complexes / dark;
 }
 
-/** D-13: the one-line robustness note, or null when nothing flips. */
+/**
+ * D-13: the robustness note, or null when nothing flips.
+ *
+ * Two rules from the published tick (2026-W37) shape it:
+ *   - "lead" is a §2.2 term — heat AND light down. Most flips are not leads
+ *     (W37: 7 flips, 1 of them a lead; 5 are Light down only ↔ Steady), so
+ *     the consequence of a flip is "not a conclusion", never "a lead". The
+ *     D-13 line — light drop holds on the single pixel, not on the 3×3 —
+ *     is said of a flipping LEAD only, by name where the tier may see it.
+ *   - Below Pro a lead's flip is counted and described, never identified,
+ *     and never PLACED: it goes after every identified flip, because its
+ *     position in a key-ordered list would bracket its cluster key (a
+ *     coordinate cell) between its neighbours'.
+ */
 export function robustnessNote(t: TickPayload): string | null {
   const flips = t.robustness.not_robust ?? [];
+  const col = t.robustness.column;
   if (flips.length === 0) {
-    return `Every verdict on this tick survives the stricter ${t.robustness.column} retrieval (px_hq_3x3 ≥ ${t.robustness.min_px_hq}).`;
+    return `Every verdict on this tick survives the stricter ${col} retrieval (px_hq_3x3 ≥ ${t.robustness.min_px_hq}).`;
   }
-  const names = flips.map((f) => `${f.cluster_key} (${VERDICTS[f.verdict].label} → ${VERDICTS[f.robustness_verdict].label})`);
-  return `${flips.length} verdict${flips.length === 1 ? '' : 's'} change under the stricter ${t.robustness.column} retrieval: ${names.join(', ')}. A verdict that does not hold on both retrievals is a lead, not a conclusion.`;
+  const move = (f: { verdict: Verdict; robustness_verdict: Verdict }) =>
+    `${VERDICTS[f.verdict].label} → ${VERDICTS[f.robustness_verdict].label}`;
+  const identified = flips.filter((f) => f.cluster_key);
+  const withheld = flips.filter((f) => !f.cluster_key);
+  const items = [
+    ...identified.map((f) => `${f.cluster_key} (${move(f)})`),
+    ...withheld.map((f) => `a lead, identity withheld below Pro (${move(f)})`),
+  ];
+  let note = `${flips.length} verdict${flips.length === 1 ? '' : 's'} change${flips.length === 1 ? 's' : ''} under the stricter ${col} retrieval: ${items.join(', ')}. Both retrievals are published, and a verdict that does not hold on both is not a conclusion.`;
+  let unnamed = 0;
+  for (const f of [...identified, ...withheld]) {
+    if (!leadLightLost(f.verdict, f.robustness_verdict)) continue;
+    const name = f.cluster_key ? t.rows?.find((r) => r.cluster_key === f.cluster_key)?.site_name : null;
+    const whose = name ? `${name}’s` : f.cluster_key ? `${f.cluster_key}’s`
+      : (unnamed++ === 0 ? 'One lead’s' : 'Another lead’s');
+    note += ` ${leadLightLine(t, whose)}`;
+  }
+  return note;
+}
+
+/**
+ * A LEAD whose light drop the stricter retrieval does not reproduce: the
+ * check reads the complex as lit (Refuted, or Steady). A lead that the check
+ * cannot read at all (a VOID) is not one — nothing was reproduced or refused.
+ */
+export function leadLightLost(verdict: Verdict, robustnessVerdict: Verdict | null | undefined): boolean {
+  return verdict === 'LEAD' && (robustnessVerdict === 'REFUTED' || robustnessVerdict === 'STEADY');
+}
+
+/** D-13's one line, in its own words, for a lead the stricter retrieval does not reproduce. */
+export function leadLightLine(t: TickPayload, whose: string): string {
+  const col = t.robustness.column;
+  const primary = t.parameters?.light_column == null ? null : String(t.parameters.light_column);
+  return (primary === null || primary === 'radiance') && col === 'radiance_3x3'
+    ? `${whose} light drop holds on the single-pixel retrieval, not on the stricter 3×3 one — a lead, not a conclusion.`
+    : `${whose} light drop holds on ${primary}, not on the stricter ${col} — a lead, not a conclusion.`;
 }
 
 // ─── the claims line (D-7) ───────────────────────────────────────────────
@@ -444,7 +644,7 @@ export const MAINTENANCE_DISCLOSURE =
 // ─── the known limits, on the board because there is no methods page ─────
 export const KNOWN_LIMITS: string[] = [
   'Recall is not measured. Every figure here is a false-positive rate: the share of apparent disruptions the second instrument removes. How many genuine shutdowns the method catches is unmeasured on refineries, and no free labelled source exists that could measure it.',
-  'Heat and light are different physics, not different satellites. NASA FIRMS and Black Marble VNP46A2 are both VIIRS-family and see through the same clouds, so a cloud that hides one usually hides the other.',
+  'Heat and light are different physics, partly from the same instrument. NASA FIRMS (VIIRS and MODIS) and Black Marble VNP46A2 (VIIRS) see through the same clouds, so a cloud that hides one usually hides the other.',
   'A thermal detection is a hot pixel. It is not a fire, not a strike, and not a flare stack — and its absence is not an outage.',
   'Lit is not running. Site lighting stays on through a turnaround, so a steady light rules out "the site went dark", never "the site is producing".',
   'The cadence is set by the slowest instrument. Black Marble publishes about nine days behind, so the window always ends about nine days back. Weekly is the honest maximum, not a convenience.',
