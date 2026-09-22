@@ -346,6 +346,26 @@ check('T7 a register that disagrees with the frozen count is shown, not hidden',
     .includes('(the register holds 54)'));
 check('T8 the funnel notes print the floor and ratio the way the pages do (0.20, 0.60)',
   B.funnelSteps(w37)[2].note.includes('0.20') && B.funnelSteps(w37)[3].note.includes('0.60'));
+// A superseding tick (e.g. 2026-W37-r2) never issues: tick.ts issues on new
+// ticks only. "Alternate ticks" would give it the wrong reason.
+const r2 = { ...w37, tick: '2026-W37-r2', claims: { ...w37.claims, issued_on_this_tick: null,
+  on_register: { ...w37.claims.on_register, claims: 0, complexes: 0, verdicts_without_claims: 295 } },
+  supersession: { current: true, superseded_by: null, supersedes: '2026-W37' } };
+const ccr2 = B.claimsCoverageText(r2);
+check('T9 a superseding tick says it supersedes and issues none of its own — never "alternate ticks"',
+  ccr2 === 'Tick 2026-W37-r2 supersedes tick 2026-W37 and, like every superseding tick, issues no claims of its own. Its 295 verdicts are published without one.',
+  ccr2);
+// W37 has no complex without a usable FIRMS day; a tick that has some must
+// not count them under "a rate of 0.20 or less".
+const hnoGap = B.heatNotObservableText({ ...w37, heat_not_observable: { ...w37.heat_not_observable,
+  complexes: 150, with_baseline_detection: 63, without_baseline_detection: 78, without_usable_firms_days: 9 } });
+check('T10 complexes with no usable FIRMS day are not counted as "a rate of 0.20 or less"',
+  hnoGap.startsWith('141 observed complexes have a baseline heat-detection rate of 0.20 or less')
+  && hnoGap.endsWith('9 observed complexes had no usable FIRMS day in the baseline or the window, so no heat-detection rate to read: also reported as heat not observable, never as heat steady.'),
+  hnoGap);
+check('T11 W37 (no FIRMS gap) renders exactly the sentence the pages agree with',
+  B.heatNotObservableText({ ...w37, heat_not_observable: { ...w37.heat_not_observable, without_usable_firms_days: 0 } })
+    === '141 observed complexes have a baseline heat-detection rate of 0.20 or less — 63 of them had detection days in the baseline and 78 had none. Either way that is too little heat to fall from: reported as heat not observable, never as heat steady.');
 
 // ── 14 · no rendered sentence contradicts the published tick ────────────
 // The W37 agents flagged these; the board must not say them again. Scanned
@@ -358,6 +378,7 @@ const BOARD_TSX = readFileSync(join(WEB, 'components/intel/workspaces/realityChe
 const rendered = [
   ...strings, hno, cc,
   B.claimsCoverageText({ ...w37, claims: { ...w37.claims, issued_on_this_tick: null } }),
+  ccr2, hnoGap,
   B.robustnessNote(masked), B.robustnessNote(flipped), ...B.funnelSteps(w37).map((f) => f.note),
   BOARD_TSX,
 ].map((x) => String(x).toLowerCase().replace(/\s+/g, ' '));

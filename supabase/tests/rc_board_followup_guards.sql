@@ -45,7 +45,8 @@
 --           robustness list and the drill-down echo included — while Pro
 --           still sees them, and the row count still adds up
 --   C1–C5   the counts the board's copy renders: heat-not-observable split
---           (141 · 63 · 78 on W37) and the claims on the register (55 claims
+--           by why (141 = 63 + 78 at or below the floor + 0 with no usable
+--           FIRMS day, on W37) and the claims on the register (55 claims
 --           on 19 complexes, 276 verdicts with none), claims only on
 --           thermally dark complexes, no US state on any row
 --   X1–X2   the re-issued accessor's empty state is unchanged
@@ -420,22 +421,38 @@ r_results := r_results || jsonb_build_object('id', 'L7',
 
 -- ═══ C · the counts the copy renders ═════════════════════════════════
 r_results := r_results || jsonb_build_object('id', 'C1',
-  'what', 'heat not observable = observed − heat-observable, split into with / without baseline detection days, counted from the verdicts',
+  'what', 'heat not observable = observed − heat-observable, split into rate at or below the floor with / without baseline detection days, and no usable FIRMS day — counted from the verdicts',
   'ok', (v_pro#>>'{heat_not_observable,complexes}')::int
           = (v_pro#>>'{funnel,observed,complexes}')::int - (v_pro#>>'{funnel,heat_observable,complexes}')::int
     AND (v_pro#>>'{heat_not_observable,with_baseline_detection}')::int
           + (v_pro#>>'{heat_not_observable,without_baseline_detection}')::int
+          + (v_pro#>>'{heat_not_observable,without_usable_firms_days}')::int
           = (v_pro#>>'{heat_not_observable,complexes}')::int
     AND (v_pro#>>'{heat_not_observable,with_baseline_detection}')::int
           = (SELECT count(*) FROM public.reality_check_site_verdicts
               WHERE run_id = v_run AND coverage_state = 'OBSERVED'
-                AND heat_state = 'HEAT_NOT_OBSERVABLE' AND baseline_heat_days > 0));
+                AND heat_state = 'HEAT_NOT_OBSERVABLE' AND baseline_heat_days > 0
+                AND baseline_heat_rate <= (v_pro#>>'{parameters,heat_observable_floor}')::numeric)
+    AND (v_pro#>>'{heat_not_observable,without_usable_firms_days}')::int
+          = (SELECT count(*) FROM public.reality_check_site_verdicts
+              WHERE run_id = v_run AND coverage_state = 'OBSERVED'
+                AND heat_state = 'HEAT_NOT_OBSERVABLE'
+                AND (baseline_heat_rate IS NULL
+                     OR baseline_heat_rate > (v_pro#>>'{parameters,heat_observable_floor}')::numeric))
+    -- and every one of those really lacks a usable FIRMS day (classify.ts heatState)
+    AND NOT EXISTS (SELECT 1 FROM public.reality_check_site_verdicts
+                     WHERE run_id = v_run AND coverage_state = 'OBSERVED'
+                       AND heat_state = 'HEAT_NOT_OBSERVABLE'
+                       AND (baseline_heat_rate IS NULL
+                            OR baseline_heat_rate > (v_pro#>>'{parameters,heat_observable_floor}')::numeric)
+                       AND baseline_firms_days > 0 AND window_firms_days > 0));
 
 r_results := r_results || jsonb_build_object('id', 'C2',
-  'what', 'on W37: 141 heat-not-observable complexes, 63 of them with baseline detection days, 78 without',
+  'what', 'on W37: 141 heat-not-observable complexes, all at or below the 0.20 floor — 63 of them with baseline detection days, 78 without, 0 without a usable FIRMS day',
   'ok', (v_pro#>>'{heat_not_observable,complexes}') = '141'
     AND (v_pro#>>'{heat_not_observable,with_baseline_detection}') = '63'
-    AND (v_pro#>>'{heat_not_observable,without_baseline_detection}') = '78',
+    AND (v_pro#>>'{heat_not_observable,without_baseline_detection}') = '78'
+    AND (v_pro#>>'{heat_not_observable,without_usable_firms_days}') = '0',
   'detail', v_pro->>'heat_not_observable');
 
 r_results := r_results || jsonb_build_object('id', 'C3',

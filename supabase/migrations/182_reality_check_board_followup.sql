@@ -243,6 +243,7 @@ DECLARE
   v_hno_rows integer;
   v_hno_some integer;
   v_hno_none integer;
+  v_hno_nor  integer;
   v_reg_n    integer;
   v_reg_cx   integer;
 BEGIN
@@ -300,13 +301,23 @@ BEGIN
   END;
 
   -- ── what "heat not observable" is made of, counted from the tick ────
-  -- Observed complexes whose baseline heat-detection RATE is at or below
-  -- the floor. Many have detection days — too few to fall from, not none.
+  -- Observed complexes the classifier put in HEAT_NOT_OBSERVABLE, split by
+  -- WHY: a baseline heat-detection RATE at or below the tick's floor (many
+  -- of those have detection days — too few to fall from, not none), or no
+  -- usable FIRMS day to take a rate from (none in the baseline, or none in
+  -- the window — classify.ts heatState). The board's sentence says "a rate
+  -- of 0.20 or less" only of the first group, so it stays true on a tick
+  -- where a FIRMS gap, not a low rate, put a complex here. (W37: 141 = 63 +
+  -- 78 + 0.)
   SELECT count(*),
          coalesce(sum(member_count), 0),
-         count(*) FILTER (WHERE baseline_heat_days > 0),
-         count(*) FILTER (WHERE baseline_heat_days = 0)
-    INTO v_hno, v_hno_rows, v_hno_some, v_hno_none
+         count(*) FILTER (WHERE baseline_heat_rate <= (i.parameters->>'heat_observable_floor')::numeric
+                            AND baseline_heat_days > 0),
+         count(*) FILTER (WHERE baseline_heat_rate <= (i.parameters->>'heat_observable_floor')::numeric
+                            AND baseline_heat_days = 0),
+         count(*) FILTER (WHERE baseline_heat_rate IS NULL
+                             OR NOT (baseline_heat_rate <= (i.parameters->>'heat_observable_floor')::numeric))
+    INTO v_hno, v_hno_rows, v_hno_some, v_hno_none, v_hno_nor
     FROM public.reality_check_site_verdicts
    WHERE run_id = i.run_id
      AND coverage_state = 'OBSERVED'
@@ -518,8 +529,9 @@ BEGIN
       'rows', v_hno_rows,
       'with_baseline_detection', v_hno_some,
       'without_baseline_detection', v_hno_none,
+      'without_usable_firms_days', v_hno_nor,
       'floor', i.parameters->'heat_observable_floor',
-      'rule', 'Observed complexes whose baseline heat-detection rate (days with a FIRMS detection over FIRMS days) is at or below the floor: too little heat to fall from. Many had detection days; the rate, not the count, puts them here. Reported as heat not observable, never as heat steady.'),
+      'rule', 'Observed complexes whose baseline heat-detection rate (days with a FIRMS detection over FIRMS days) is at or below the floor — too little heat to fall from; many had detection days, and the rate, not the count, puts them here (with / without baseline detection) — plus any with no usable FIRMS day in the baseline or the window, which have no rate at all (without_usable_firms_days). Reported as heat not observable, never as heat steady.'),
     'counts_by_verdict', i.counts_by_verdict,
     'robustness', v_robust,
     'claims', jsonb_build_object(
@@ -530,7 +542,7 @@ BEGIN
         'claims', v_reg_n,
         'complexes', v_reg_cx,
         'verdicts_without_claims', i.watched_complexes - v_reg_cx,
-        'rule', 'Counted from the calibration ledger''s register (source refinery-rc, issued by this tick). Claims issue on the thermally dark complexes, on alternate ticks; every other verdict on the tick carries none.')),
+        'rule', 'Counted from the calibration ledger''s register (source refinery-rc, issued by this tick). Claims issue only on refuted and lead complexes (thermally dark, with a verdict), only on alternate new ticks and never on a superseding tick; every other verdict on the tick carries none.')),
     'coverage', jsonb_build_object(
       'bm_nights_used', to_jsonb(r.bm_nights_used),
       'firms_days_used', to_jsonb(r.firms_days_used),
@@ -695,9 +707,10 @@ WITH t AS (
               OR (lead.rname IS NOT NULL AND (strpos(t.mem::text, lead.rname) > 0 OR strpos(t.pub::text, lead.rname) > 0))
               OR (lead.dname IS NOT NULL AND (strpos(t.mem::text, lead.dname) > 0 OR strpos(t.pub::text, lead.dname) > 0)))
   UNION ALL
-  SELECT 11, 'W37 heat not observable: complexes · with baseline detection days · without', '141 · 63 · 78',
+  SELECT 11, 'W37 heat not observable: complexes · rate <= floor with baseline detection days · without · no usable FIRMS day', '141 · 63 · 78 · 0',
          (SELECT (pro#>>'{heat_not_observable,complexes}') || ' · ' || (pro#>>'{heat_not_observable,with_baseline_detection}')
-                 || ' · ' || (pro#>>'{heat_not_observable,without_baseline_detection}') FROM t)
+                 || ' · ' || (pro#>>'{heat_not_observable,without_baseline_detection}')
+                 || ' · ' || (pro#>>'{heat_not_observable,without_usable_firms_days}') FROM t)
   UNION ALL
   SELECT 12, 'W37 claims on the register: claims · complexes · verdicts without a claim', '55 · 19 · 276',
          (SELECT (pro#>>'{claims,on_register,claims}') || ' · ' || (pro#>>'{claims,on_register,complexes}')

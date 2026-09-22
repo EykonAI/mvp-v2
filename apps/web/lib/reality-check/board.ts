@@ -140,6 +140,12 @@ export interface TickPayload {
   heat_not_observable?: {
     complexes: number; rows: number;
     with_baseline_detection: number; without_baseline_detection: number;
+    /**
+     * Heat not observable for want of a usable FIRMS day (none in the
+     * baseline, or none in the window), not for a low rate: no rate to
+     * report. The two counts above cover only rates at or below the floor.
+     */
+    without_usable_firms_days?: number;
     floor: number | string | null; rule: string;
   };
   claims: {
@@ -350,7 +356,15 @@ export function heatNotObservableText(t: TickPayload): string | null {
   const h = t.heat_not_observable;
   const n = h ? h.complexes : t.funnel.observed.complexes - t.funnel.heat_observable.complexes;
   if (!n) return null;
-  const head = `${plural(n, 'observed complex has', 'observed complexes have')} a baseline heat-detection rate of ${floor} or less`;
+  // A complex with no usable FIRMS day has no rate at all: it is never
+  // counted under "a rate of 0.20 or less" (tick 2026-W37 has none).
+  const noRate = h?.without_usable_firms_days ?? 0;
+  const noRateLine = noRate > 0
+    ? `${plural(noRate, 'observed complex', 'observed complexes')} had no usable FIRMS day in the baseline or the window, so no heat-detection rate to read: also reported as heat not observable, never as heat steady.`
+    : '';
+  const rated = n - noRate;
+  if (rated <= 0) return noRateLine;
+  const head = `${plural(rated, 'observed complex has', 'observed complexes have')} a baseline heat-detection rate of ${floor} or less`;
   const tail = 'too little heat to fall from: reported as heat not observable, never as heat steady.';
   if (!h) return `${head} — ${tail}`;
   const split = h.with_baseline_detection === 0
@@ -358,7 +372,7 @@ export function heatNotObservableText(t: TickPayload): string | null {
     : h.without_baseline_detection === 0
       ? `every one of them had detection days in the baseline, just not enough`
       : `${h.with_baseline_detection} of them had detection days in the baseline and ${h.without_baseline_detection} had none`;
-  return `${head} — ${split}. Either way that is ${tail}`;
+  return `${head} — ${split}. Either way that is ${tail}${noRateLine ? ` ${noRateLine}` : ''}`;
 }
 
 /**
@@ -371,6 +385,13 @@ export function claimsCoverageText(t: TickPayload): string {
   const watched = t.funnel.watched.complexes;
   const issued = t.claims.issued_on_this_tick;
   if (issued === null || issued === undefined) {
+    // A superseding tick never issues (lib/reality-check/tick.ts issues on
+    // plan.kind 'new' only): "alternate ticks" would be the wrong reason, on
+    // the very tick a late night produces (e.g. 2026-W37-r2).
+    const prev = t.supersession?.supersedes;
+    if (prev) {
+      return `Tick ${t.tick} supersedes tick ${prev} and, like every superseding tick, issues no claims of its own. Its ${plural(watched, 'verdict is', 'verdicts are')} published without one.`;
+    }
     return `Tick ${t.tick} issued no claims: claims issue on alternate ticks only, so that no two claims of one family on one complex share a night. Its ${plural(watched, 'verdict is', 'verdicts are')} published without one.`;
   }
   const reg = t.claims.on_register;
