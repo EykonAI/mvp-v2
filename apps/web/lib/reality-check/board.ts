@@ -40,7 +40,12 @@ export interface TickLocation {
   iso_country: string | null;
   country: string | null;
   city: string | null;
-  us_state: string | null;
+  /**
+   * Not printed (migration 182). The one-pagers print no US state, and §3.3's
+   * Location is ISO country, city where the registry holds one, and
+   * coordinates. A payload from before 182 may still carry it; nothing reads it.
+   */
+  us_state?: string | null;
   multi_country: boolean;
   latitude: number | null;
   longitude: number | null;
@@ -48,9 +53,18 @@ export interface TickLocation {
 }
 
 export interface BoardRow {
-  cluster_key: string;
+  /**
+   * The row's identity on the page. The cluster key where it may be shown;
+   * an opaque 'withheld-lead-<n>' for a lead below Pro (migration 182), whose
+   * key is withheld because a cluster key is a coordinate cell.
+   */
+  row_key?: string;
+  /** null below Pro on a lead row (§5, D-12). */
+  cluster_key: string | null;
   site_name: string | null;
   name_masked: boolean;
+  /** Where a sourced display name came from (migration 182); null when every name is the registry's own. */
+  name_sources?: string[] | null;
   member_count: number;
   member_names: string[] | null;
   members: string[] | null;
@@ -115,12 +129,25 @@ export interface TickPayload {
     column: string; min_px_hq: number;
     observed: number; heat_observable: number; thermally_dark: number;
     refuted: number; lead: number;
-    not_robust: Array<{ cluster_key: string; verdict: Verdict; robustness_verdict: Verdict }>;
+    /** A lead's key is null below Pro (migration 182), with name_masked set. */
+    not_robust: Array<{ cluster_key: string | null; verdict: Verdict; robustness_verdict: Verdict; name_masked?: boolean }>;
+  };
+  /**
+   * What "heat not observable" is made of, counted from the tick's verdicts
+   * (migration 182): observed complexes whose baseline heat-detection RATE is
+   * at or below the floor — many of them with detection days.
+   */
+  heat_not_observable?: {
+    complexes: number; rows: number;
+    with_baseline_detection: number; without_baseline_detection: number;
+    floor: number | string | null; rule: string;
   };
   claims: {
     issued_on_this_tick: number | null;
     at_publication: WalkforwardBlock | null;
     live: WalkforwardBlock | null;
+    /** The claims this tick put on the ledger's register (migration 182). */
+    on_register?: { claims: number; complexes: number; verdicts_without_claims: number; rule: string };
   };
   coverage: {
     bm_nights_used: string[] | null;
@@ -147,8 +174,8 @@ export interface TickPayload {
     refuted: number; lead: number; current: boolean;
   }>;
   rows: BoardRow[];
-  mask: { tier: MaskTier; lead_names: string; drilldown: string; archive: string };
-  drilldown?: { cluster_key: string; nights?: DrilldownNight[]; withheld?: boolean; reason?: string };
+  mask: { tier: MaskTier; lead_names: string; lead_identity?: string; drilldown: string; archive: string };
+  drilldown?: { cluster_key: string | null; nights?: DrilldownNight[]; withheld?: boolean; reason?: string };
   as_of: string;
 }
 
@@ -201,7 +228,7 @@ export const VERDICTS: Record<Verdict, VerdictPresentation> = {
   REFUTED: {
     label: 'Refuted',
     banner: 'Refuted — the apparent outage does not hold',
-    gloss: 'Thermal went quiet while the site stayed lit. A heat-only monitor raises this as an outage; two instruments refuse it.',
+    gloss: 'Heat detections fell while the site stayed lit. A heat-only monitor raises this as an outage; two instruments refuse it.',
     tone: 'refuted', rank: 0, withheld: false,
   },
   LEAD: {
@@ -242,8 +269,8 @@ export const VERDICTS: Record<Verdict, VerdictPresentation> = {
   },
   VOID_HEAT_NOT_OBSERVABLE: {
     label: 'Heat not observable',
-    banner: 'Withheld — no thermal baseline to fall from',
-    gloss: 'The baseline heat rate is at or below the observability floor, so there is no heat to lose. Reported as not observable, never as heat steady.',
+    banner: 'Withheld — too little baseline heat to fall from',
+    gloss: 'The baseline heat-detection rate is at or below the observability floor. The site may have had detection days, but too few for a fall to mean anything. Reported as not observable, never as heat steady.',
     tone: 'void', rank: 7, withheld: true,
   },
 };
@@ -254,13 +281,36 @@ export const HEAT_STATES: Record<string, string> = {
   HEAT_NOT_OBSERVABLE: 'Heat not observable',
 };
 
+/**
+ * A row's identity on the page: the accessor's row_key, else the cluster key
+ * (a payload from before migration 182). Never empty, so React keys and the
+ * selection never collide on a masked row.
+ */
+export function rowKey(r: Pick<BoardRow, 'row_key' | 'cluster_key'>): string {
+  return r.row_key ?? r.cluster_key ?? 'withheld';
+}
+
 /** The board order: refuted first, lead after it, silence last, then by key. */
-export function sortRows(rows: BoardRow[]): BoardRow[] {
+export function sortRows<T extends Pick<BoardRow, 'verdict' | 'row_key' | 'cluster_key'>>(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
     const r = VERDICTS[a.verdict].rank - VERDICTS[b.verdict].rank;
     if (r !== 0) return r;
-    return a.cluster_key < b.cluster_key ? -1 : a.cluster_key > b.cluster_key ? 1 : 0;
+    const ka = rowKey(a);
+    const kb = rowKey(b);
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
   });
+}
+
+/**
+ * The Location cell: city where the registry holds one, then the country.
+ * No US state, for any row (migration 182): the one-pagers print none, and
+ * §3.3's Location is ISO country, city and coordinates — so the board prints
+ * the state for none rather than for some.
+ */
+export function placeLabel(loc: TickLocation | null | undefined): string | null {
+  if (!loc) return null;
+  const parts = [loc.city, loc.country ?? loc.iso_country].filter((p): p is string => !!p);
+  return parts.length ? parts.join(', ') : null;
 }
 
 // ─── numbers ─────────────────────────────────────────────────────────────
@@ -277,6 +327,58 @@ export function num2(v: number | null | undefined): string {
 /** A rate as a whole percent, or an em dash. */
 export function pct(v: number | null | undefined): string {
   return v === null || v === undefined || !Number.isFinite(Number(v)) ? '—' : `${Math.round(Number(v) * 100)}%`;
+}
+
+/** A parameter as a number, whatever shape the JSON carried it in. */
+function num(v: unknown, fallback: number): number {
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * The heat-not-observable sentence, every number from the tick. The rule is a
+ * baseline heat-detection RATE at or below the floor — many of these sites DO
+ * have baseline detection days, so "no thermal baseline" would be false
+ * (tick 2026-W37: 63 of 141). Null when nothing is in that state.
+ */
+export function heatNotObservableText(t: TickPayload): string | null {
+  const floor = num2(num(t.heat_not_observable?.floor ?? t.parameters.heat_observable_floor, 0.2));
+  const h = t.heat_not_observable;
+  const n = h ? h.complexes : t.funnel.observed.complexes - t.funnel.heat_observable.complexes;
+  if (!n) return null;
+  const head = `${plural(n, 'observed complex has', 'observed complexes have')} a baseline heat-detection rate of ${floor} or less`;
+  const tail = 'too little heat to fall from: reported as heat not observable, never as heat steady.';
+  if (!h) return `${head} — ${tail}`;
+  const split = h.with_baseline_detection === 0
+    ? 'none of them had a detection day in the baseline'
+    : h.without_baseline_detection === 0
+      ? `every one of them had detection days in the baseline, just not enough`
+      : `${h.with_baseline_detection} of them had detection days in the baseline and ${h.without_baseline_detection} had none`;
+  return `${head} — ${split}. Either way that is ${tail}`;
+}
+
+/**
+ * The claims sentence, every number from the tick and the register. Claims
+ * issue only on the thermally dark complexes, and only on alternate ticks,
+ * so "every verdict is a claim" would be false (tick 2026-W37: 55 claims on
+ * 19 complexes; 276 of 295 verdicts carry none).
+ */
+export function claimsCoverageText(t: TickPayload): string {
+  const watched = t.funnel.watched.complexes;
+  const issued = t.claims.issued_on_this_tick;
+  if (issued === null || issued === undefined) {
+    return `Tick ${t.tick} issued no claims: claims issue on alternate ticks only, so that no two claims of one family on one complex share a night. Its ${plural(watched, 'verdict is', 'verdicts are')} published without one.`;
+  }
+  const reg = t.claims.on_register;
+  if (!reg) {
+    return `Tick ${t.tick} issued ${plural(issued, 'claim', 'claims')}, on its thermally dark complexes only; its other verdicts carry none.`;
+  }
+  const mismatch = reg.claims !== issued ? ` (the register holds ${reg.claims})` : '';
+  return `Claims are issued only on the thermally dark complexes. Tick ${t.tick} issued ${plural(issued, 'claim', 'claims')}${mismatch} on ${plural(reg.complexes, 'complex', 'complexes')}; the other ${reg.verdicts_without_claims} of its ${plural(watched, 'verdict', 'verdicts')} carry none.`;
 }
 
 /** "07-18 → 08-17", from two ISO dates. Explicit dates, never "30-day". */
@@ -296,9 +398,9 @@ export function funnelSteps(t: TickPayload): FunnelStep[] {
     { key: 'observed', label: 'observed', complexes: f.observed.complexes, rows: f.observed.rows,
       note: `${t.parameters.min_baseline_nights ?? 5}+ baseline and ${t.parameters.min_window_nights ?? 3}+ window usable clear nights carrying a retrieval`, hero: false },
     { key: 'heat_observable', label: 'heat-observable', complexes: f.heat_observable.complexes, rows: f.heat_observable.rows,
-      note: `baseline heat rate above ${t.parameters.heat_observable_floor ?? 0.2} — the rest have too little heat to fall from`, hero: false },
+      note: `baseline heat-detection rate above ${num2(num(t.parameters.heat_observable_floor, 0.2))} — the rest have too little heat to fall from`, hero: false },
     { key: 'thermally_dark', label: 'thermally dark', complexes: f.thermally_dark.complexes, rows: f.thermally_dark.rows,
-      note: `window heat rate below ${t.parameters.heat_down_ratio ?? 0.6} × baseline`, hero: false },
+      note: `window heat-detection rate below ${num2(num(t.parameters.heat_down_ratio, 0.6))} × baseline`, hero: false },
     { key: 'refuted', label: 'refuted', complexes: f.refuted.complexes, rows: f.refuted.rows,
       note: 'thermally dark, but the site stayed lit — the product', hero: true },
   ];
@@ -329,7 +431,10 @@ export function robustnessNote(t: TickPayload): string | null {
   if (flips.length === 0) {
     return `Every verdict on this tick survives the stricter ${t.robustness.column} retrieval (px_hq_3x3 ≥ ${t.robustness.min_px_hq}).`;
   }
-  const names = flips.map((f) => `${f.cluster_key} (${VERDICTS[f.verdict].label} → ${VERDICTS[f.robustness_verdict].label})`);
+  // A lead's key is withheld below Pro (§5, D-12): the flip is still counted
+  // and described, never identified.
+  const names = flips.map((f) =>
+    `${f.cluster_key ?? 'a lead, identity withheld below Pro'} (${VERDICTS[f.verdict].label} → ${VERDICTS[f.robustness_verdict].label})`);
   return `${flips.length} verdict${flips.length === 1 ? '' : 's'} change under the stricter ${t.robustness.column} retrieval: ${names.join(', ')}. A verdict that does not hold on both retrievals is a lead, not a conclusion.`;
 }
 

@@ -272,6 +272,115 @@ check('W1 windowLabel renders both endpoints', B.windowLabel('2026-07-18', '2026
 check('W2 no board string says "30-day" or "14-night"',
   !strings.some((s) => /\b(30-day|14-night)\b/i.test(String(s))));
 
+// ── 11 · the lead mask below Pro (migration 182, §5, D-12) ─────────────
+const masked = {
+  ...tick,
+  robustness: {
+    ...tick.robustness,
+    not_robust: [
+      { cluster_key: null, verdict: 'LEAD', robustness_verdict: 'REFUTED', name_masked: true },
+      { cluster_key: 'RFC-N26-E053-1', verdict: 'LIGHT_DOWN_ONLY', robustness_verdict: 'STEADY', name_masked: false },
+    ],
+  },
+};
+const mn = B.robustnessNote(masked);
+check('M1 a masked lead flip is counted and described, never identified',
+  mn.startsWith('2 verdicts change') && mn.includes('a lead, identity withheld below Pro') && !mn.includes('null'), mn);
+check('M2 a non-lead flip is still named', mn.includes('RFC-N26-E053-1'), mn);
+const rowsMasked = [
+  { row_key: 'withheld-lead-2', cluster_key: null, verdict: 'LEAD' },
+  { row_key: 'RFC-b', cluster_key: 'RFC-b', verdict: 'REFUTED' },
+  { row_key: 'withheld-lead-1', cluster_key: null, verdict: 'LEAD' },
+];
+const sm = B.sortRows(rowsMasked).map((r) => B.rowKey(r));
+check('M3 rows sort and key on row_key, so a masked lead never collides with another',
+  JSON.stringify(sm) === JSON.stringify(['RFC-b', 'withheld-lead-1', 'withheld-lead-2']), sm);
+check('M4 rowKey falls back to the cluster key on a payload from before migration 182',
+  B.rowKey({ cluster_key: 'RFC-x' }) === 'RFC-x');
+
+// ── 12 · the Location cell prints no US state, for any row ──────────────
+check('K1 placeLabel is city, country — no US state even when the payload carries one',
+  B.placeLabel({ city: 'Baytown', us_state: 'TX', country: 'United States', iso_country: 'US' }) === 'Baytown, United States',
+  B.placeLabel({ city: 'Baytown', us_state: 'TX', country: 'United States', iso_country: 'US' }));
+check('K2 placeLabel falls back to the ISO code and is null with nothing to print',
+  B.placeLabel({ city: null, country: null, iso_country: 'NL' }) === 'NL' && B.placeLabel(null) === null
+  && B.placeLabel({ city: null, country: null, iso_country: null }) === null);
+
+// ── 13 · copy rendered from the tick, never typed (tick 2026-W37) ───────
+const w37 = {
+  tick: '2026-W37',
+  parameters: { heat_observable_floor: 0.20, heat_down_ratio: 0.60, min_baseline_nights: 5, min_window_nights: 3 },
+  funnel: {
+    counted_by: 'complex',
+    watched: { complexes: 295, rows: 353 }, observed: { complexes: 228, rows: 277 },
+    heat_observable: { complexes: 87, rows: 122 }, thermally_dark: { complexes: 19, rows: 24 },
+    refuted: { complexes: 17, rows: 22 }, lead: { complexes: 2, rows: 2 }, withheld: { complexes: 0, rows: 0 },
+  },
+  heat_not_observable: { complexes: 141, rows: 155, with_baseline_detection: 63, without_baseline_detection: 78, floor: 0.20, rule: '' },
+  claims: { issued_on_this_tick: 55, at_publication: null, live: null,
+    on_register: { claims: 55, complexes: 19, verdicts_without_claims: 276, rule: '' } },
+  robustness: { column: 'radiance_3x3', min_px_hq: 5, not_robust: [] },
+};
+const hno = B.heatNotObservableText(w37);
+check('T1 heat-not-observable is a RATE at or below the floor, with the split from the tick',
+  hno.startsWith('141 observed complexes have a baseline heat-detection rate of 0.20 or less')
+  && hno.includes('63 of them had detection days in the baseline and 78 had none')
+  && hno.includes('never as heat steady'), hno);
+check('T2 the heat line follows the tick, not a constant',
+  B.heatNotObservableText({ ...w37, heat_not_observable: { ...w37.heat_not_observable, complexes: 7, with_baseline_detection: 2, without_baseline_detection: 5 } })
+    .startsWith('7 observed complexes'));
+check('T3 with nothing heat-not-observable there is no line',
+  B.heatNotObservableText({ ...w37, heat_not_observable: { ...w37.heat_not_observable, complexes: 0, with_baseline_detection: 0, without_baseline_detection: 0 } }) === null);
+check('T4 a payload from before migration 182 still gets a true line (no split, no "no baseline")',
+  /^141 observed complexes have a baseline heat-detection rate of 0\.20 or less — too little heat/.test(
+    B.heatNotObservableText({ ...w37, heat_not_observable: undefined, funnel: { ...w37.funnel } }) ?? ''),
+  B.heatNotObservableText({ ...w37, heat_not_observable: undefined }));
+const cc = B.claimsCoverageText(w37);
+check('T5 the claims line says who carries a claim, with every count from the tick and the register',
+  cc === 'Claims are issued only on the thermally dark complexes. Tick 2026-W37 issued 55 claims on 19 complexes; the other 276 of its 295 verdicts carry none.', cc);
+check('T6 a tick that issued no claims says so, and why',
+  /^Tick 2026-W38 issued no claims: claims issue on alternate ticks only/.test(
+    B.claimsCoverageText({ ...w37, tick: '2026-W38', claims: { ...w37.claims, issued_on_this_tick: null } })));
+check('T7 a register that disagrees with the frozen count is shown, not hidden',
+  B.claimsCoverageText({ ...w37, claims: { ...w37.claims, on_register: { ...w37.claims.on_register, claims: 54 } } })
+    .includes('(the register holds 54)'));
+check('T8 the funnel notes print the floor and ratio the way the pages do (0.20, 0.60)',
+  B.funnelSteps(w37)[2].note.includes('0.20') && B.funnelSteps(w37)[3].note.includes('0.60'));
+
+// ── 14 · no rendered sentence contradicts the published tick ────────────
+// The W37 agents flagged these; the board must not say them again. Scanned
+// over every string board.ts can render AND the board component's JSX text
+// (comments stripped — the rule is about what reaches a screen).
+const BOARD_TSX = readFileSync(join(WEB, 'components/intel/workspaces/realityCheck/RefineryBoard.tsx'), 'utf8')
+  .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/^\s*\/\/.*$/gm, '');
+const rendered = [
+  ...strings, hno, cc,
+  B.claimsCoverageText({ ...w37, claims: { ...w37.claims, issued_on_this_tick: null } }),
+  B.robustnessNote(masked), B.robustnessNote(flipped), ...B.funnelSteps(w37).map((f) => f.note),
+  BOARD_TSX,
+].map((x) => String(x).toLowerCase().replace(/\s+/g, ' '));
+for (const phrase of ['this week', 'stopped flaring', 'forward-testable claim', 'no thermal baseline',
+                      'every verdict on this board', 'quiet week', 'went quiet', 'us_state']) {
+  check(`B1 no board sentence says "${phrase}"`, !rendered.some((x) => x.includes(phrase)), phrase);
+}
+check('B2 the refutation is described in §2.2 terms ("heat detections fell")',
+  B.VERDICTS.REFUTED.gloss.startsWith('Heat detections fell') && BOARD_TSX.includes('heat detections fell while the site stayed lit'));
+check('B3 the board names the tick by its slug where it used to say "this week"',
+  BOARD_TSX.includes('On tick {t.tick} a thermal-only feed')
+  && BOARD_TSX.includes('Nothing was thermally dark on tick {t.tick}'));
+
+// ── 15 · the verdict column stays on screen (fix 5) ─────────────────────
+const CSS = readFileSync(join(WEB, 'app/globals.css'), 'utf8');
+check('F10 the Verdict header and cell carry the pinned-column class',
+  (BOARD_TSX.match(/className="rc-col-verdict"/g) ?? []).length === 2);
+check('F11 the pinned column is sticky at the scroller\'s right edge over an opaque background',
+  /\.rc-table \.rc-col-verdict \{[^}]*position: sticky;[^}]*right: 0;[^}]*background: var\(--bg-navy\)/.test(CSS));
+check('F12 row hover and selection still out-rank the pinned background (specificity)',
+  /\.rc-table tbody tr:hover td \{ background: var\(--bg-raised\); \}/.test(CSS)
+  && CSS.indexOf('.rc-table .rc-col-verdict {') < CSS.indexOf('.rc-table tbody tr:hover td'));
+
 // ── report ──────────────────────────────────────────────────────────────
 if (fails.length) {
   console.error(`test-rc-board: ${fails.length} FAILED of ${pass + fails.length}`);
