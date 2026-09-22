@@ -319,6 +319,35 @@ export function placeLabel(loc: TickLocation | null | undefined): string | null 
   return parts.length ? parts.join(', ') : null;
 }
 
+/**
+ * The Location cell's coordinates, in the pages' form and the form an
+ * unnamed site's name already uses ("Unnamed site (35.065 N, 106.652 W)"):
+ * hemisphere letters, never a signed decimal, so one row never prints the
+ * same point two ways. Four decimals — the precision the accessor sends —
+ * so nothing is rounded twice. Null when either coordinate is missing.
+ */
+export function coordLabel(lat: number | null | undefined, lon: number | null | undefined): string | null {
+  const la = Number(lat);
+  const lo = Number(lon);
+  if (lat === null || lat === undefined || lon === null || lon === undefined
+      || !Number.isFinite(la) || !Number.isFinite(lo)) return null;
+  return `${Math.abs(la).toFixed(4)} ${la < 0 ? 'S' : 'N'}, ${Math.abs(lo).toFixed(4)} ${lo < 0 ? 'W' : 'E'}`;
+}
+
+/**
+ * A stored threshold, ratio or floor, printed the way the one-pagers print it
+ * (0.20, 0.60) everywhere on the board — the tick band, the funnel, the
+ * drill-down and the method — so one page never shows 0.6 and 0.60 for the
+ * same parameter. Never rounded away: a value stored with more decimals
+ * keeps them. An em dash when the tick does not carry it.
+ */
+export function paramNum(v: unknown): string {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  if (!Number.isFinite(n)) return '—';
+  const frac = String(n).split('.')[1] ?? '';
+  return n.toFixed(Math.min(6, Math.max(2, frac.length)));
+}
+
 // ─── numbers ─────────────────────────────────────────────────────────────
 /**
  * One decimal, or an em dash. NEVER a 0 stand-in: a null here means the
@@ -352,7 +381,7 @@ function plural(n: number, one: string, many: string): string {
  * (tick 2026-W37: 63 of 141). Null when nothing is in that state.
  */
 export function heatNotObservableText(t: TickPayload): string | null {
-  const floor = num2(num(t.heat_not_observable?.floor ?? t.parameters.heat_observable_floor, 0.2));
+  const floor = paramNum(num(t.heat_not_observable?.floor ?? t.parameters.heat_observable_floor, 0.2));
   const h = t.heat_not_observable;
   const n = h ? h.complexes : t.funnel.observed.complexes - t.funnel.heat_observable.complexes;
   if (!n) return null;
@@ -419,9 +448,9 @@ export function funnelSteps(t: TickPayload): FunnelStep[] {
     { key: 'observed', label: 'observed', complexes: f.observed.complexes, rows: f.observed.rows,
       note: `${t.parameters.min_baseline_nights ?? 5}+ baseline and ${t.parameters.min_window_nights ?? 3}+ window usable clear nights carrying a retrieval`, hero: false },
     { key: 'heat_observable', label: 'heat-observable', complexes: f.heat_observable.complexes, rows: f.heat_observable.rows,
-      note: `baseline heat-detection rate above ${num2(num(t.parameters.heat_observable_floor, 0.2))} — the rest have too little heat to fall from`, hero: false },
+      note: `baseline heat-detection rate above ${paramNum(num(t.parameters.heat_observable_floor, 0.2))} — the rest have too little heat to fall from`, hero: false },
     { key: 'thermally_dark', label: 'thermally dark', complexes: f.thermally_dark.complexes, rows: f.thermally_dark.rows,
-      note: `window heat-detection rate below ${num2(num(t.parameters.heat_down_ratio, 0.6))} × baseline`, hero: false },
+      note: `window heat-detection rate below ${paramNum(num(t.parameters.heat_down_ratio, 0.6))} × baseline`, hero: false },
     { key: 'refuted', label: 'refuted', complexes: f.refuted.complexes, rows: f.refuted.rows,
       note: 'thermally dark, but the site stayed lit — the product', hero: true },
   ];
@@ -446,17 +475,62 @@ export function eliminationShare(t: TickPayload): number | null {
   return t.funnel.refuted.complexes / dark;
 }
 
-/** D-13: the one-line robustness note, or null when nothing flips. */
+/**
+ * D-13: the robustness note, or null when nothing flips.
+ *
+ * Two rules from the published tick (2026-W37) shape it:
+ *   - "lead" is a §2.2 term — heat AND light down. Most flips are not leads
+ *     (W37: 7 flips, 1 of them a lead; 5 are Light down only ↔ Steady), so
+ *     the consequence of a flip is "not a conclusion", never "a lead". The
+ *     D-13 line — light drop holds on the single pixel, not on the 3×3 —
+ *     is said of a flipping LEAD only, by name where the tier may see it.
+ *   - Below Pro a lead's flip is counted and described, never identified,
+ *     and never PLACED: it goes after every identified flip, because its
+ *     position in a key-ordered list would bracket its cluster key (a
+ *     coordinate cell) between its neighbours'.
+ */
 export function robustnessNote(t: TickPayload): string | null {
   const flips = t.robustness.not_robust ?? [];
+  const col = t.robustness.column;
   if (flips.length === 0) {
-    return `Every verdict on this tick survives the stricter ${t.robustness.column} retrieval (px_hq_3x3 ≥ ${t.robustness.min_px_hq}).`;
+    return `Every verdict on this tick survives the stricter ${col} retrieval (px_hq_3x3 ≥ ${t.robustness.min_px_hq}).`;
   }
-  // A lead's key is withheld below Pro (§5, D-12): the flip is still counted
-  // and described, never identified.
-  const names = flips.map((f) =>
-    `${f.cluster_key ?? 'a lead, identity withheld below Pro'} (${VERDICTS[f.verdict].label} → ${VERDICTS[f.robustness_verdict].label})`);
-  return `${flips.length} verdict${flips.length === 1 ? '' : 's'} change under the stricter ${t.robustness.column} retrieval: ${names.join(', ')}. A verdict that does not hold on both retrievals is a lead, not a conclusion.`;
+  const move = (f: { verdict: Verdict; robustness_verdict: Verdict }) =>
+    `${VERDICTS[f.verdict].label} → ${VERDICTS[f.robustness_verdict].label}`;
+  const identified = flips.filter((f) => f.cluster_key);
+  const withheld = flips.filter((f) => !f.cluster_key);
+  const items = [
+    ...identified.map((f) => `${f.cluster_key} (${move(f)})`),
+    ...withheld.map((f) => `a lead, identity withheld below Pro (${move(f)})`),
+  ];
+  let note = `${flips.length} verdict${flips.length === 1 ? '' : 's'} change${flips.length === 1 ? 's' : ''} under the stricter ${col} retrieval: ${items.join(', ')}. Both retrievals are published, and a verdict that does not hold on both is not a conclusion.`;
+  let unnamed = 0;
+  for (const f of [...identified, ...withheld]) {
+    if (!leadLightLost(f.verdict, f.robustness_verdict)) continue;
+    const name = f.cluster_key ? t.rows?.find((r) => r.cluster_key === f.cluster_key)?.site_name : null;
+    const whose = name ? `${name}’s` : f.cluster_key ? `${f.cluster_key}’s`
+      : (unnamed++ === 0 ? 'One lead’s' : 'Another lead’s');
+    note += ` ${leadLightLine(t, whose)}`;
+  }
+  return note;
+}
+
+/**
+ * A LEAD whose light drop the stricter retrieval does not reproduce: the
+ * check reads the complex as lit (Refuted, or Steady). A lead that the check
+ * cannot read at all (a VOID) is not one — nothing was reproduced or refused.
+ */
+export function leadLightLost(verdict: Verdict, robustnessVerdict: Verdict | null | undefined): boolean {
+  return verdict === 'LEAD' && (robustnessVerdict === 'REFUTED' || robustnessVerdict === 'STEADY');
+}
+
+/** D-13's one line, in its own words, for a lead the stricter retrieval does not reproduce. */
+export function leadLightLine(t: TickPayload, whose: string): string {
+  const col = t.robustness.column;
+  const primary = t.parameters?.light_column == null ? null : String(t.parameters.light_column);
+  return (primary === null || primary === 'radiance') && col === 'radiance_3x3'
+    ? `${whose} light drop holds on the single-pixel retrieval, not on the stricter 3×3 one — a lead, not a conclusion.`
+    : `${whose} light drop holds on ${primary}, not on the stricter ${col} — a lead, not a conclusion.`;
 }
 
 // ─── the claims line (D-7) ───────────────────────────────────────────────
@@ -570,7 +644,7 @@ export const MAINTENANCE_DISCLOSURE =
 // ─── the known limits, on the board because there is no methods page ─────
 export const KNOWN_LIMITS: string[] = [
   'Recall is not measured. Every figure here is a false-positive rate: the share of apparent disruptions the second instrument removes. How many genuine shutdowns the method catches is unmeasured on refineries, and no free labelled source exists that could measure it.',
-  'Heat and light are different physics, not different satellites. NASA FIRMS and Black Marble VNP46A2 are both VIIRS-family and see through the same clouds, so a cloud that hides one usually hides the other.',
+  'Heat and light are different physics, partly from the same instrument. NASA FIRMS (VIIRS and MODIS) and Black Marble VNP46A2 (VIIRS) see through the same clouds, so a cloud that hides one usually hides the other.',
   'A thermal detection is a hot pixel. It is not a fire, not a strike, and not a flare stack — and its absence is not an outage.',
   'Lit is not running. Site lighting stays on through a turnaround, so a steady light rules out "the site went dark", never "the site is producing".',
   'The cadence is set by the slowest instrument. Black Marble publishes about nine days behind, so the window always ends about nine days back. Weekly is the honest maximum, not a convenience.',

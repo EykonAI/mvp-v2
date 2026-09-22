@@ -457,13 +457,16 @@ body.intel-view {
    edge over an opaque cell, with a rule marking the seam. On a 13" laptop
    the measurements scroll under it; the verdict stays in view. The row
    hover / selected fills below out-rank this background, so the pinned
-   cell tracks its row. */
+   cell tracks its row. A collapsed-border table paints each cell's border
+   at the cell's UNPINNED position, so the pinned cell draws its own row
+   rule (the second inset shadow) — without it the verdict column reads as
+   one unruled block, detached from the rows it judges. */
 .rc-table .rc-col-verdict {
   position: sticky; right: 0; z-index: 1;
   background: var(--bg-navy);
-  box-shadow: inset 1px 0 0 var(--rule);
+  box-shadow: inset 1px 0 0 var(--rule), inset 0 -1px 0 var(--rule-soft);
 }
-.rc-table thead .rc-col-verdict { z-index: 2; }
+.rc-table thead .rc-col-verdict { z-index: 2; box-shadow: inset 1px 0 0 var(--rule), inset 0 -1px 0 var(--rule); }
 .rc-table tbody tr { cursor: pointer; }
 .rc-table tbody tr:hover td { background: var(--bg-raised); }
 .rc-table tbody tr[data-selected='true'] td { background: var(--bg-hover); }

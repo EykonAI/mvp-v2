@@ -2,8 +2,9 @@
 import { useEffect, useMemo } from 'react';
 import {
   KNOWN_LIMITS, MAINTENANCE_DISCLOSURE, VERDICTS, HEAT_STATES,
-  claimsCoverageText, claimsLine, eliminationShare, funnelSteps, heatNotObservableText,
-  heatStrip, lightStrip, num1, num2, outcomeSplit, pct, placeLabel, robustnessNote,
+  claimsCoverageText, claimsLine, coordLabel, eliminationShare, funnelSteps, heatNotObservableText,
+  heatStrip, leadLightLine, leadLightLost, lightStrip, num1, num2, outcomeSplit, paramNum, pct,
+  placeLabel, robustnessNote,
   rowKey, sortRows, windowLabel,
   type BoardRow, type TickPayload, type TickResponse,
 } from '@/lib/reality-check/board';
@@ -137,7 +138,7 @@ function Board({
         </span>
         <span className="rc-fact">
           <b>{String(t.parameters.statistic)}</b> on {String(t.parameters.light_column)} · threshold{' '}
-          <b>{String(t.parameters.light_down_ratio)}</b>
+          <b>{paramNum(t.parameters.light_down_ratio)}</b>
         </span>
         <span className="rc-fact">
           unit <b>complex</b> ({String(t.parameters.complex_linkage_m)} m)
@@ -324,6 +325,7 @@ function Row({
   // City and country only — the state is printed for no US site, because the
   // one-pagers print none (migration 182).
   const place = placeLabel(loc);
+  const coords = coordLabel(loc?.latitude, loc?.longitude);
   const key = rowKey(r);
 
   const name = r.site_name ?? 'Name withheld below Pro';
@@ -355,17 +357,21 @@ function Row({
         <span className="rc-sub">
           {r.cluster_key ?? 'key withheld below Pro'}
           {r.member_count > 1 && ` · ${r.member_count} sites, counted once`}
+          {/* A display name is not the registry's own; the source is on the
+              drill-down banner, and the row says there is one. */}
+          {r.name_sources && r.name_sources.length > 0 && ' · name sourced outside the registry'}
         </span>
       </td>
       <td>
-        {place ? (
+        {r.name_masked ? (
+          // A masked lead IS in the registry: its location is withheld with
+          // its name and key (§5, D-12), and saying "not in the registry"
+          // would be false.
+          <span className="rc-none">withheld below Pro</span>
+        ) : place ? (
           <>
             <span>{place}</span>
-            {loc?.latitude !== null && loc?.longitude !== null && (
-              <span className="rc-sub">
-                {num2(loc!.latitude)}, {num2(loc!.longitude)}
-              </span>
-            )}
+            {coords && <span className="rc-sub">{coords}</span>}
             {loc?.multi_country && <span className="rc-sub">members in more than one country</span>}
           </>
         ) : (
@@ -421,6 +427,18 @@ function Drilldown({ t, r }: { t: TickPayload; r: BoardRow }) {
   const v = VERDICTS[r.verdict];
   const label = r.site_name ?? r.cluster_key ?? 'Name withheld below Pro';
   const dd = t.drilldown && r.cluster_key !== null && t.drilldown.cluster_key === r.cluster_key ? t.drilldown : null;
+  // The members, each distinct name once with its count: three polygons that
+  // carry one sourced name (Tuban, tick 2026-W37) read as one name and "3
+  // sites", not as the same string four times.
+  const memberList = (() => {
+    if (!r.member_names || r.member_names.length < 2) return null;
+    const counts = new Map<string, number>();
+    for (const n of r.member_names) counts.set(n, (counts.get(n) ?? 0) + 1);
+    return Array.from(counts, ([n, c]) => (c > 1 ? `${n} (${c} sites)` : n)).join(' · ');
+  })();
+  // Below Pro the strips are withheld (§5): say so, rather than invite a
+  // click that can never load them.
+  const stripsWithheld = t.mask?.drilldown !== undefined && t.mask.drilldown !== 'available';
   const nights = dd?.nights ?? [];
   const light = lightStrip(nights);
   const heat = heatStrip(nights);
@@ -433,7 +451,7 @@ function Drilldown({ t, r }: { t: TickPayload; r: BoardRow }) {
         <div className="rc-banner-g">{v.gloss}</div>
         <div className="rc-banner-g rc-mono">
           {label}
-          {r.member_names && r.member_names.length > 1 && ` · ${r.member_names.join(' · ')}`}
+          {memberList && ` · members: ${memberList}`}
         </div>
         {/* A name that is not the registry's own carries its source, on the
             page, where the reader meets the name (migration 182). */}
@@ -448,7 +466,9 @@ function Drilldown({ t, r }: { t: TickPayload; r: BoardRow }) {
             <p className="rc-p">
               {dd?.withheld
                 ? dd.reason
-                : 'Select a row to load its night-by-night strips. The strips come from the same tick as the verdict — they are not recomputed.'}
+                : stripsWithheld
+                  ? 'The night-by-night sensor strips are a Pro view. The measurements beside this are the ones the verdict was read from.'
+                  : 'Select a row to load its night-by-night strips. The strips come from the same tick as the verdict — they are not recomputed.'}
             </p>
           ) : (
             <>
@@ -521,7 +541,7 @@ function Drilldown({ t, r }: { t: TickPayload; r: BoardRow }) {
             <dd>
               {num1(r.light.baseline_median)} → {num1(r.light.window_median)}
             </dd>
-            <dt>Ratio against the {String(t.parameters.light_down_ratio)} threshold</dt>
+            <dt>Ratio against the {paramNum(t.parameters.light_down_ratio)} threshold</dt>
             <dd>{num2(r.light.ratio)}</dd>
             <dt>Baseline range</dt>
             <dd>
@@ -573,8 +593,13 @@ function Drilldown({ t, r }: { t: TickPayload; r: BoardRow }) {
               {t.robustness.column} retrieval (px_hq_3x3 ≥ {t.robustness.min_px_hq}):{' '}
               {VERDICTS[r.verdict].label} on the primary statistic,{' '}
               {r.robustness.verdict ? VERDICTS[r.robustness.verdict].label : '—'} on the check. Both
-              are published. A verdict that holds on one retrieval and not the other is a lead, not
-              a conclusion.
+              are published.{' '}
+              {/* "a lead" is a §2.2 term — heat AND light down — so D-13's
+                  line is said of a lead only, never of a flipping Steady or
+                  Light down only row. */}
+              {leadLightLost(r.verdict, r.robustness.verdict)
+                ? leadLightLine(t, 'Its')
+                : 'A verdict that holds on one retrieval and not the other is not a conclusion.'}
             </p>
           )}
           <p className="rc-p rc-p-top">
@@ -621,15 +646,15 @@ function Method({ t }: { t: TickPayload }) {
         </div>
         <div className="rc-param">
           <dt>Light-down threshold</dt>
-          <dd>below {String(p.light_down_ratio)} × the baseline median</dd>
+          <dd>below {paramNum(p.light_down_ratio)} × the baseline median</dd>
         </div>
         <div className="rc-param">
           <dt>Heat-down threshold</dt>
-          <dd>below {String(p.heat_down_ratio)} × the baseline detection rate</dd>
+          <dd>below {paramNum(p.heat_down_ratio)} × the baseline heat-detection rate</dd>
         </div>
         <div className="rc-param">
           <dt>Heat-observable floor</dt>
-          <dd>baseline heat rate above {String(p.heat_observable_floor)}</dd>
+          <dd>baseline heat-detection rate above {paramNum(p.heat_observable_floor)}</dd>
         </div>
         <div className="rc-param">
           <dt>Night floors</dt>

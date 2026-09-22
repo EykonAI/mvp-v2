@@ -42,8 +42,10 @@
 --           in the facility-id order the claim statements and pages use
 --   L1–L7   the §5 mask below Pro: no W37 lead key, member id, name or
 --           coordinate anywhere in the member or public payload — rows, the
---           robustness list and the drill-down echo included — while Pro
---           still sees them, and the row count still adds up
+--           robustness list and the drill-down echo included — and no
+--           masked flip placed among identified ones in the key-ordered
+--           robustness list (L4), while Pro still sees them, and the row
+--           count still adds up
 --   C1–C5   the counts the board's copy renders: heat-not-observable split
 --           by why (141 = 63 + 78 at or below the floor + 0 with no usable
 --           FIRMS day, on W37) and the claims on the register (55 claims
@@ -392,11 +394,19 @@ r_results := r_results || jsonb_build_object('id', 'L3',
 
 SELECT count(*) INTO v_n FROM jsonb_array_elements(v_mem#>'{robustness,not_robust}') e
  WHERE e->>'verdict' = 'LEAD' AND (e->'cluster_key' <> 'null'::jsonb OR NOT (e->>'name_masked')::boolean);
+-- ...and a masked entry is never placed among the identified ones: in a
+-- key-ordered list its position would bracket its key between its
+-- neighbours'. v_txt = how many masked entries come BEFORE an identified one.
+SELECT count(*)::text INTO v_txt
+  FROM jsonb_array_elements(v_mem#>'{robustness,not_robust}') WITH ORDINALITY AS a(e, o)
+ WHERE (e->>'name_masked')::boolean
+   AND EXISTS (SELECT 1 FROM jsonb_array_elements(v_mem#>'{robustness,not_robust}') WITH ORDINALITY AS b(f, q)
+                WHERE q > a.o AND NOT (f->>'name_masked')::boolean);
 r_results := r_results || jsonb_build_object('id', 'L4',
-  'what', 'the robustness list below Pro keeps every flip but withholds a lead''s key (RFC-N46-W093-1 was printed to every tier)',
-  'ok', v_n = 0
+  'what', 'the robustness list below Pro keeps every flip but withholds a lead''s key (RFC-N46-W093-1 was printed to every tier), and lists a withheld flip after every identified one so its place cannot bracket its key',
+  'ok', v_n = 0 AND v_txt = '0'
     AND jsonb_array_length(v_mem#>'{robustness,not_robust}') = jsonb_array_length(v_pro#>'{robustness,not_robust}'),
-  'detail', format('%s unmasked lead flip(s)', v_n));
+  'detail', format('%s unmasked lead flip(s); %s masked flip(s) placed among identified ones', v_n, v_txt));
 
 SELECT cluster_key INTO v_txt FROM public.reality_check_site_verdicts
  WHERE run_id = v_run AND verdict = 'LEAD' ORDER BY cluster_key LIMIT 1;

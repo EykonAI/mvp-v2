@@ -30,6 +30,8 @@
 --       on the row, in the robustness block's list of verdicts that flip
 --       (RFC-N46-W093-1 on W37), and echoed any key asked for in a withheld
 --       drill-down. A cluster key is a coordinate cell: it identifies a site.
+--       A masked entry is also moved to the end of that key-ordered list, so
+--       its position cannot bracket the key it no longer shows.
 --
 --   4 · ITS COPY TYPED WHAT THE TICK KNOWS. "141 observed complexes have no
 --       thermal baseline" is false (63 of those 141 have baseline detection
@@ -334,6 +336,10 @@ BEGIN
      AND p.context->>'tick_run_id' = i.run_id::text;
 
   -- ── the robustness block, with a lead's key withheld below Pro ──────
+  -- A withheld entry is also never PLACED: the stored list is in cluster-key
+  -- order, so a masked entry left where it was would sit between its
+  -- neighbours' keys and bracket its own (W37: between RFC-N32-E044-1 and
+  -- RFC-N50-W105-1, a latitude band). Below Pro the masked entries go last.
   SELECT i.robustness || jsonb_build_object('not_robust', coalesce((
            SELECT jsonb_agg(CASE WHEN e->>'verdict' = 'LEAD' AND v_tier <> 'pro'
                                  THEN jsonb_build_object('cluster_key', NULL,
@@ -341,7 +347,7 @@ BEGIN
                                                          'robustness_verdict', e->'robustness_verdict',
                                                          'name_masked', true)
                                  ELSE e || jsonb_build_object('name_masked', false) END
-                            ORDER BY o)
+                            ORDER BY (e->>'verdict' = 'LEAD' AND v_tier <> 'pro'), o)
              FROM jsonb_array_elements(i.robustness->'not_robust') WITH ORDINALITY AS a(e, o)),
            '[]'::jsonb))
     INTO v_robust;
