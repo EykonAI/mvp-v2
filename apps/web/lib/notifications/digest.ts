@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { personaLabel, type PersonaId } from '@/lib/intelligence-analyst/personas';
+import { storedComposite } from '@/lib/intel/postureComposite';
 
 // Zero-config persona digest — data layer (PR 2 of 3).
 //
@@ -183,7 +184,7 @@ export async function fetchDigestSources(
       .limit(60),
     supabase
       .from('posture_scores')
-      .select('theatre_slug, composite, computed_at')
+      .select('theatre_slug, composite, imagery, computed_at')
       .gte('computed_at', sinceIso)
       .order('computed_at', { ascending: false })
       .limit(2000),
@@ -202,7 +203,14 @@ export async function fetchDigestSources(
     convergences: (convergencesRes.data as DigestSources['convergences'] | null) ?? [],
     infraEvents: (infraRes.data as DigestSources['infraEvents'] | null) ?? [],
     conflictEvents: (conflictRes.data as DigestSources['conflictEvents'] | null) ?? [],
-    postureRows: (postureRes.data as DigestSources['postureRows'] | null) ?? [],
+    // Every composite goes through storedComposite(): rows written before
+    // IMG-0 carry the fixture imagery term, and comparing them with rows
+    // written after it would report a mover that is only a formula change.
+    postureRows: ((postureRes.data as Array<{ theatre_slug: string; composite: unknown; imagery: unknown; computed_at: string }> | null) ?? []).map(r => ({
+      theatre_slug: r.theatre_slug,
+      composite: storedComposite(r.composite, r.imagery),
+      computed_at: r.computed_at,
+    })),
     errors,
   };
 }

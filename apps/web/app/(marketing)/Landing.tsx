@@ -495,7 +495,7 @@ export function Landing() {
               ['IM-02', 'Maritime Tracker', 'AIS vessel positions, vessel metadata, port-call history, shadow-fleet flags.'],
               ['IM-03', 'Aviation Tracker', 'ADS-B with military-adjacent callsign detection and squawk anomalies.'],
               ['IM-04', 'Conflict Feed', 'GDELT 2.0 events with escalation scoring and territorial-control deltas.'],
-              ['IM-05', 'Satellite Watch', 'Sentinel-2 imagery with change-detection pins over user watchlists.'],
+              ['IM-05', 'Satellite Watch · ROADMAP', 'Sentinel-2 imagery with change-detection pins over user watchlists.'],
               ['IM-06', 'Weather & Environmental Layer', 'Storm tracks, wildfires, and disruption overlays.'],
             ]}
           />

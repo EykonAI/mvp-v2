@@ -331,7 +331,7 @@ export const CLAUDE_TOOLS: Anthropic.Tool[] = [
   // ── Intelligence Center ────────────────────────────────────
   {
     name: 'query_posture_scores',
-    description: 'Most recent posture_scores rows per theatre. Returns composite + 5-domain sub-scores.',
+    description: 'Most recent posture_scores rows per theatre. Returns composite + air, sea, conflict and grid sub-scores. imagery is always null: no imagery is measured yet — never describe it as a domain score.',
     input_schema: {
       type: 'object' as const,
       properties: {

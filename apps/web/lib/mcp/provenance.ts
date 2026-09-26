@@ -183,7 +183,12 @@ export const TOOL_PROVENANCE: Record<string, ToolProvenance> = {
   query_posture_scores: {
     grounding: 'live',
     source: 'computed posture by theatre',
-    caveats: ['Derived score, not an observation. State the window when quoting.'],
+    caveats: [
+      'Derived score, not an observation. State the window when quoting.',
+      // IMG-0: the composite's fifth term was the fixture's constant, not a
+      // measurement. It is gone; imagery is null until real observations exist.
+      'Composite = air, sea, conflict and grid only (weights 0.25/0.25/0.25/0.15, renormalised). imagery is null: eYKON measures no imagery yet.',
+    ],
   },
   query_agent_reports: {
     grounding: 'live',

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
 import seed from '@/lib/fixtures/posture_seed.json';
+import { compositeFromDomains } from '@/lib/intel/postureComposite';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -10,7 +11,11 @@ export const maxDuration = 60;
  * Compute-posture-scores · every 15 min.
  * For each pinned theatre, pulls last 30 min of aircraft, vessel,
  * conflict, and energy_flows rows within the theatre's bbox, composes
- * the five sub-scores, and writes a posture_scores row.
+ * the four measured sub-scores, and writes a posture_scores row.
+ *
+ * There is no imagery sub-score. The fifth term this route used to add
+ * was the fixture's constant, not an observation; it is written as NULL
+ * until the Imagery Layer produces real ones. See lib/intel/postureComposite.ts.
  */
 export async function POST(req: NextRequest) {
   const unauth = requireCronSecret(req);
@@ -63,15 +68,18 @@ export async function POST(req: NextRequest) {
       const sea = saturate((seaRes.count ?? 0) / 50);
       const conflict = saturate((confRes.count ?? 0) / 6);
       const grid = saturate((gridRes.count ?? 0) / 30);
-      const imagery = t.imagery ?? 0.3;
-      const composite = round3(0.25 * air + 0.25 * sea + 0.25 * conflict + 0.15 * grid + 0.10 * imagery);
+      const composite = compositeFromDomains(air, sea, conflict, grid);
 
-      await supabase.from('posture_scores').insert({
+      const { error: insertError } = await supabase.from('posture_scores').insert({
         theatre_slug: t.slug,
         composite,
-        air, sea, conflict, grid, imagery,
+        air, sea, conflict, grid,
+        imagery: null,
         computed_at: now.toISOString(),
       });
+      // Fail loud: a tick that reports a composite it never stored is the
+      // "ok:true having written nothing" failure (brief §0.2).
+      if (insertError) throw new Error(`posture_scores insert: ${insertError.message}`);
       results.push({ theatre: t.slug, composite });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'unknown';
@@ -79,12 +87,19 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, computed: results, computed_at: now.toISOString() });
+  // `formula` echoes which composite this build computes, so a stale
+  // deploy is visible from outside (brief §3.1).
+  return NextResponse.json(
+    {
+      ok: results.length > 0,
+      formula: 'four-domain-v2 (no imagery term)',
+      computed: results,
+      computed_at: now.toISOString(),
+    },
+    { status: results.length > 0 ? 200 : 500 },
+  );
 }
 
 function saturate(x: number): number {
   return Math.max(0, Math.min(1, x));
-}
-function round3(n: number): number {
-  return Math.round(n * 1000) / 1000;
 }
