@@ -24,7 +24,9 @@
 --                           status 'operating', buffered 1,500 m
 --         port              ports with harbor_size L or M, buffered 2,000 m
 --         mine              mines_curated with coordinates (mig 080),
---                           buffered 2,000 m (the Sentinel cron's ~2 km box)
+--                           rows at one coordinate = one site (heavy-REE
+--                           mines appear once per workspace), buffered
+--                           2,000 m (the Sentinel cron's ~2 km box)
 --       Anchorages, chokepoints and datacentres are allowed kinds but are
 --       NOT seeded: anchorages are drawn from AIS dwell clusters in IMG-3,
 --       datacentres wait on founder decision F-5.
@@ -491,14 +493,23 @@ BEGIN
     FROM public.ports p
    WHERE p.harbor_size IN ('L', 'M');
 
-  -- curated mines with a published coordinate (mig 080)
+  -- curated mines with a published coordinate (mig 080). ONE SITE, NOT ONE
+  -- ROW: heavy-REE mines are listed once per workspace (dysprosium AND
+  -- terbium) but are the same physical pit, so rows are grouped by their
+  -- coordinate (3 decimals ≈ 100 m, the precision 080 seeded) and the site
+  -- is keyed by the lowest row id in the group.
   INSERT INTO _imagery_aoi_src
-  SELECT 'mine:' || mc.id::text, 'mine', 'mines_curated', mc.id::text, mc.name,
-         CASE WHEN upper(mc.country) ~ '^[A-Z]{2}$' THEN upper(mc.country) END,
-         ST_Buffer(ST_SetSRID(ST_MakePoint(mc.longitude, mc.latitude), 4326)::geography, 2000)::geometry,
-         'point + 2000 m'
-    FROM public.mines_curated mc
-   WHERE mc.latitude IS NOT NULL AND mc.longitude IS NOT NULL;
+  SELECT 'mine:' || g.site_key, 'mine', 'mines_curated', g.site_key, g.name, g.country_iso,
+         ST_Buffer(ST_SetSRID(ST_MakePoint(g.lon, g.lat), 4326)::geography, 2000)::geometry,
+         'point + 2000 m (rows at one coordinate = one site)'
+    FROM (SELECT min(mc.id::text) AS site_key,
+                 min(mc.name) AS name,
+                 min(CASE WHEN upper(mc.country) ~ '^[A-Z]{2}$' THEN upper(mc.country) END) AS country_iso,
+                 round(mc.latitude::numeric, 3)::double precision  AS lat,
+                 round(mc.longitude::numeric, 3)::double precision AS lon
+            FROM public.mines_curated mc
+           WHERE mc.latitude IS NOT NULL AND mc.longitude IS NOT NULL
+           GROUP BY round(mc.latitude::numeric, 3), round(mc.longitude::numeric, 3)) g;
 
   FOR k IN SELECT unnest(ARRAY['refinery_complex','lng_terminal','port','mine']) LOOP
     INSERT INTO public.imagery_aois AS a
@@ -585,7 +596,8 @@ SELECT 'port',
 UNION ALL
 SELECT 'mine',
        (SELECT count(*) FROM public.imagery_aois WHERE kind = 'mine' AND retired_at IS NULL),
-       (SELECT count(*) FROM public.mines_curated WHERE latitude IS NOT NULL AND longitude IS NOT NULL);
+       (SELECT count(DISTINCT (round(latitude::numeric, 3), round(longitude::numeric, 3)))
+          FROM public.mines_curated WHERE latitude IS NOT NULL AND longitude IS NOT NULL);
 
 -- V2 · nothing is imaged yet, and footprints are plausible
 SELECT count(*) FILTER (WHERE sensors_enabled <> '{}') AS aois_with_a_sensor_enabled,   -- expect 0
