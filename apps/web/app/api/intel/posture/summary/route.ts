@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
+import { storedComposite } from '@/lib/intel/postureComposite';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +19,7 @@ export async function GET(_req: NextRequest) {
     const since = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
     const { data, error } = await supabase
       .from('posture_scores')
-      .select('theatre_slug, composite, computed_at')
+      .select('theatre_slug, composite, imagery, computed_at')
       .gte('computed_at', since)
       .order('computed_at', { ascending: false })
       .limit(200);
@@ -31,13 +32,13 @@ export async function GET(_req: NextRequest) {
     const latest = new Map<string, { slug: string; composite: number; computed_at: string }>();
     for (const row of data ?? []) {
       const slug = String(row.theatre_slug);
-      if (!latest.has(slug)) {
-        latest.set(slug, {
-          slug,
-          composite: Math.round((Number(row.composite) || 0) * 1000) / 1000,
-          computed_at: String(row.computed_at),
-        });
-      }
+      if (latest.has(slug)) continue;
+      // Through storedComposite so a row written under the old five-term
+      // formula reads on today's scale; a missing composite is skipped,
+      // never shown as 0.
+      const composite = storedComposite(row.composite, row.imagery);
+      if (composite === null) continue;
+      latest.set(slug, { slug, composite, computed_at: String(row.computed_at) });
     }
 
     return jsonWithCache({

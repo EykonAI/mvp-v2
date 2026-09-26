@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase-server';
 import precursor from '@/lib/fixtures/precursor_library.json';
 import { THEATRE_SLUGS, resolveTheatreSlug } from '@/lib/theatres';
 import posture from '@/lib/fixtures/posture_seed.json';
+import { storedComposite } from '@/lib/intel/postureComposite';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,12 +20,17 @@ function cosine(a: number[], b: number[]): number {
   return na > 0 && nb > 0 ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
 }
 
+// Four measured domains. The fifth, imagery, was the posture fixture's
+// constant and never an observation (lib/intel/postureComposite.ts), so
+// the current vector is now 34 dimensions, not 35. Library vectors are
+// 64-point curves (supabase/seed/002_precursor_library.sql) whose later
+// positions are not domain scores; cosine() compares the shared prefix,
+// which was already an approximation and is now one dimension shorter.
 interface CurrentDomains {
   air: number;
   sea: number;
   conflict: number;
   grid: number;
-  imagery: number;
 }
 
 /**
@@ -44,7 +50,7 @@ async function buildLiveCurrent(
   // days of daily averages.
   const { data, error } = await supabase
     .from('posture_scores')
-    .select('composite, computed_at')
+    .select('composite, imagery, computed_at')
     .eq('theatre_slug', theatreSlug)
     .gte('computed_at', since)
     .order('computed_at', { ascending: false })
@@ -54,9 +60,14 @@ async function buildLiveCurrent(
   // Daily average of composite, keyed by UTC day.
   const byDay = new Map<string, { sum: number; n: number }>();
   for (const row of data) {
+    // storedComposite() puts pre-IMG-0 rows on today's formula, so the
+    // 30-day series has no step on the deploy day; a missing composite is
+    // skipped rather than averaged in as 0.
+    const composite = storedComposite(row.composite, row.imagery);
+    if (composite === null) continue;
     const day = String(row.computed_at).slice(0, 10);
     const agg = byDay.get(day) ?? { sum: 0, n: 0 };
-    agg.sum += Number(row.composite) || 0;
+    agg.sum += composite;
     agg.n += 1;
     byDay.set(day, agg);
   }
@@ -72,7 +83,7 @@ async function buildLiveCurrent(
   // query no longer selects the domain columns).
   const { data: latestRows, error: latestError } = await supabase
     .from('posture_scores')
-    .select('air, sea, conflict, grid, imagery')
+    .select('air, sea, conflict, grid')
     .eq('theatre_slug', theatreSlug)
     .order('computed_at', { ascending: false })
     .limit(1);
@@ -83,7 +94,6 @@ async function buildLiveCurrent(
     sea: round3(Number(latest.sea) || 0),
     conflict: round3(Number(latest.conflict) || 0),
     grid: round3(Number(latest.grid) || 0),
-    imagery: round3(Number(latest.imagery) || 0),
   };
   return { series, domains };
 }
@@ -148,13 +158,13 @@ export async function POST(req: NextRequest) {
       const theatre = posture.theatres.find(t => t.slug === theatreSlug);
       if (theatre) {
         currentSeries = theatre.last_30d_composite ?? [];
-        currentDomains = { air: theatre.air, sea: theatre.sea, conflict: theatre.conflict, grid: theatre.grid, imagery: theatre.imagery };
+        currentDomains = { air: theatre.air, sea: theatre.sea, conflict: theatre.conflict, grid: theatre.grid };
       } else {
         // Unknown theatre: keep the legacy synthetic 35-dim shape.
         const synthetic = Array.from({ length: 35 }, (_, i) => 0.1 + Math.sin(i * 0.2) * 0.05 + 0.2);
         currentSeries = synthetic.slice(0, 30);
-        const [air, sea, conflict, grid, imagery] = synthetic.slice(30);
-        currentDomains = { air, sea, conflict, grid, imagery };
+        const [air, sea, conflict, grid] = synthetic.slice(30);
+        currentDomains = { air, sea, conflict, grid };
       }
     }
     const current: number[] = [
@@ -163,7 +173,6 @@ export async function POST(req: NextRequest) {
       currentDomains.sea,
       currentDomains.conflict,
       currentDomains.grid,
-      currentDomains.imagery,
     ];
     const currentPayload = {
       current_series: currentSeries,

@@ -16,7 +16,8 @@ interface Theatre {
   sea: number;
   conflict: number;
   grid: number;
-  imagery: number;
+  /** Always null until the Imagery Layer produces observations (IMG-0). */
+  imagery: number | null;
   precursor_match_id?: string | null;
   precursor_similarity?: number | null;
   last_30d_composite?: number[];
@@ -166,7 +167,7 @@ function StylizedMap({
             t.sea.toFixed(2),
             t.conflict.toFixed(2),
             t.grid.toFixed(2),
-            t.imagery.toFixed(2),
+            t.imagery == null ? 'not measured' : t.imagery.toFixed(2),
           ]),
         }}
       >
@@ -268,17 +269,25 @@ function PostureDecompose({ theatre }: { theatre: Theatre }) {
       }}
     >
       <section style={{ background: 'var(--bg-panel)', padding: 12, minWidth: 0 }}>
-        <div className="eyebrow mb-[8px]" >5-Domain Score</div>
+        <div className="eyebrow mb-[8px]" >Domain Scores</div>
         <div className="flex flex-col" style={{ gap: 6 }}>
           {segs.map(s => (
             <div key={s.key} className="flex items-center" style={{ gap: 10 }}>
               <span className="num-lg" style={{ width: 64, fontSize: 10.5, color: 'var(--ink-dim)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
                 {s.label}
               </span>
-              <ScoreBar value={s.value} width={120} />
-              <span className="num-lg" style={{ fontSize: 11, color: 'var(--ink)' }}>
-                {s.value.toFixed(2)}
-              </span>
+              {s.value == null ? (
+                <span style={{ fontSize: 11, color: 'var(--ink-faint)' }}>
+                  not measured — no imagery observations yet
+                </span>
+              ) : (
+                <>
+                  <ScoreBar value={s.value} width={120} />
+                  <span className="num-lg" style={{ fontSize: 11, color: 'var(--ink)' }}>
+                    {s.value.toFixed(2)}
+                  </span>
+                </>
+              )}
             </div>
           ))}
         </div>

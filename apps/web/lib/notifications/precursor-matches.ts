@@ -5,11 +5,11 @@ import posture from '@/lib/fixtures/posture_seed.json';
 //
 // Reuses the scheme already shipped in /api/intel/precursor/match
 // — build a "current state" vector from the relevant theatre's
-// posture (30-day composite + 5 domain scores = 35 dims), cosine
+// posture (30-day composite + 4 domain scores = 34 dims), cosine
 // it against precursor_library.vector_json.values (64 dims, seeded
 // in supabase/seed/002_precursor_library.sql). cosine() does
 // Math.min(a.length, b.length) so the comparison runs on the
-// shared 35-dim prefix — same approximation as the existing intel
+// shared 34-dim prefix — same approximation as the existing intel
 // endpoint; consistency over precision until embeddings are
 // re-generated to a uniform dimensionality.
 //
@@ -64,7 +64,9 @@ export function detectTheatreFromOutcome(outcome: string): string | null {
 /**
  * Compose the current-state vector for a theatre. Same shape as
  * /api/intel/precursor/match: last 30-day composite (30 dims) +
- * the 5 domain scores. Returns null when the theatre is unknown.
+ * the 4 measured domain scores (34 dims; the fixture 'imagery' domain
+ * was never an observation and is left out). Returns null when the
+ * theatre is unknown.
  */
 export function composeCurrentVector(theatreSlug: string): number[] | null {
   const theatre = posture.theatres.find(t => t.slug === theatreSlug);
@@ -75,7 +77,6 @@ export function composeCurrentVector(theatreSlug: string): number[] | null {
     theatre.sea,
     theatre.conflict,
     theatre.grid,
-    theatre.imagery,
   ];
 }
 

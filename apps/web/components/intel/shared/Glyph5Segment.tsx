@@ -4,7 +4,8 @@ interface Props {
   sea: number;
   conflict: number;
   grid: number;
-  imagery: number;
+  /** null = not measured (no imagery observations exist yet); drawn as an empty segment. */
+  imagery: number | null;
   size?: number;
   label?: string;
   active?: boolean;
@@ -81,7 +82,9 @@ export default function Glyph5Segment({
           fill={segmentColour(s.value)}
           stroke="var(--bg-navy)"
           strokeWidth="0.8"
-        />
+        >
+          <title>{s.value == null ? `${s.label} — not measured` : `${s.label} ${s.value.toFixed(2)}`}</title>
+        </path>
       ))}
 
       {/* Composite centre */}
@@ -122,7 +125,7 @@ export default function Glyph5Segment({
   );
 }
 
-function segmentColour(v: number): string {
+function segmentColour(v: number | null): string {
   if (v == null) return 'var(--bg-raised)';
   const alpha = Math.max(0.15, Math.min(1, v));
   if (v < 0.5) return `rgba(25, 208, 184, ${alpha})`;

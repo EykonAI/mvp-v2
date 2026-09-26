@@ -24,7 +24,6 @@ interface CurrentDomains {
   sea: number;
   conflict: number;
   grid: number;
-  imagery: number;
 }
 
 export default function PrecursorAnalogsWorkspace() {
@@ -79,7 +78,7 @@ export default function PrecursorAnalogsWorkspace() {
   const theatre = posture.theatres.find(t => t.slug === theatreSlug);
   const currentSeries = apiSeries ?? theatre?.last_30d_composite ?? [];
   const currentDomains: CurrentDomains | null =
-    apiDomains ?? (theatre ? { air: theatre.air, sea: theatre.sea, conflict: theatre.conflict, grid: theatre.grid, imagery: theatre.imagery } : null);
+    apiDomains ?? (theatre ? { air: theatre.air, sea: theatre.sea, conflict: theatre.conflict, grid: theatre.grid } : null);
   const currentValue = currentSeries.length > 0 ? currentSeries[currentSeries.length - 1] : theatre?.composite;
 
   return (
@@ -147,7 +146,7 @@ export default function PrecursorAnalogsWorkspace() {
           </p>
           {currentDomains && (
             <div style={{ fontFamily: 'var(--f-mono)', fontSize: 10.5, color: 'var(--ink-faint)', marginTop: 6, letterSpacing: '0.06em' }}>
-              AIR {currentDomains.air.toFixed(2)} · SEA {currentDomains.sea.toFixed(2)} · CONFLICT {currentDomains.conflict.toFixed(2)} · GRID {currentDomains.grid.toFixed(2)} · IMAGERY {currentDomains.imagery.toFixed(2)}
+              AIR {currentDomains.air.toFixed(2)} · SEA {currentDomains.sea.toFixed(2)} · CONFLICT {currentDomains.conflict.toFixed(2)} · GRID {currentDomains.grid.toFixed(2)}
             </div>
           )}
         </div>
@@ -207,7 +206,7 @@ export default function PrecursorAnalogsWorkspace() {
             ? 'Library loaded from Supabase — pgvector will replace this JS cosine when the extension is enabled.'
             : 'Library loaded from fixture JSON — run db:seed to load the library into Supabase.'}{' '}
           {sourceCurrent === 'live'
-            ? 'Current-theatre vector computed from live posture_scores (30-day daily-average composite + latest domain scores).'
+            ? 'Current-theatre vector computed from live posture_scores (30-day daily-average composite + latest air, sea, conflict and grid scores; imagery is not measured).'
             : sourceCurrent === 'fixture'
               ? 'Current-theatre vector from fixture posture seed.'
               : null}
