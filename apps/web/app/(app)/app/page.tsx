@@ -56,6 +56,8 @@ export default function Home() {
   const [thermal, setThermal] = useState<any[]>([]);
   // Black Marble night-lights — measured radiance on clear nights, never power state.
   const [nightlights, setNightlights] = useState<any[]>([]);
+  // Sentinel-2 — latest look per watched site, in its real state; chips show their acquisition day.
+  const [imagery, setImagery] = useState<any[]>([]);
 
   // Per-data-source fetch state (one entry per /api/* route).
   const [dataState, setDataState] = useState<Record<DataKey, LayerState>>({
@@ -70,6 +72,7 @@ export default function Home() {
     mines: initialDataState(),
     firms: initialDataState(),
     nightlights: initialDataState(),
+    imagery: initialDataState(),
   });
 
   // Per-sub-layer visibility — independent of fetch state, since one parent
@@ -124,6 +127,7 @@ export default function Home() {
     name === 'refineries' ? setRefineries :
     name === 'firms' ? setThermal :
     name === 'nightlights' ? setNightlights :
+    name === 'imagery' ? setImagery :
     setMines;
 
   const fetchLayer = useCallback(
@@ -229,6 +233,7 @@ export default function Home() {
       pipelines, refineries, mines,
       firms: thermal,
       nightlights,
+      imagery,
     };
     for (const cat of CATEGORIES) {
       for (const sub of cat.sublayers) {
@@ -240,7 +245,7 @@ export default function Home() {
       }
     }
     return out;
-  }, [aircraft, vessels, conflicts, airports, ports, powerPlants, pipelines, refineries, mines, thermal, nightlights]);
+  }, [aircraft, vessels, conflicts, airports, ports, powerPlants, pipelines, refineries, mines, thermal, nightlights, imagery]);
 
   const visibleAircraft = useMemo(
     () => filterByVisibleSublayers(aircraft, 'aircraft', sublayerVisible),
@@ -284,6 +289,10 @@ export default function Home() {
     () => filterByVisibleSublayers(thermal, 'thermal', sublayerVisible),
     [thermal, sublayerVisible],
   );
+  const visibleImagery = useMemo(
+    () => filterByVisibleSublayers(imagery, 'imagery', sublayerVisible),
+    [imagery, sublayerVisible],
+  );
   const visibleNightlights = useMemo(
     () => filterByVisibleSublayers(nightlights, 'nightlights', sublayerVisible),
     [nightlights, sublayerVisible],
@@ -308,6 +317,7 @@ export default function Home() {
             mines={visibleMines}
             thermal={visibleThermal}
             nightlights={visibleNightlights}
+            imagery={visibleImagery}
             onViewportChange={setBbox}
           />
           <LayerControls

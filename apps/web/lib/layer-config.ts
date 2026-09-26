@@ -88,11 +88,14 @@ export const CATEGORIES: CategoryDef[] = [
     label: 'Imagery',
     color: 'var(--violet)',
     icon: '◉',
+    // Surfaced verbatim in the layer panel. A chip is what Sentinel-2
+    // recorded on its acquisition day — see app/api/imagery/route.ts.
+    note: 'Latest Sentinel-2 look at each watched site, in its real state — a cloudy week reads cloudy. Chips show their acquisition day, not now. Only sites with a sensor switched on are looked at (today: curated mines). The metric is median NDVI, a spectral proxy, not a volume.',
     sublayers: [
       { key: 'imagery.cctv', label: 'Open CCTV', status: 'planned',
         comingSoon: 'Phase 3 — Windy Webcams API' },
-      { key: 'imagery.satellite', label: 'Satellite imagery', status: 'planned',
-        comingSoon: 'Phase 3 — Copernicus Sentinel Hub' },
+      { key: 'imagery.satellite', label: 'Satellite imagery', status: 'live',
+        dataKey: 'imagery', predicate: () => true },
     ],
   },
   {
@@ -117,9 +120,9 @@ export const CATEGORIES: CategoryDef[] = [
   },
 ];
 
-export type DataKey = 'aircraft' | 'vessels' | 'conflicts' | 'airports' | 'ports' | 'power-plants' | 'pipelines' | 'refineries' | 'mines' | 'firms' | 'nightlights';
+export type DataKey = 'aircraft' | 'vessels' | 'conflicts' | 'airports' | 'ports' | 'power-plants' | 'pipelines' | 'refineries' | 'mines' | 'firms' | 'nightlights' | 'imagery';
 
-export const DATA_KEYS: DataKey[] = ['aircraft', 'vessels', 'conflicts', 'airports', 'ports', 'power-plants', 'pipelines', 'refineries', 'mines', 'firms', 'nightlights'];
+export const DATA_KEYS: DataKey[] = ['aircraft', 'vessels', 'conflicts', 'airports', 'ports', 'power-plants', 'pipelines', 'refineries', 'mines', 'firms', 'nightlights', 'imagery'];
 
 /**
  * Default visibility: live sub-layers on (except those flagged
