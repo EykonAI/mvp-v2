@@ -53,6 +53,8 @@ const cspDirectives = {
   ],
   'connect-src': [
     "'self'",
+    // deck.gl TileLayer fetches the IMG-4 context raster tiles with fetch()
+    'https://gibs.earthdata.nasa.gov',
     supabaseHttp,
     supabaseWs,
     POSTHOG_HOST,

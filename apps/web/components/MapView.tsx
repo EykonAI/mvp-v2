@@ -1,7 +1,8 @@
 'use client';
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import DeckGL from '@deck.gl/react';
-import { ScatterplotLayer, IconLayer, PathLayer, GeoJsonLayer, TextLayer } from '@deck.gl/layers';
+import { ScatterplotLayer, IconLayer, PathLayer, GeoJsonLayer, TextLayer, BitmapLayer } from '@deck.gl/layers';
+import { TileLayer } from '@deck.gl/geo-layers';
 import Map, { type MapRef } from 'react-map-gl/maplibre';
 import { MAP_CONFIG } from '@/lib/constants';
 import type { BBox } from '@/lib/types';
@@ -28,6 +29,8 @@ interface MapViewProps {
   nightlights: any[];
   /** Sentinel-2 latest look per watched site (IMG-2) — a look, dated; never "now". */
   imagery?: any[];
+  /** Switched-on context raster sub-layers (IMG-4): 'imagery.truecolor' / 'imagery.geostationary'. */
+  contextSublayers?: string[];
   /** Fired ~500ms after the user stops panning/zooming, with the visible bbox. */
   onViewportChange?: (bbox: BBox) => void;
 }
@@ -42,6 +45,18 @@ interface MapViewProps {
 //   TextLayer.
 // Stable default so an absent prop does not rebuild the layer every render.
 const NO_IMAGERY: any[] = [];
+const NO_CONTEXT: string[] = [];
+
+interface ContextRaster {
+  id: string;
+  sublayer: string;
+  label: string;
+  time: string | null;
+  partial: boolean;
+  what_it_is: string;
+  max_zoom: number;
+  tile_url: string | null;
+}
 
 const PIPELINE_COLOR_GAS: [number, number, number, number] = [255, 214, 165, 220];
 const PIPELINE_COLOR_OIL: [number, number, number, number] = [236, 251, 233, 220];
@@ -207,6 +222,7 @@ export default function MapView({
   thermal,
   nightlights,
   imagery = NO_IMAGERY,
+  contextSublayers = NO_CONTEXT,
   onViewportChange,
 }: MapViewProps) {
   const [viewState, setViewState] = useState(MAP_CONFIG.INITIAL_VIEW);
@@ -336,6 +352,51 @@ export default function MapView({
     onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'nightlights' } : null),
     updateTriggers: { getPosition: nightlights.length, getFillColor: nightlights.length, getRadius: nightlights.length },
   }), [nightlights]);
+
+  // ─── Context rasters (IMG-4) — NASA GIBS pictures under the data layers ───
+  // Times come from /api/imagery/context (GIBS capabilities), so every tile is
+  // requested for a NAMED image time and the legend prints it. Refreshed every
+  // 10 minutes while a context sub-layer is on; nothing is fetched otherwise.
+  const contextKey = contextSublayers.join(',');
+  const [context, setContext] = useState<{ layers: ContextRaster[]; credit: string; stale: boolean } | null>(null);
+  useEffect(() => {
+    if (!contextKey) return;
+    let cancelled = false;
+    const load = () =>
+      fetch('/api/imagery/context')
+        .then(r => r.json())
+        .then(j => { if (!cancelled && Array.isArray(j.layers)) setContext({ layers: j.layers, credit: j.credit, stale: !!j.stale }); })
+        .catch(() => { /* no times → nothing drawn; the legend says so */ });
+    load();
+    const t = setInterval(load, 10 * 60 * 1000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [contextKey]);
+
+  const activeContext = useMemo(
+    () => (context?.layers ?? []).filter(l => contextSublayers.includes(l.sublayer)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [context, contextKey],
+  );
+
+  const contextLayers = useMemo(
+    () =>
+      activeContext
+        .filter(l => l.tile_url)
+        .map(l => new TileLayer({
+          id: `context-${l.id}-${l.time}`,
+          data: l.tile_url as string,
+          minZoom: 0,
+          maxZoom: l.max_zoom,
+          tileSize: 256,
+          opacity: 0.8,
+          pickable: false,
+          renderSubLayers: (props: any) => {
+            const [[west, south], [east, north]] = props.tile.boundingBox;
+            return new BitmapLayer(props, { data: undefined, image: props.data, bounds: [west, south, east, north] });
+          },
+        })),
+    [activeContext],
+  );
 
   // ─── Satellite imagery Layer (Sentinel-2 latest look per watched site) ───
   // HONESTY: a filled ring = the latest look was clear; a hollow ring = the
@@ -543,7 +604,7 @@ export default function MapView({
   // Pipelines render under everything else (lines as background); LNG
   // terminals sit alongside other point markers. Hover-pick order is
   // last → first, so terminals win over pipelines when overlapping.
-  const layers = [pipelineLayer, vesselLayer, aircraftLayer, imageryLayer, nightlightsLayer, thermalLayer, conflictLayer, refineryLayer, mineLayer, powerPlantLayer, nuclearLayer, airportLayer, portLayer, lngTerminalLayer];
+  const layers = [...contextLayers, pipelineLayer, vesselLayer, aircraftLayer, imageryLayer, nightlightsLayer, thermalLayer, conflictLayer, refineryLayer, mineLayer, powerPlantLayer, nuclearLayer, airportLayer, portLayer, lngTerminalLayer];
 
   // ─── Tooltip Renderer ───
   const renderTooltip = useCallback(() => {
@@ -921,6 +982,24 @@ export default function MapView({
       </DeckGL>
 
       {renderTooltip()}
+
+      {activeContext.length > 0 && (
+        <div className="ctx-legend">
+          {activeContext.map(l => (
+            <div key={l.id} className="ctx-legend-item">
+              <div className="ctx-legend-title">{l.label}</div>
+              <div className="ctx-legend-time">
+                {l.time
+                  ? `Image time ${l.time.replace('T', ' ').replace(':00Z', ' UTC')}${l.partial ? ' · today, still filling in' : ''}`
+                  : 'Image time unavailable from NASA GIBS — not drawn'}
+              </div>
+              <div className="ctx-legend-what">{l.what_it_is}</div>
+            </div>
+          ))}
+          {context?.stale && <div className="ctx-legend-stale">NASA GIBS unreachable — showing the last times read.</div>}
+          <div className="ctx-legend-credit">{context?.credit}</div>
+        </div>
+      )}
     </div>
   );
 }

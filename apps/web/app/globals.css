@@ -577,3 +577,17 @@ body.intel-view {
 }
 .rc-covcell.rc-cov-bm { background: var(--teal-dim); border-color: var(--teal-dim); }
 .rc-covcell.rc-cov-fr { border-color: var(--amber); }
+
+/* ─── IMG-4 context-raster legend (MapView) ─────────────────────────────
+   Names each NASA GIBS picture's image time, what it is and the credit. */
+.ctx-legend {
+  position: absolute; left: 12px; bottom: 28px; max-width: 340px; padding: 8px 10px;
+  background: rgba(8, 14, 28, 0.85); border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #e5e7eb; font-size: 11px; line-height: 1.4; pointer-events: auto;
+}
+.ctx-legend-item { margin-bottom: 6px; }
+.ctx-legend-title { font-weight: 600; }
+.ctx-legend-time { color: #cbd5e1; }
+.ctx-legend-what { color: #94a3b8; }
+.ctx-legend-stale { color: rgb(251, 191, 36); }
+.ctx-legend-credit { color: #94a3b8; font-size: 10px; }
