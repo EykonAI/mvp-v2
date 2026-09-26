@@ -78,9 +78,15 @@ BEGIN
   SELECT count(DISTINCT (round(latitude::numeric, 3), round(longitude::numeric, 3))) INTO n_src
     FROM public.mines_curated WHERE latitude IS NOT NULL AND longitude IS NOT NULL;
   IF n <> n_src THEN RAISE EXCEPTION 'FAIL 3d: mine AOIs % vs distinct mine sites %', n, n_src; END IF;
-  SELECT count(*) INTO n FROM public.imagery_aois WHERE sensors_enabled <> '{}';
-  IF n <> 0 THEN RAISE EXCEPTION 'FAIL 3e: % AOIs already have a sensor enabled — IMG-1 must image nothing', n; END IF;
-  RAISE NOTICE 'PASS 3: AOIs match their registries by site · no sensor enabled';
+  -- IMG-1 images nothing. Once 184 (IMG-2) is applied it switches mines on,
+  -- and img2_guards.sql owns that assertion — so this one only holds pre-184.
+  IF to_regclass('public.imagery_aoi_checks') IS NULL THEN
+    SELECT count(*) INTO n FROM public.imagery_aois WHERE sensors_enabled <> '{}';
+    IF n <> 0 THEN RAISE EXCEPTION 'FAIL 3e: % AOIs already have a sensor enabled — IMG-1 must image nothing', n; END IF;
+    RAISE NOTICE 'PASS 3: AOIs match their registries by site · no sensor enabled';
+  ELSE
+    RAISE NOTICE 'PASS 3: AOIs match their registries by site (184 applied: sensor enablement is checked by img2_guards.sql)';
+  END IF;
 
   -- ── 4. Sync is idempotent ──────────────────────────────────────────────
   SELECT coalesce(sum(inserted + refreshed + retired), 0) INTO n FROM public.imagery_aois_sync();
