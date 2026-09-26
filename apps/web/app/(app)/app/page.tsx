@@ -318,6 +318,7 @@ export default function Home() {
             thermal={visibleThermal}
             nightlights={visibleNightlights}
             imagery={visibleImagery}
+            contextSublayers={['imagery.truecolor', 'imagery.geostationary'].filter(k => sublayerVisible[k])}
             onViewportChange={setBbox}
           />
           <LayerControls

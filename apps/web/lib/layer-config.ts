@@ -90,12 +90,17 @@ export const CATEGORIES: CategoryDef[] = [
     icon: '◉',
     // Surfaced verbatim in the layer panel. A chip is what Sentinel-2
     // recorded on its acquisition day — see app/api/imagery/route.ts.
-    note: 'Latest Sentinel-2 look at each watched site, in its real state — a cloudy week reads cloudy. Chips show their acquisition day, not now. Only sites with a sensor switched on are looked at (today: curated mines). The metric is median NDVI, a spectral proxy, not a volume.',
+    note: 'Latest Sentinel-2 look at each watched site, in its real state — a cloudy week reads cloudy. Chips show their acquisition day, not now. Only sites with a sensor switched on are looked at (today: curated mines). The metric is median NDVI, a spectral proxy, not a volume. True colour and geostationary clouds are NASA GIBS pictures at the time printed on the map — context, never a measurement.',
     sublayers: [
       { key: 'imagery.cctv', label: 'Open CCTV', status: 'planned',
         comingSoon: 'Phase 3 — Windy Webcams API' },
       { key: 'imagery.satellite', label: 'Satellite imagery', status: 'live',
         dataKey: 'imagery', predicate: () => true },
+      // Context rasters (IMG-4): NASA GIBS pictures drawn under the data
+      // layers. No dataKey — nothing counts or reads their pixels. Off by
+      // default: they are heavy and they are context, not signal.
+      { key: 'imagery.truecolor', label: 'Daily true colour (VIIRS)', status: 'live', defaultHidden: true },
+      { key: 'imagery.geostationary', label: 'Geostationary clouds (10 min)', status: 'live', defaultHidden: true },
     ],
   },
   {
