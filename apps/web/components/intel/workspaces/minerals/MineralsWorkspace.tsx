@@ -41,15 +41,17 @@ interface Data {
   }> | null;
   in_transit_source?: string;
   tiles: Array<{
-    aoi_kind: 'mine' | 'port';
-    aoi_ref: string;
-    mineral: string;
-    acquisition_date: string;
-    image_url: string;
-    index_name: string;
-    index_mean: number | null;
-    prev_mean: number | null;
-    change_pct: number | null;
+    aoi_id: string;
+    name: string | null;
+    latest_acquired_at: string;
+    latest_state: string;
+    clear_acquired_at: string;
+    chip_url: string;
+    metric_name: string;
+    metric_value: number | null;
+    baseline_median: number | null;
+    baseline_n: number | null;
+    attribution: string;
   }> | null;
 }
 
@@ -273,7 +275,7 @@ export default function MineralsWorkspace() {
           badge={!data.tiles || data.tiles.length === 0}
           source={
             data.tiles && data.tiles.length > 0
-              ? `Sentinel-2 L2A via Copernicus · ${data.tiles[0].index_name} change proxy — not volumetric measurement`
+              ? 'Sentinel-2 L2A via Copernicus · median NDVI over clear pixels vs the site\'s own baseline — a spectral change proxy, not volumetric measurement'
               : undefined
           }
         >
@@ -281,55 +283,59 @@ export default function MineralsWorkspace() {
             <Unavailable />
           ) : data.tiles.length === 0 ? (
             <p style={{ fontFamily: 'var(--f-mono)', fontSize: 11, color: 'var(--ink-faint)' }}>
-              Awaiting first Sentinel-2 acquisition — tiles land after the monthly cron&apos;s first run.
+              Awaiting the first clear Sentinel-2 look — chips land after the daily imagery run finds one.
             </p>
           ) : (
             <div className="grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-              {data.tiles.map(t => (
-                <figure
-                  key={t.aoi_ref}
-                  style={{
-                    margin: 0,
-                    border: '1px solid var(--rule)',
-                    background: 'var(--bg-raised)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                  }}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={t.image_url}
-                    alt={`Sentinel-2 ${t.index_name} tile — ${t.aoi_ref} (${t.aoi_kind}), acquired ${t.acquisition_date}`}
-                    style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', display: 'block' }}
-                    loading="lazy"
-                  />
-                  <figcaption style={{ padding: '6px 8px', fontFamily: 'var(--f-mono)', fontSize: 10 }}>
-                    <div className="flex items-center justify-between" style={{ gap: 6 }}>
-                      <span style={{ color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {t.aoi_ref}
+              {data.tiles.map(t => {
+                const delta =
+                  t.metric_value !== null && t.baseline_median !== null ? t.metric_value - t.baseline_median : null;
+                return (
+                  <figure
+                    key={t.aoi_id}
+                    style={{
+                      margin: 0,
+                      border: '1px solid var(--rule)',
+                      background: 'var(--bg-raised)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                    }}
+                  >
+                    <div style={{ position: 'relative' }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={t.chip_url}
+                        alt={`Sentinel-2 true colour — ${t.name ?? t.aoi_id}, acquired ${t.clear_acquired_at}`}
+                        style={{ width: '100%', aspectRatio: '1 / 1', objectFit: 'cover', display: 'block' }}
+                        loading="lazy"
+                      />
+                      <span
+                        style={{
+                          position: 'absolute', left: 0, right: 0, bottom: 0, padding: '2px 4px',
+                          fontFamily: 'var(--f-mono)', fontSize: 8.5, color: '#e5e7eb', background: 'rgba(0,0,0,0.6)',
+                        }}
+                      >
+                        {t.attribution}
                       </span>
-                      {t.change_pct !== null ? (
-                        <span
-                          className="num-lg"
-                          style={{
-                            fontSize: 12,
-                            color: Math.abs(t.change_pct) >= 15 ? 'var(--red)' : Math.abs(t.change_pct) >= 5 ? 'var(--amber)' : 'var(--ink-dim)',
-                          }}
-                        >
-                          {t.change_pct > 0 ? '+' : ''}
-                          {t.change_pct.toFixed(1)}%
-                        </span>
-                      ) : (
-                        <span className="text-eykon-ink-faint">baseline pass</span>
-                      )}
                     </div>
-                    <div style={{ marginTop: 2, color: 'var(--ink-faint)' }}>
-                      {t.acquisition_date}
-                      {t.change_pct !== null ? ' · vs prior pass' : ''}
-                    </div>
-                  </figcaption>
-                </figure>
-              ))}
+                    <figcaption style={{ padding: '6px 8px', fontFamily: 'var(--f-mono)', fontSize: 10 }}>
+                      <div style={{ color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {t.name ?? t.aoi_id}
+                      </div>
+                      <div style={{ marginTop: 2, color: 'var(--ink-dim)' }}>
+                        NDVI {t.metric_value !== null ? t.metric_value.toFixed(3) : '—'}
+                        {delta !== null
+                          ? ` · ${delta > 0 ? '+' : ''}${delta.toFixed(3)} vs own baseline (n ${t.baseline_n})`
+                          : ' · no baseline yet (< 3 clear looks)'}
+                      </div>
+                      <div style={{ marginTop: 2, color: 'var(--ink-faint)' }}>
+                        clear look {t.clear_acquired_at}
+                        {t.latest_state !== 'clear' ? ` · latest ${t.latest_acquired_at} ${t.latest_state.replace('_', ' ')}, no reading` : ''}
+                      </div>
+                    </figcaption>
+                  </figure>
+                );
+              })}
             </div>
           )}
         </Panel>
@@ -341,7 +347,7 @@ export default function MineralsWorkspace() {
 /**
  * Section panel. `badge` is OPT-IN: panels 01-03 are grounded on seeded
  * USGS/IEA datasets (mig 079), 04 on AIS-derived mineral_shipments and 05
- * on sentinel_tiles — all show a `source` line. The badge only remains on
+ * on the Imagery Layer engine (imagery_latest, mig 184) — all show a `source` line. The badge only remains on
  * panel 05's empty state (no acquisition yet → placeholder framing).
  */
 function Panel({
