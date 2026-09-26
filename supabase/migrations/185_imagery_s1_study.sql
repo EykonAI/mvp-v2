@@ -11,7 +11,8 @@
 --   1 · ANCHORAGES FROM AIS. imagery_derive_anchorages() finds where
 --       profiled vessels sit still (speed < 0.5 kn) 3–30 km from a large or
 --       medium port — outside the 3 km berth ring port_calls already uses —
---       and mints one 'anchorage' AOI per port from those cells. Positions
+--       and mints one 'anchorage' AOI per port from those cells. (Port size is
+--       matched on the stored WPI words 'Large' / 'Medium'.) Positions
 --       are binned to ~2 km cells BEFORE the port join, so the large table
 --       is scanned once, by its recorded_at index, and aggregated in memory
 --       (the 2026-09-18 temp-disk incident, brief §16.13).
@@ -116,7 +117,8 @@ BEGIN
       CROSS JOIN LATERAL (
         SELECT pt.id, pt.port_name, pt.geom
           FROM public.ports pt
-         WHERE pt.harbor_size IN ('L','M') AND pt.geom IS NOT NULL
+         -- the stored WPI words, not L/M (read from production 2026-09-26)
+         WHERE pt.harbor_size IN ('Large','Medium') AND pt.geom IS NOT NULL
            AND ST_DWithin(pt.geom, ST_SetSRID(ST_MakePoint((c.cx + 0.5) * c_cell, (c.cy + 0.5) * c_cell), 4326)::geography, 30000)
          ORDER BY pt.geom <-> ST_SetSRID(ST_MakePoint((c.cx + 0.5) * c_cell, (c.cy + 0.5) * c_cell), 4326)::geography
          LIMIT 1) p
