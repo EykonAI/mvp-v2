@@ -43,6 +43,31 @@ const DRY_STREAK_CAP    = 6;
 const STARVED_FLOOR_MIN = 300_000;     // 5 minutes
 const STARVED_FLOOR_MAX = 1_800_000;   // 30 minutes
 
+// ─── Silence watchdog (2026-08-09) ────────────────────────────
+// The backoff above makes a dead feed CHEAP, but it also makes it QUIET:
+// the worker sits at a 30-minute heartbeat reporting "Online" forever,
+// which is the same looks-alive-but-isn't failure the whole storm fix was
+// about. Past this much silence the process exits non-zero so Railway
+// restarts it under restartPolicyType="ON_FAILURE"; a climbing restart
+// count, and eventually a red service once restartPolicyMaxRetries is
+// spent, is a state a human actually notices.
+//
+// WHY 45 MINUTES, and not "N minutes". A restart resets dryStreak to 0, so
+// every restart re-runs the aggressive 1s→60s ramp (~2 min of attempts).
+// The threshold must therefore sit ABOVE the 30-minute backoff ceiling, or
+// restarts would pre-empt the polite interval and rebuild the very storm
+// #360 removed. At 45 min the ramp is ~4% of the cycle instead of 100%.
+// Set to 0 to disable the exit entirely.
+const SILENCE_EXIT_MS = Number(process.env.AIS_SILENCE_EXIT_MS ?? 2_700_000);
+
+// Unrecognised frames are logged, but a feed that changes shape must not
+// turn the log into the firehose: first few, then at most one per window.
+const UNKNOWN_LOG_MS = 60_000;
+
+// Durations read in whatever unit is legible. Rounding everything to whole
+// minutes printed "NO AIS DATA FOR 0 MIN" under a short test threshold.
+const dur = (ms) => (ms >= 60_000 ? `${Math.round(ms / 60_000)}m` : `${Math.round(ms / 1_000)}s`);
+
 // ─── Subscription bounding boxes ──────────────────────────────
 // AISStream's free-tier rate limit (~155 msg/s globally) means a
 // single global box is sampled and biased toward Europe-dense
@@ -118,6 +143,37 @@ let ws;
 let messagesIn = 0;
 let lastLogged = Date.now();
 let lastMessageAt = Date.now();        // liveness: bumped on every inbound AIS message
+
+// The honest data clock. lastMessageAt is SOCKET liveness and is reset by
+// grace windows (on 'open', and by the stale watchdog itself), so it cannot
+// answer "when did we last receive actual AIS?". lastDataAt is set ONLY by a
+// recognised data frame and never by a grace reset — it survives reconnects
+// and is the sole input to the silence watchdog.
+let lastDataAt = Date.now();
+
+// Frames that are not recognised AIS data. AISStream reports protocol-level
+// problems — bad key, malformed subscription, quota — as JSON frames on the
+// socket, and every one of them used to be dropped in silence at the `!mmsi`
+// guard. Now surfaced, throttled, and redacted.
+let unknownFrames = 0;
+let unknownLoggedAt = 0;
+
+// A frame could echo our subscription back at us, and that payload contains
+// the API key. Never let it reach the log.
+function redact(s) {
+  return AIS_KEY ? s.split(AIS_KEY).join('«APIKey»') : s;
+}
+
+function noteUnrecognized(kind, sample) {
+  unknownFrames++;
+  const now = Date.now();
+  if (unknownFrames > 3 && now - unknownLoggedAt < UNKNOWN_LOG_MS) return;
+  unknownLoggedAt = now;
+  console.warn(
+    `  unrecognized frame [${kind}] (${unknownFrames} so far): ` +
+    redact(String(sample)).slice(0, 300),
+  );
+}
 
 // A connection that OPENS is not a connection that WORKS. dryStreak counts
 // consecutive connection cycles that delivered ZERO AIS messages — whether
@@ -196,20 +252,37 @@ function connect() {
     res.on('error', (e) => finish(` · body read failed: ${e.message}`));
   });
 
-  socket.on('message', (raw) => {
+  // Promotes this connection from "receiving bytes" to "delivering AIS".
+  // Called ONLY from the recognised data branches below — a socket that
+  // chatters error frames is no more working than one that opens and stalls,
+  // and clearing the streak on any inbound frame would let it masquerade as
+  // healthy. Same principle as not resetting the backoff on 'open' (#360).
+  const markLive = () => {
+    lastDataAt = Date.now();
     if (!gotData) {
       gotData = true;
       if (dryStreak > 0) console.log(`  stream is live — clearing dry streak (was ${dryStreak})`);
       dryStreak = 0;
     }
+  };
+
+  socket.on('message', (raw) => {
+    // Socket-level liveness: the peer sent us bytes, so it is not half-open.
+    // Deliberately bumped for unrecognised frames too — the stale watchdog
+    // reconnects dead sockets, and a chattering socket is not dead. Whether
+    // those bytes were USEFUL is lastDataAt's question, not this one.
     lastMessageAt = Date.now();
     messagesIn++;
+    const text = raw.toString();
     let msg;
-    try { msg = JSON.parse(raw.toString()); } catch { return; }
+    try { msg = JSON.parse(text); }
+    catch { return noteUnrecognized('unparseable', text); }
 
     const meta = msg.MetaData || {};
     const mmsi = String(meta.MMSI || '');
-    if (!mmsi) return;
+    // No MMSI means this is not a vessel report. AISStream's error frames
+    // land here — this is the branch that was silently swallowing them.
+    if (!mmsi) return noteUnrecognized('no MMSI', text);
 
     if (msg.MessageType === 'PositionReport') {
       const p = msg.Message?.PositionReport;
@@ -217,6 +290,7 @@ function connect() {
       const lat = Number(meta.latitude  ?? p.Latitude);
       const lon = Number(meta.longitude ?? p.Longitude);
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+      markLive();
       upsertBuffer(mmsi, {
         latitude:   lat,
         longitude:  lon,
@@ -230,6 +304,7 @@ function connect() {
     } else if (msg.MessageType === 'ShipStaticData') {
       const s = msg.Message?.ShipStaticData;
       if (!s) return;
+      markLive();
       upsertBuffer(mmsi, {
         name:        (s.Name || meta.ShipName || '').trim() || undefined,
         callsign:    (s.CallSign || '').trim() || undefined,
@@ -238,6 +313,10 @@ function connect() {
         imo:         s.ImoNumber ? String(s.ImoNumber) : undefined,
         flag:        flagFromMmsi(mmsi),
       });
+    } else {
+      // We subscribe to exactly two types, so this should be unreachable —
+      // which is precisely why it is worth hearing about if it ever fires.
+      noteUnrecognized(`MessageType=${msg.MessageType}`, text);
     }
   });
 
@@ -288,6 +367,7 @@ console.log('eYKON AIS ingest starting…');
 console.log(`  flush every ${FLUSH_MS / 1000}s, batches of ${BATCH_SIZE}`);
 console.log(`  stale after ${STALE_MS / 1000}s · storm cap after ${DRY_STREAK_CAP} dry cycles ` +
             `(floor ${STARVED_FLOOR_MIN / 60_000}m → ${STARVED_FLOOR_MAX / 60_000}m)`);
+console.log(`  silence exit ${SILENCE_EXIT_MS > 0 ? dur(SILENCE_EXIT_MS) : 'DISABLED'}`);
 connect();
 setInterval(() => { flush().catch((e) => console.error('flush threw:', e.message)); }, FLUSH_MS);
 
@@ -317,6 +397,38 @@ setInterval(() => {
   // the old flat tick meant a stall was caught anywhere from 90-120s later —
   // which is why the 2026-08-05 logs read "no AIS messages for 105s".)
 }, Math.max(1_000, Math.min(30_000, Math.floor(STALE_MS / 3))));
+
+// ─── Silence watchdog ──────────────────────────────────────────
+// The watchdog above heals a socket; this one escalates a FEED. After #360
+// a starved worker backs off to a 30-minute heartbeat and sits there
+// reporting "Online" indefinitely — cheap, correct, and invisible. On
+// 2026-08-05 that invisibility cost four days.
+//
+// Exiting non-zero converts silence into something Railway renders: a
+// restart count that climbs, then a red service once
+// restartPolicyMaxRetries is spent. It is deliberately NOT a repair —
+// restarting cannot make AISStream send data. It is an alarm with a
+// side effect.
+//
+// Measured against lastDataAt, never lastMessageAt: only a recognised AIS
+// frame counts. A socket cheerfully emitting error frames every second
+// would keep lastMessageAt fresh forever and is exactly the case this must
+// still catch.
+if (SILENCE_EXIT_MS > 0) {
+  setInterval(() => {
+    const silentMs = Date.now() - lastDataAt;
+    if (silentMs < SILENCE_EXIT_MS) return;
+    console.error(
+      `[${new Date().toISOString()}] NO AIS DATA FOR ${dur(silentMs)} ` +
+      `(threshold ${dur(SILENCE_EXIT_MS)}, dryStreak=${dryStreak}, ` +
+      `unrecognized frames=${unknownFrames}) — exiting non-zero so this stops ` +
+      `reading as "Online". The feed is the problem; a restart will not fix it.`,
+    );
+    flush().catch(() => {}).finally(() => process.exit(1));
+    // Tick proportional to the threshold, same reasoning as the stale
+    // watchdog: a flat interval makes a retuned threshold fire late.
+  }, Math.max(1_000, Math.min(60_000, Math.floor(SILENCE_EXIT_MS / 3))));
+}
 
 process.on('SIGTERM', async () => {
   console.log('SIGTERM — flushing and exiting…');
