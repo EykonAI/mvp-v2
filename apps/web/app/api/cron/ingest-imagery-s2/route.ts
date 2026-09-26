@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
-import { fetchCdseToken } from '@/lib/imagery/cdse';
+import { fetchCdseToken, sleep } from '@/lib/imagery/cdse';
 import { S2_ENGINE_VERSION, S2_PARAMS, chipPath, fetchChip, observeAoi, type DueAoi } from '@/lib/imagery/s2';
 
 export const runtime = 'nodejs';
@@ -27,7 +27,9 @@ export const maxDuration = 300;
  *   4. logs the check (window, acquisitions, rows, PU estimate or error) in
  *      imagery_aoi_checks — "looked, nothing there" is on record.
  *
- * FAIL LOUD: a run in which every AOI errored returns 502. The response
+ * FAIL LOUD: a run in which ANY AOI errored returns 502 (the successful AOIs
+ * are still written). The first production run reported ok:true with 8 of 27
+ * AOIs refused by a rate limit, and Railway showed it green. The response
  * echoes the engine version and every pinned threshold, so a stale deploy
  * is visible from outside (brief §3.1).
  *
@@ -37,6 +39,8 @@ export const maxDuration = 300;
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 60;
 const BUCKET = 'sentinel';
+/** Pause between AOIs — the first run tripped CDSE's rate limit firing back to back. */
+const PACE_MS = 1500;
 
 async function handle(req: NextRequest) {
   const unauth = requireCronSecret(req);
@@ -86,9 +90,24 @@ async function handle(req: NextRequest) {
   let puTotal = 0;
   const errors: string[] = [];
 
-  for (const aoi of aois) {
+  let alreadyStoredTotal = 0;
+  for (const [index, aoi] of aois.entries()) {
+    if (index > 0) await sleep(PACE_MS);
     try {
-      const { rows, puEstimate, daysReturned } = await observeAoi(token, aoi, runId);
+      // Days this AOI already has a look for inside the window: not rewritten,
+      // and their median and chip are not paid for again.
+      const { data: storedRows, error: storedErr } = await supabase
+        .from('imagery_observations')
+        .select('acquired_at')
+        .eq('aoi_id', aoi.aoi_id)
+        .eq('sensor', 's2_l2a')
+        .gte('acquired_at', new Date(Date.parse(aoi.window_from) - 86_400_000).toISOString());
+      if (storedErr) throw new Error(`stored looks: ${storedErr.message}`);
+      const stored = new Set(
+        (storedRows ?? []).map(r => `${String((r as { acquired_at: string }).acquired_at).slice(0, 10)}T00:00:00Z`),
+      );
+      const { rows, puEstimate, daysReturned, alreadyStored } = await observeAoi(token, aoi, runId, stored);
+      alreadyStoredTotal += alreadyStored;
       let pu = puEstimate;
 
       // Chip for the newest clear look only (1 Process call, ~1 PU).
@@ -130,6 +149,7 @@ async function handle(req: NextRequest) {
       results.push({
         aoi_id: aoi.aoi_id,
         days_returned: daysReturned,
+        already_stored: alreadyStored,
         looks: rows.length,
         clear: clear.length,
         states: rows.reduce<Record<string, number>>((acc, r) => ((acc[r.coverage_state] = (acc[r.coverage_state] ?? 0) + 1), acc), {}),
@@ -150,8 +170,9 @@ async function handle(req: NextRequest) {
     }
   }
 
-  // Nothing due is a success; everything failing is not.
-  const ok = aois.length === 0 || aoisOk > 0;
+  // Nothing due is a success. Any AOI failing is not: the run is reported
+  // failed (502) so Railway shows it, and the failed AOIs stay due.
+  const ok = errors.length === 0;
   return NextResponse.json(
     {
       ok,
@@ -160,6 +181,8 @@ async function handle(req: NextRequest) {
       aois_due: aois.length,
       aois_ok: aoisOk,
       rows_written: rowsWritten,
+      already_stored_skipped: alreadyStoredTotal,
+      partial: errors.length > 0 && aoisOk > 0,
       clear_looks: clearLooks,
       chips,
       pu_estimate: Math.round(puTotal * 10000) / 10000,

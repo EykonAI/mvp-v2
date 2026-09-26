@@ -20,6 +20,36 @@ export const PROCESS_URL = 'https://sh.dataspace.copernicus.eu/api/v1/process';
 export const STATS_URL = 'https://sh.dataspace.copernicus.eu/api/v1/statistics';
 
 const PU_FLOOR_STATS = 0.01;
+
+/**
+ * Rate limits. The first production run (2026-09-26 22:17 UTC) had 8 of 27
+ * AOIs refused with HTTP 429 RATE_LIMIT_EXCEEDED inside half a second: the
+ * engine fired requests back to back. Every CDSE call now goes through
+ * cdseFetch(), which on a 429 (or 503) waits Retry-After — or 10 s, 20 s,
+ * 40 s — and tries again, at most 3 times. A request still refused after
+ * that throws, the AOI's check is logged as an error, and it stays due.
+ */
+const RETRY_STATUSES = new Set([429, 503]);
+const MAX_RETRIES = 3;
+const BASE_BACKOFF_MS = 10_000;
+
+export const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+export async function cdseFetch(url: string, init: RequestInit, label: string): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, { ...init, cache: 'no-store' });
+    if (!RETRY_STATUSES.has(res.status) || attempt >= MAX_RETRIES) {
+      if (!res.ok) throw new Error(`${label}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}${attempt ? ` (after ${attempt} retries)` : ''}`);
+      return res;
+    }
+    const retryAfter = Number(res.headers.get('retry-after'));
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+      ? Math.min(retryAfter * 1000, 60_000)
+      : BASE_BACKOFF_MS * 2 ** attempt;
+    await res.text().catch(() => undefined);
+    await sleep(waitMs);
+  }
+}
 const PU_FLOOR_PROCESS = 0.005;
 
 export function estimatePu(opts: {
@@ -67,26 +97,22 @@ export interface StatsInterval {
 
 /** POST a Statistical API request; returns the per-interval data array. */
 export async function postStatistics(token: string, body: unknown): Promise<StatsInterval[]> {
-  const res = await fetch(STATS_URL, {
+  const res = await cdseFetch(STATS_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    cache: 'no-store',
-  });
-  if (!res.ok) throw new Error(`statistics: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
+  }, 'statistics');
   const json = (await res.json()) as { data?: StatsInterval[]; status?: string };
   return json.data ?? [];
 }
 
 /** POST a Process API request expecting a PNG. */
 export async function postProcessPng(token: string, body: unknown): Promise<ArrayBuffer> {
-  const res = await fetch(PROCESS_URL, {
+  const res = await cdseFetch(PROCESS_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'image/png' },
     body: JSON.stringify(body),
-    cache: 'no-store',
-  });
-  if (!res.ok) throw new Error(`process: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
+  }, 'process');
   return res.arrayBuffer();
 }
 

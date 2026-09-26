@@ -146,7 +146,10 @@ export function coveredFraction(
   return Math.max(0, Math.min(1, valid / expected));
 }
 
-function statsBody(aoi: DueAoi, evalscript: string, width: number, height: number, withMedian: boolean) {
+function statsBody(
+  aoi: DueAoi, evalscript: string, width: number, height: number, withMedian: boolean,
+  range: { from: string; to: string } = { from: aoi.window_from, to: aoi.window_to },
+) {
   return {
     input: {
       bounds: {
@@ -156,7 +159,7 @@ function statsBody(aoi: DueAoi, evalscript: string, width: number, height: numbe
       data: [{ type: 'sentinel-2-l2a' }],
     },
     aggregation: {
-      timeRange: { from: aoi.window_from, to: aoi.window_to },
+      timeRange: range,
       aggregationInterval: { of: 'P1D' },
       evalscript,
       width,
@@ -176,11 +179,20 @@ function dayOf(iv: StatsInterval): string {
  * Observe one AOI over its window. Returns one row per acquisition day the
  * API reported, plus the PU estimate for the calls made.
  */
+/**
+ * `stored` = acquisition days (ISO 'YYYY-MM-DDT00:00:00Z') this AOI already
+ * has a row for. The window deliberately re-reads the last 5 days so a
+ * late-published product is not lost — but a look already stored does not
+ * change, so it is neither rewritten nor paid for again beyond the cheap
+ * one-band cover request. The first production run showed why: re-reading
+ * the overlap on every daily run would pay for each acquisition ~6 times.
+ */
 export async function observeAoi(
   token: string,
   aoi: DueAoi,
   runId: string,
-): Promise<{ rows: S2Row[]; puEstimate: number; daysReturned: number }> {
+  stored: ReadonlySet<string> = new Set(),
+): Promise<{ rows: S2Row[]; puEstimate: number; daysReturned: number; alreadyStored: number }> {
   const { width, height, pixelAreaM2 } = gridFor(aoi);
 
   const cover = await postStatistics(token, statsBody(aoi, COVER_EVALSCRIPT, width, height, false));
@@ -194,13 +206,22 @@ export async function observeAoi(
     perDay.set(dayOf(iv), { covered, cloud });
   }
 
+  const daysReturned = perDay.size;
+  let alreadyStored = 0;
+  for (const day of [...perDay.keys()]) {
+    if (stored.has(day)) { perDay.delete(day); alreadyStored += 1; }
+  }
+
   const states = new Map<string, CoverageState>();
   for (const [day, v] of perDay) states.set(day, classify(v.covered, v.cloud));
 
-  // The metric is asked for only when at least one day is clear.
+  // The metric is asked for only for NEW clear days, over just their span.
   const medians = new Map<string, number>();
-  if ([...states.values()].includes('clear')) {
-    const ndvi = await postStatistics(token, statsBody(aoi, NDVI_EVALSCRIPT, width, height, true));
+  const newClear = [...states.entries()].filter(([, st]) => st === 'clear').map(([d]) => d).sort();
+  if (newClear.length > 0) {
+    const from = newClear[0];
+    const to = new Date(Date.parse(newClear[newClear.length - 1]) + 86_400_000 - 1000).toISOString();
+    const ndvi = await postStatistics(token, statsBody(aoi, NDVI_EVALSCRIPT, width, height, true, { from, to }));
     pu += estimatePu({ width, height, inputBands: 3, samples: Math.max(ndvi.length, 1), api: 'statistics' });
     for (const iv of ndvi) {
       const m = medianOf(bandStats(iv, 'ndvi'));
@@ -238,7 +259,7 @@ export async function observeAoi(
   // spread the call cost over the rows it produced (estimate, see cdse.ts)
   const share = rows.length ? round4(pu / rows.length) ?? 0 : 0;
   for (const r of rows) r.pu_cost = share;
-  return { rows, puEstimate: round4(pu) ?? 0, daysReturned: perDay.size };
+  return { rows, puEstimate: round4(pu) ?? 0, daysReturned, alreadyStored };
 }
 
 /** True-colour chip of one clear acquisition day, clipped to the AOI bbox. */
