@@ -26,6 +26,8 @@ interface MapViewProps {
   thermal: any[];
   /** Black Marble clear-night radiance + significance events (measured light — NOT power state). */
   nightlights: any[];
+  /** Sentinel-2 latest look per watched site (IMG-2) — a look, dated; never "now". */
+  imagery?: any[];
   /** Fired ~500ms after the user stops panning/zooming, with the visible bbox. */
   onViewportChange?: (bbox: BBox) => void;
 }
@@ -38,6 +40,9 @@ interface MapViewProps {
 //   pipelines branch on `infra_subtype` (pipeline_gas | pipeline_oil); LNG
 //   terminals come through the same prop and are split off into their own
 //   TextLayer.
+// Stable default so an absent prop does not rebuild the layer every render.
+const NO_IMAGERY: any[] = [];
+
 const PIPELINE_COLOR_GAS: [number, number, number, number] = [255, 214, 165, 220];
 const PIPELINE_COLOR_OIL: [number, number, number, number] = [236, 251, 233, 220];
 const LNG_TERMINAL_COLOR: [number, number, number, number] = [255, 214, 165, 240];
@@ -201,6 +206,7 @@ export default function MapView({
   mines,
   thermal,
   nightlights,
+  imagery = NO_IMAGERY,
   onViewportChange,
 }: MapViewProps) {
   const [viewState, setViewState] = useState(MAP_CONFIG.INITIAL_VIEW);
@@ -330,6 +336,27 @@ export default function MapView({
     onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'nightlights' } : null),
     updateTriggers: { getPosition: nightlights.length, getFillColor: nightlights.length, getRadius: nightlights.length },
   }), [nightlights]);
+
+  // ─── Satellite imagery Layer (Sentinel-2 latest look per watched site) ───
+  // HONESTY: a filled ring = the latest look was clear; a hollow ring = the
+  // latest look was cloudy / partly cloudy / partial swath (VOID). The
+  // tooltip never shows an older clear chip without saying the newest look
+  // was not clear.
+  const imageryLayer = useMemo(() => new ScatterplotLayer({
+    id: 'imagery',
+    data: imagery,
+    getPosition: (d: any) => [Number(d.longitude), Number(d.latitude)],
+    getFillColor: (d: any) => (d.latest_state === 'clear' ? [167, 139, 250, 150] : [167, 139, 250, 0]),
+    getLineColor: [167, 139, 250, 230],
+    getRadius: 2500,
+    radiusMinPixels: 4,
+    radiusMaxPixels: 14,
+    stroked: true,
+    lineWidthMinPixels: 1.5,
+    pickable: true,
+    onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'imagery' } : null),
+    updateTriggers: { getPosition: imagery.length, getFillColor: imagery.length },
+  }), [imagery]);
 
   // ─── Refineries Layer (⚗ alembic glyph, orange — OSM Overpass) ───
   const refineryLayer = useMemo(() => new TextLayer({
@@ -516,7 +543,7 @@ export default function MapView({
   // Pipelines render under everything else (lines as background); LNG
   // terminals sit alongside other point markers. Hover-pick order is
   // last → first, so terminals win over pipelines when overlapping.
-  const layers = [pipelineLayer, vesselLayer, aircraftLayer, nightlightsLayer, thermalLayer, conflictLayer, refineryLayer, mineLayer, powerPlantLayer, nuclearLayer, airportLayer, portLayer, lngTerminalLayer];
+  const layers = [pipelineLayer, vesselLayer, aircraftLayer, imageryLayer, nightlightsLayer, thermalLayer, conflictLayer, refineryLayer, mineLayer, powerPlantLayer, nuclearLayer, airportLayer, portLayer, lngTerminalLayer];
 
   // ─── Tooltip Renderer ───
   const renderTooltip = useCallback(() => {
@@ -631,6 +658,61 @@ export default function MapView({
               Emitted light measured from orbit (VIIRS Black Marble) — not power
               state and not a confirmed outage. Clear nights only; a cloudy
               facility simply has no reading. Any cause is inference.
+            </div>
+          </div>
+        );
+        break;
+      }
+      case 'imagery': {
+        const day = (v: string | null | undefined) => (v ? String(v).slice(0, 10) : '—');
+        const stateLabel: Record<string, string> = {
+          clear: 'clear', partly_cloudy: 'partly cloudy — no reading', cloudy: 'cloudy — no reading',
+          partial_swath: 'partial swath — no reading', processing_error: 'processing error — no reading',
+        };
+        const latestClear = object.latest_state === 'clear';
+        content = (
+          <div style={{ maxWidth: 260 }}>
+            <div className="font-semibold" style={{ color: 'rgb(196, 181, 253)' }}>
+              {object.name || object.aoi_id}
+            </div>
+            <div className="text-xs text-gray-400 mt-0.5">
+              Sentinel-2 · {object.kind}{object.country ? ` · ${object.country}` : ''}
+            </div>
+            <div className="text-xs mt-1">
+              Latest look {day(object.latest_acquired_at)}: {stateLabel[object.latest_state] ?? object.latest_state}
+              {object.latest_cloud_fraction != null && !latestClear
+                ? ` (${Math.round(Number(object.latest_cloud_fraction) * 100)}% of the site under cloud)` : ''}
+            </div>
+            {object.chip_url && (
+              <div className="mt-1.5">
+                <div style={{ position: 'relative', width: 240, height: 240 }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={object.chip_url} alt={`Sentinel-2 true colour, ${day(object.clear_acquired_at)}`}
+                       width={240} height={240} style={{ display: 'block', width: 240, height: 240 }} />
+                  <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '2px 4px', fontSize: 9,
+                                background: 'rgba(0,0,0,0.6)', color: '#e5e7eb' }}>
+                    {object.attribution} · {day(object.clear_acquired_at)}
+                  </div>
+                </div>
+                {!latestClear && (
+                  <div className="text-xs mt-1" style={{ color: 'rgb(251, 191, 36)' }}>
+                    Picture from the last CLEAR look ({day(object.clear_acquired_at)}), not the latest.
+                  </div>
+                )}
+              </div>
+            )}
+            {object.metric_value != null && (
+              <div className="text-xs mt-1">
+                Median NDVI {Number(object.metric_value).toFixed(3)}
+                {object.baseline_median != null
+                  ? ` · own baseline ${Number(object.baseline_median).toFixed(3)} (median of ${object.baseline_n} clear looks)`
+                  : ' · no baseline yet (fewer than 3 clear looks)'}
+              </div>
+            )}
+            <div className="text-xs text-gray-500 mt-1.5 leading-snug">
+              A picture of the acquisition day, not now. Median NDVI is a
+              spectral proxy for exposed ground — not a volume, a tonnage or an
+              activity claim. A cloudy look carries no reading.
             </div>
           </div>
         );
