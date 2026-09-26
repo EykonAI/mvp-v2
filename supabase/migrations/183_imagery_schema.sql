@@ -22,7 +22,10 @@
 --         lng_terminal      lng_terminals grouped by project_id (a terminal
 --                           is a site; its units are rows — count sites),
 --                           status 'operating', buffered 1,500 m
---         port              ports with harbor_size L or M, buffered 2,000 m
+--         port              ports with harbor_size 'Large' or 'Medium' (the
+--                           stored WPI words — not the L/M codes mig 013
+--                           documents), buffered 2,000 m; no ISO country
+--                           (ports.country_code is NULL in production)
 --         mine              mines_curated with coordinates (mig 080),
 --                           rows at one coordinate = one site (heavy-REE
 --                           mines appear once per workspace), buffered
@@ -225,7 +228,7 @@ CREATE INDEX IF NOT EXISTS imagery_aois_active_kind_idx
   ON public.imagery_aois (kind) WHERE retired_at IS NULL;
 
 COMMENT ON TABLE public.imagery_aois IS
-  'IMG-1 (mig 183). One row per SITE eYKON may image (count sites, never rows). Seeded and kept in step by imagery_aois_sync() from refinery_complexes, lng_terminals (by project), ports (harbor_size L/M) and mines_curated. sensors_enabled starts empty: nothing is imaged until IMG-2 enables a sensor. The footprint is frozen once an observation exists.';
+  'IMG-1 (mig 183). One row per SITE eYKON may image (count sites, never rows). Seeded and kept in step by imagery_aois_sync() from refinery_complexes, lng_terminals (by project), ports (harbor_size Large/Medium) and mines_curated. sensors_enabled starts empty: nothing is imaged until IMG-2 enables a sensor. The footprint is frozen once an observation exists.';
 
 -- ─── 3 · Observations ──────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.imagery_observations (
@@ -484,14 +487,18 @@ BEGIN
            WHERE t.status = 'operating'
            GROUP BY coalesce(t.project_id, t.id)) s;
 
-  -- ports: large and medium harbours (World Port Index)
+  -- ports: large and medium harbours (World Port Index). country_code is
+  -- NULL on every production row (2026-09-26), so country_iso stays NULL.
   INSERT INTO _imagery_aoi_src
   SELECT 'port:' || p.id, 'port', 'ports', p.id, p.port_name,
          CASE WHEN p.country_code ~ '^[A-Z]{2}$' THEN p.country_code END,
          ST_Buffer(ST_SetSRID(ST_MakePoint(p.longitude, p.latitude), 4326)::geography, 2000)::geometry,
          'point + 2000 m'
     FROM public.ports p
-   WHERE p.harbor_size IN ('L', 'M');
+   -- production values are the WPI words, not the L/M/S/V codes mig 013's
+   -- comment documents (read 2026-09-26: Large 174 · Medium 370 · Small ·
+   -- Very Small · NULL)
+   WHERE p.harbor_size IN ('Large', 'Medium');
 
   -- curated mines with a published coordinate (mig 080). ONE SITE, NOT ONE
   -- ROW: heavy-REE mines are listed once per workspace (dysprosium AND
@@ -592,7 +599,7 @@ SELECT 'lng_terminal',
 UNION ALL
 SELECT 'port',
        (SELECT count(*) FROM public.imagery_aois WHERE kind = 'port' AND retired_at IS NULL),
-       (SELECT count(*) FROM public.ports WHERE harbor_size IN ('L','M'))
+       (SELECT count(*) FROM public.ports WHERE harbor_size IN ('Large','Medium'))
 UNION ALL
 SELECT 'mine',
        (SELECT count(*) FROM public.imagery_aois WHERE kind = 'mine' AND retired_at IS NULL),

@@ -71,8 +71,10 @@ BEGIN
   SELECT count(DISTINCT coalesce(project_id, id)) INTO n_src FROM public.lng_terminals WHERE status = 'operating';
   IF n <> n_src THEN RAISE EXCEPTION 'FAIL 3b: lng_terminal AOIs % vs operating terminal sites %', n, n_src; END IF;
   SELECT count(*) INTO n FROM public.imagery_aois WHERE kind = 'port' AND retired_at IS NULL;
-  SELECT count(*) INTO n_src FROM public.ports WHERE harbor_size IN ('L','M');
-  IF n <> n_src THEN RAISE EXCEPTION 'FAIL 3c: port AOIs % vs L/M ports %', n, n_src; END IF;
+  SELECT count(*) INTO n_src FROM public.ports WHERE harbor_size IN ('Large','Medium');
+  -- n > 0 too: a filter on the wrong spelling makes BOTH sides 0 and "match"
+  -- (the harbor_size L/M vs Large/Medium bug, caught read-only 2026-09-26)
+  IF n <> n_src OR n = 0 THEN RAISE EXCEPTION 'FAIL 3c: port AOIs % vs Large/Medium ports %', n, n_src; END IF;
   SELECT count(*) INTO n FROM public.imagery_aois WHERE kind = 'mine' AND retired_at IS NULL;
   -- sites, not rows: a mine listed in two workspaces is one AOI
   SELECT count(DISTINCT (round(latitude::numeric, 3), round(longitude::numeric, 3))) INTO n_src
