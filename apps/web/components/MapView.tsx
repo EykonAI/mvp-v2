@@ -984,26 +984,20 @@ export default function MapView({
       {renderTooltip()}
 
       {activeContext.length > 0 && (
-        <div
-          style={{
-            position: 'absolute', left: 12, bottom: 28, maxWidth: 340, padding: '8px 10px',
-            background: 'rgba(8, 14, 28, 0.85)', border: '1px solid rgba(148, 163, 184, 0.3)',
-            color: '#e5e7eb', fontSize: 11, lineHeight: 1.4, pointerEvents: 'auto',
-          }}
-        >
+        <div className="ctx-legend">
           {activeContext.map(l => (
-            <div key={l.id} style={{ marginBottom: 6 }}>
-              <div style={{ fontWeight: 600 }}>{l.label}</div>
-              <div style={{ color: '#cbd5e1' }}>
+            <div key={l.id} className="ctx-legend-item">
+              <div className="ctx-legend-title">{l.label}</div>
+              <div className="ctx-legend-time">
                 {l.time
                   ? `Image time ${l.time.replace('T', ' ').replace(':00Z', ' UTC')}${l.partial ? ' · today, still filling in' : ''}`
                   : 'Image time unavailable from NASA GIBS — not drawn'}
               </div>
-              <div style={{ color: '#94a3b8' }}>{l.what_it_is}</div>
+              <div className="ctx-legend-what">{l.what_it_is}</div>
             </div>
           ))}
-          {context?.stale && <div style={{ color: 'rgb(251, 191, 36)' }}>NASA GIBS unreachable — showing the last times read.</div>}
-          <div style={{ color: '#94a3b8', fontSize: 10 }}>{context?.credit}</div>
+          {context?.stale && <div className="ctx-legend-stale">NASA GIBS unreachable — showing the last times read.</div>}
+          <div className="ctx-legend-credit">{context?.credit}</div>
         </div>
       )}
     </div>
