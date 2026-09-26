@@ -90,12 +90,16 @@ export const CATEGORIES: CategoryDef[] = [
     icon: '◉',
     // Surfaced verbatim in the layer panel. A chip is what Sentinel-2
     // recorded on its acquisition day — see app/api/imagery/route.ts.
-    note: 'Latest Sentinel-2 look at each watched site, in its real state — a cloudy week reads cloudy. Chips show their acquisition day, not now. Only sites with a sensor switched on are looked at (today: curated mines). The metric is median NDVI, a spectral proxy, not a volume. True colour and geostationary clouds are NASA GIBS pictures at the time printed on the map — context, never a measurement.',
+    note: 'Latest Sentinel-2 look at each watched site, in its real state — a cloudy week reads cloudy. Chips show their acquisition day, not now. Only sites with a sensor switched on are looked at (today: curated mines). The metric is median NDVI, a spectral proxy, not a volume. True colour and geostationary clouds are NASA GIBS pictures at the time printed on the map — context, never a measurement. Public cameras are government traffic and volcano cameras: a frame shows the time its operator stamped, and only cameras that returned a fresh, changing image are shown. No recognition, no recording.',
     sublayers: [
-      { key: 'imagery.cctv', label: 'Open CCTV', status: 'planned',
-        comingSoon: 'Phase 3 — Windy Webcams API' },
+      // Wave 1 (IMG-5): licence-clean government cameras — TfL, Hong Kong
+      // TD, Singapore LTA, Caltrans, USGS volcano cams. Live cameras only.
+      { key: 'imagery.cctv', label: 'Public cameras', status: 'live',
+        dataKey: 'webcams', predicate: (d: any) => !!d.webcam_id, defaultHidden: true },
       { key: 'imagery.satellite', label: 'Satellite imagery', status: 'live',
-        dataKey: 'imagery', predicate: () => true },
+        // imagery rows carry aoi_id; webcam rows carry webcam_id — the two
+        // sub-layers share this category, so each predicate must pick its own
+        dataKey: 'imagery', predicate: (d: any) => !!d.aoi_id },
       // Context rasters (IMG-4): NASA GIBS pictures drawn under the data
       // layers. No dataKey — nothing counts or reads their pixels. Off by
       // default: they are heavy and they are context, not signal.
@@ -125,9 +129,9 @@ export const CATEGORIES: CategoryDef[] = [
   },
 ];
 
-export type DataKey = 'aircraft' | 'vessels' | 'conflicts' | 'airports' | 'ports' | 'power-plants' | 'pipelines' | 'refineries' | 'mines' | 'firms' | 'nightlights' | 'imagery';
+export type DataKey = 'aircraft' | 'vessels' | 'conflicts' | 'airports' | 'ports' | 'power-plants' | 'pipelines' | 'refineries' | 'mines' | 'firms' | 'nightlights' | 'imagery' | 'webcams';
 
-export const DATA_KEYS: DataKey[] = ['aircraft', 'vessels', 'conflicts', 'airports', 'ports', 'power-plants', 'pipelines', 'refineries', 'mines', 'firms', 'nightlights', 'imagery'];
+export const DATA_KEYS: DataKey[] = ['aircraft', 'vessels', 'conflicts', 'airports', 'ports', 'power-plants', 'pipelines', 'refineries', 'mines', 'firms', 'nightlights', 'imagery', 'webcams'];
 
 /**
  * Default visibility: live sub-layers on (except those flagged

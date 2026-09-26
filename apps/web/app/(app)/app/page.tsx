@@ -58,6 +58,8 @@ export default function Home() {
   const [nightlights, setNightlights] = useState<any[]>([]);
   // Sentinel-2 — latest look per watched site, in its real state; chips show their acquisition day.
   const [imagery, setImagery] = useState<any[]>([]);
+  // Public cameras (IMG-5): live government cameras; frames via /api/webcams/<id>/image.
+  const [webcams, setWebcams] = useState<any[]>([]);
 
   // Per-data-source fetch state (one entry per /api/* route).
   const [dataState, setDataState] = useState<Record<DataKey, LayerState>>({
@@ -73,6 +75,7 @@ export default function Home() {
     firms: initialDataState(),
     nightlights: initialDataState(),
     imagery: initialDataState(),
+    webcams: initialDataState(),
   });
 
   // Per-sub-layer visibility — independent of fetch state, since one parent
@@ -128,6 +131,7 @@ export default function Home() {
     name === 'firms' ? setThermal :
     name === 'nightlights' ? setNightlights :
     name === 'imagery' ? setImagery :
+    name === 'webcams' ? setWebcams :
     setMines;
 
   const fetchLayer = useCallback(
@@ -234,6 +238,7 @@ export default function Home() {
       firms: thermal,
       nightlights,
       imagery,
+      webcams,
     };
     for (const cat of CATEGORIES) {
       for (const sub of cat.sublayers) {
@@ -245,7 +250,7 @@ export default function Home() {
       }
     }
     return out;
-  }, [aircraft, vessels, conflicts, airports, ports, powerPlants, pipelines, refineries, mines, thermal, nightlights, imagery]);
+  }, [aircraft, vessels, conflicts, airports, ports, powerPlants, pipelines, refineries, mines, thermal, nightlights, imagery, webcams]);
 
   const visibleAircraft = useMemo(
     () => filterByVisibleSublayers(aircraft, 'aircraft', sublayerVisible),
@@ -289,6 +294,10 @@ export default function Home() {
     () => filterByVisibleSublayers(thermal, 'thermal', sublayerVisible),
     [thermal, sublayerVisible],
   );
+  const visibleWebcams = useMemo(
+    () => filterByVisibleSublayers(webcams, 'imagery', sublayerVisible),
+    [webcams, sublayerVisible],
+  );
   const visibleImagery = useMemo(
     () => filterByVisibleSublayers(imagery, 'imagery', sublayerVisible),
     [imagery, sublayerVisible],
@@ -318,6 +327,7 @@ export default function Home() {
             thermal={visibleThermal}
             nightlights={visibleNightlights}
             imagery={visibleImagery}
+            webcams={visibleWebcams}
             contextSublayers={['imagery.truecolor', 'imagery.geostationary'].filter(k => sublayerVisible[k])}
             onViewportChange={setBbox}
           />
