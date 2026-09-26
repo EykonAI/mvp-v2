@@ -47,6 +47,9 @@ const cspDirectives = {
     'https://*.basemaps.cartocdn.com',
     'https://tiles.sentinel-hub.com',
     'https://gibs.earthdata.nasa.gov',
+    // Sentinel-2 chips (IMG-2) and the Minerals panel tiles live in Supabase
+    // Storage's public 'sentinel' bucket.
+    supabaseHttp,
   ],
   'connect-src': [
     "'self'",

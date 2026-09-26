@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
  *   supply_risk_index  ← COMPUTED from mineral_production (USGS MCS 2026)
  *                        + mineral_refining_share — not asserted.
  *   in_transit         ← mineral_shipments      (AIS-derived inference cron)
- *   tiles              ← sentinel_tiles         (Sentinel-2 L2A monthly cron)
+ *   tiles              ← imagery_latest()        (Sentinel-2 engine, IMG-2 mig 184)
  *
  * Graceful degradation: any table read failing (including "table does not
  * exist" while the sibling migration deploys) → that section null.
@@ -81,15 +81,17 @@ interface ShipmentRow {
   last_seen: string;
 }
 interface TileRow {
-  aoi_kind: 'mine' | 'port';
-  aoi_ref: string;
-  mineral: string;
-  acquisition_date: string;
-  image_url: string;
-  index_name: string;
-  index_mean: number | null;
-  prev_mean: number | null;
-  change_pct: number | null;
+  aoi_id: string;
+  name: string | null;
+  latest_acquired_at: string;
+  latest_state: string;
+  clear_acquired_at: string;
+  chip_url: string;
+  metric_name: string;
+  metric_value: number | null;
+  baseline_median: number | null;
+  baseline_n: number | null;
+  attribution: string;
 }
 
 /** Latest-year rows per mineral dataset key. */
@@ -132,11 +134,13 @@ export async function GET() {
       .eq('status', 'underway')
       .order('last_seen', { ascending: false })
       .limit(12),
-    supabase
-      .from('sentinel_tiles')
-      .select('aoi_kind, aoi_ref, mineral, acquisition_date, image_url, index_name, index_mean, prev_mean, change_pct')
-      .order('acquisition_date', { ascending: false })
-      .limit(64),
+    // Panel 05 reads the Imagery Layer engine (IMG-2, mig 184): the latest
+    // look per mine AOI in its real state, and the latest clear chip with
+    // the median NDVI and the AOI's own baseline. sentinel_tiles (the
+    // retired monthly cron, NDVI MEAN) is no longer read.
+    supabase.rpc('imagery_latest', {
+      p_lon_min: -180, p_lat_min: -90, p_lon_max: 180, p_lat_max: 90, p_limit: 500,
+    }),
   ]);
 
   // ─── Mines (panel 01) ─────────────────────────────────────────
@@ -250,29 +254,28 @@ export async function GET() {
         last_seen: s.last_seen,
       }));
 
-  // ─── Sentinel-2 tiles (panel 05) — latest pass per AOI ────────
-  // Rows are ordered acquisition_date desc; keep the first (latest) row
-  // per aoi_ref, cap at 8 for the grid.
+  // ─── Sentinel-2 (panel 05) — latest clear chip per mine AOI ────
+  // Newest clear look first; an AOI whose latest look was NOT clear still
+  // shows its last clear chip, with latest_state saying so.
   let tiles: TileRow[] | null = null;
   if (!tilesRes.error) {
-    const seen = new Set<string>();
-    tiles = [];
-    for (const t of (tilesRes.data ?? []) as TileRow[]) {
-      if (seen.has(t.aoi_ref)) continue;
-      seen.add(t.aoi_ref);
-      tiles.push({
-        aoi_kind: t.aoi_kind,
-        aoi_ref: t.aoi_ref,
-        mineral: t.mineral,
-        acquisition_date: t.acquisition_date,
-        image_url: t.image_url,
-        index_name: t.index_name,
-        index_mean: t.index_mean === null ? null : Number(t.index_mean),
-        prev_mean: t.prev_mean === null ? null : Number(t.prev_mean),
-        change_pct: t.change_pct === null ? null : Number(t.change_pct),
-      });
-      if (tiles.length >= 8) break;
-    }
+    tiles = ((tilesRes.data ?? []) as Array<Record<string, any>>)
+      .filter(r => r.kind === 'mine' && r.clear_chip_path)
+      .sort((a, b) => String(b.clear_acquired_at).localeCompare(String(a.clear_acquired_at)))
+      .slice(0, 8)
+      .map(r => ({
+        aoi_id: r.aoi_id,
+        name: r.name,
+        latest_acquired_at: String(r.latest_acquired_at).slice(0, 10),
+        latest_state: r.latest_state,
+        clear_acquired_at: String(r.clear_acquired_at).slice(0, 10),
+        chip_url: supabase.storage.from('sentinel').getPublicUrl(r.clear_chip_path).data.publicUrl,
+        metric_name: r.clear_metric_name,
+        metric_value: r.clear_metric_value === null ? null : Number(r.clear_metric_value),
+        baseline_median: r.clear_baseline_median === null ? null : Number(r.clear_baseline_median),
+        baseline_n: r.clear_baseline_n === null ? null : Number(r.clear_baseline_n),
+        attribution: r.attribution_text,
+      }));
   }
 
   return NextResponse.json({
@@ -288,7 +291,7 @@ export async function GET() {
       refining: 'IEA Global Critical Minerals Outlook 2025 · 2024 refined-output shares',
       mines: 'Curated · operator reports / USGS MCS 2026',
       shipments: 'AIS-derived · cargo inferred from vessel class + route, not manifest data',
-      tiles: 'Sentinel-2 L2A via Copernicus · spectral-index change proxy',
+      tiles: 'Sentinel-2 L2A via Copernicus · median NDVI over clear pixels vs the site\'s own baseline — a spectral change proxy, not a volume',
     },
   });
 }
