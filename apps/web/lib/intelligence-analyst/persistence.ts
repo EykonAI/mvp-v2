@@ -35,6 +35,9 @@ const TOOL_BUCKETS: Record<string, readonly string[]> = {
   query_regime_shifts:      ['Intelligence'],
   query_entities:           ['Intelligence'],
   expand_actor_network:     ['Intelligence'],
+  // Imagery (IMG-7)
+  query_imagery:            ['Imagery'],
+  query_webcams:            ['Imagery'],
 };
 
 export interface ToolCallRecord {
