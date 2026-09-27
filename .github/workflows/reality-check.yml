@@ -73,3 +73,7 @@ jobs:
       # admitted pass co-occurs. The database half is img6_guards.sql.
       - name: Convergence clustering rules (hard gate)
         run: node apps/web/scripts/intel/test-convergence-cluster.mjs
+      # IMG-7: query_imagery / query_webcams — coverage_state on every look,
+      # a VOID row is never a number or a sum, webcams leave as proxy links.
+      - name: Imagery analyst tools (hard gate)
+        run: node apps/web/scripts/intel/test-imagery-tools.mjs

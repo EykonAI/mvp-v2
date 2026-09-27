@@ -5,6 +5,7 @@ import { simulateChokepoint } from './intel/chokepoint';
 import { runWargame } from './intel/sanctions';
 import { FIRMS_REGIONS } from './firms/client';
 import { snapshotNote, unknownSnapshot } from './reference/freshness';
+import { IMAGERY_SENSORS, imageryPayload, webcamPayload, type ImagerySensor, type ObsRow, type CamRow } from './imagery/analyst-tools';
 
 const APP_URL = () => process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
@@ -24,6 +25,8 @@ export async function executeToolCall(toolName: string, toolInput: Record<string
       case 'query_weather':             return await queryWeather(toolInput);
       case 'query_thermal_anomalies':   return await queryThermalAnomalies(toolInput);
       case 'query_nightlights':        return await queryNightlights(toolInput);
+      case 'query_imagery':             return await queryImagery(toolInput);
+      case 'query_webcams':             return await queryWebcams(toolInput);
       case 'query_agent_reports':       return await queryAgentReports(toolInput);
 
       // Intelligence Center
@@ -1081,4 +1084,123 @@ async function expandActorNetwork(input: Record<string, any>): Promise<string> {
   } catch (err: any) {
     return JSON.stringify({ error: err.message });
   }
+}
+
+// ─── Imagery (IMG-7) ───────────────────────────────────────────────────
+// query_imagery: every look with its coverage_state; the payload counts
+// looks and never sums values (lib/imagery/analyst-tools.ts). Sentinel-1
+// rows come only through imagery_s1_readings(), which is empty until the
+// measurement study is admitted (mig 189).
+function num(v: unknown): number | null {
+  const n = typeof v === 'number' ? v : v === undefined || v === null || v === '' ? NaN : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+async function queryImagery(input: Record<string, any>): Promise<string> {
+  const sensor: ImagerySensor = (IMAGERY_SENSORS as readonly string[]).includes(String(input.sensor ?? 's2_l2a'))
+    ? (String(input.sensor ?? 's2_l2a') as ImagerySensor)
+    : 's2_l2a';
+  const windowDays = Math.min(120, Math.max(1, num(input.window_days) ?? 30));
+  const siteLimit = Math.min(100, Math.max(1, num(input.limit) ?? 25));
+  const bbox = [num(input.lat_min), num(input.lat_max), num(input.lon_min), num(input.lon_max)];
+  const hasBbox = bbox.every(v => v !== null);
+  const inBbox = (lat: number | null, lon: number | null) =>
+    !hasBbox || (lat !== null && lon !== null && lat >= bbox[0]! && lat <= bbox[1]! && lon >= bbox[2]! && lon <= bbox[3]!);
+  const supabase = createServerSupabase();
+  let rows: ObsRow[] = [];
+  const extra: Record<string, unknown> = {};
+
+  if (sensor === 's1_grd') {
+    const { data: st, error: stErr } = await supabase.rpc('imagery_s1_status');
+    if (stErr) return JSON.stringify({ error: `imagery_s1_status: ${stErr.message}` });
+    const state = String((st as any[] | null)?.[0]?.state ?? 'no admission recorded');
+    extra.s1_state = state;
+    if (state !== 'admitted') {
+      return JSON.stringify(imageryPayload(sensor, windowDays, [], {
+        ...extra,
+        note: `Sentinel-1 readings are not served: ${state}. The measurement study must admit the method first — say so; do not describe any strait or anchorage from radar.`,
+      }));
+    }
+    const { data, error } = await supabase.rpc('imagery_s1_readings', { p_days: windowDays });
+    if (error) return JSON.stringify({ error: `imagery_s1_readings: ${error.message}` });
+    rows = ((data ?? []) as any[])
+      .filter(r => (!input.aoi_id || r.aoi_id === input.aoi_id) && (!input.kind || r.kind === input.kind) && inBbox(r.centroid_lat, r.centroid_lon))
+      .map(r => ({
+        aoi_id: r.aoi_id, kind: r.kind, name: r.name, lat: r.centroid_lat, lon: r.centroid_lon, sensor: 's1_grd',
+        acquired_at: r.acquired_at, coverage_state: r.coverage_state,
+        metric_name: r.bright_area_m2 === null ? null : 'bright_target_area_m2', metric_value: r.bright_area_m2,
+        baseline_median: r.baseline_median, baseline_n: r.baseline_n, vessel_equivalents: r.vessel_equivalents,
+      }));
+  } else {
+    const since = new Date(Date.now() - windowDays * 86400_000).toISOString();
+    let q = supabase
+      .from('imagery_observations')
+      .select('aoi_id,sensor,acquired_at,coverage_state,metric_name,metric_value,baseline_median,baseline_n,imagery_aois!inner(kind,name,centroid_lat,centroid_lon)')
+      .eq('sensor', 's2_l2a')
+      .gte('acquired_at', since)
+      .order('acquired_at', { ascending: false })
+      .limit(2000);
+    if (input.aoi_id) q = q.eq('aoi_id', String(input.aoi_id));
+    if (input.kind) q = q.eq('imagery_aois.kind', String(input.kind));
+    if (hasBbox) {
+      q = q.gte('imagery_aois.centroid_lat', bbox[0]!).lte('imagery_aois.centroid_lat', bbox[1]!)
+           .gte('imagery_aois.centroid_lon', bbox[2]!).lte('imagery_aois.centroid_lon', bbox[3]!);
+    }
+    const { data, error } = await q;
+    if (error) return JSON.stringify({ error: `imagery_observations: ${error.message}` });
+    rows = ((data ?? []) as any[]).map(r => {
+      const a = Array.isArray(r.imagery_aois) ? r.imagery_aois[0] : r.imagery_aois;
+      return {
+        aoi_id: r.aoi_id, kind: a?.kind ?? null, name: a?.name ?? null, lat: a?.centroid_lat ?? null, lon: a?.centroid_lon ?? null,
+        sensor: r.sensor, acquired_at: r.acquired_at, coverage_state: r.coverage_state, metric_name: r.metric_name,
+        metric_value: r.metric_value, baseline_median: r.baseline_median, baseline_n: r.baseline_n,
+      };
+    });
+    if (rows.length === 2000) extra.truncated = 'more than 2,000 looks matched; narrow the bbox, kind or window';
+  }
+
+  // cap by SITE, keeping every look of each returned site
+  const keep = new Set<string>();
+  for (const r of rows) { if (keep.size >= siteLimit) break; keep.add(r.aoi_id); }
+  const kept = rows.filter(r => keep.has(r.aoi_id));
+  if (kept.length < rows.length) extra.sites_omitted = new Set(rows.map(r => r.aoi_id)).size - keep.size;
+  return JSON.stringify(imageryPayload(sensor, windowDays, kept, extra));
+}
+
+async function queryWebcams(input: Record<string, any>): Promise<string> {
+  const limit = Math.min(200, Math.max(1, num(input.limit) ?? 25));
+  const supabase = createServerSupabase();
+  let box: [number, number, number, number] | null = null; // lon_min, lat_min, lon_max, lat_max
+  const extra: Record<string, unknown> = {};
+  let aoiFilter: string | null = null;
+
+  if (input.aoi_id) {
+    const { data: a, error } = await supabase.from('imagery_aois').select('aoi_id,name,centroid_lat,centroid_lon').eq('aoi_id', String(input.aoi_id)).maybeSingle();
+    if (error) return JSON.stringify({ error: `imagery_aois: ${error.message}` });
+    if (!a) return JSON.stringify({ error: `unknown aoi_id ${input.aoi_id}` });
+    box = [a.centroid_lon - 0.1, a.centroid_lat - 0.1, a.centroid_lon + 0.1, a.centroid_lat + 0.1];
+    aoiFilter = a.aoi_id;
+    extra.site = { aoi_id: a.aoi_id, name: a.name };
+  } else if (num(input.lat) !== null && num(input.lon) !== null) {
+    const r = Math.min(200, Math.max(1, num(input.radius_km) ?? 25));
+    const lat = num(input.lat)!, lon = num(input.lon)!;
+    const dLat = r / 110.574, dLon = r / (111.32 * Math.max(0.05, Math.cos((lat * Math.PI) / 180)));
+    box = [lon - dLon, Math.max(-90, lat - dLat), lon + dLon, Math.min(90, lat + dLat)];
+    extra.around = { lat, lon, radius_km: r, shape: 'bounding box of the radius' };
+  } else if ([input.lat_min, input.lat_max, input.lon_min, input.lon_max].every(v => num(v) !== null)) {
+    box = [num(input.lon_min)!, num(input.lat_min)!, num(input.lon_max)!, num(input.lat_max)!];
+  } else {
+    return JSON.stringify({ error: 'Pass a bbox (lat_min, lat_max, lon_min, lon_max), a point (lat, lon, radius_km) or an aoi_id.' });
+  }
+  // wrap longitudes into [-180, 180]; webcams_in_bbox reads lon_min > lon_max as crossing the antimeridian (mig 188)
+  const wrap = (x: number) => ((((x + 180) % 360) + 360) % 360) - 180;
+  const span = box[2] - box[0];
+  const [lonMin, lonMax] = span >= 360 ? [-180, 180] : [wrap(box[0]), wrap(box[2])];
+  const { data, error } = await supabase.rpc('webcams_in_bbox', {
+    p_lon_min: lonMin, p_lat_min: box[1], p_lon_max: lonMax, p_lat_max: box[3], p_limit: 5000,
+  });
+  if (error) return JSON.stringify({ error: `webcams_in_bbox: ${error.message}` });
+  let rows = (data ?? []) as CamRow[];
+  if (aoiFilter) rows = rows.filter(c => c.nearest_aoi_id === aoiFilter);
+  return JSON.stringify(webcamPayload(APP_URL(), rows, limit, extra));
 }

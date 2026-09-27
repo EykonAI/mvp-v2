@@ -218,6 +218,30 @@ export const TOOL_PROVENANCE: Record<string, ToolProvenance> = {
       'FIXTURE-BACKED. Excluded from demos in the platform\'s own groundedness rule. Do NOT quote as a measurement.',
     ],
   },
+  query_imagery: {
+    grounding: 'live_lagging',
+    source: 'Copernicus Sentinel-2 L2A (and Sentinel-1 GRD once admitted) via the Copernicus Data Space Ecosystem, over eYKON-watched site polygons',
+    audited_on: '2026-09-27',
+    caveats: [
+      'Every row carries coverage_state. A look that is not "clear" is a look that did not see the site: its value is NULL — NOT zero, NOT "no activity". Never add or average values across looks or sites.',
+      'Sentinel-2 revisits every ~5 days and cloud hides many of those; the newest clear look can be weeks old. Read acquired_at before describing anything as current.',
+      'ndvi_median is a spectral proxy for surface cover, not a tonnage, a volume or an activity level. Compare a site only with its OWN median (ratio_to_baseline, n >= 3).',
+      'Sentinel-1 radar rows exist only after the measurement study admitted the method; vessel_equivalents is a bright-return area divided by one calibration ratio — an estimate, never a vessel count.',
+      'Only sites with a sensor switched on are imaged. A site absent from the result was not looked at.',
+      'Credit: Contains modified Copernicus Sentinel data <year>.',
+    ],
+  },
+  query_webcams: {
+    grounding: 'live',
+    source: 'Government public-camera feeds (TfL, HK Transport Department, Singapore LTA via data.gov.sg, Caltrans, USGS) — registry daily, liveness hourly',
+    audited_on: '2026-09-27',
+    caveats: [
+      'Returns camera positions, operator credit and eYKON image links — never frames and never the operator\'s own URLs.',
+      'A frame shows what the camera recorded when its operator stamped it, not "now". Liveness is re-checked hourly; a camera can fail between checks.',
+      'Coverage is five operators (London, Hong Kong, Singapore, California, US volcanoes). No camera in an area is absence of coverage, not evidence.',
+      'No recognition, counting or recording of people or vehicles is done or implied.',
+    ],
+  },
   run_chokepoint_scenario: {
     grounding: 'model',
     source: 'deterministic chokepoint closure simulation',
