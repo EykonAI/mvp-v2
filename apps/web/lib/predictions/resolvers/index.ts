@@ -8,6 +8,7 @@ import { resolveAisDarkgap } from './ais-darkgap';
 import { resolveFirmsRecovery } from './firms-recovery';
 import { resolveBlackmarble } from './blackmarble';
 import { resolveRefineryRc } from './refinery-rc';
+import { resolveS1Anchorage } from './s1-anchorage';
 import type { PredictionRow, Resolution, SupabaseAny } from './types';
 
 export type { PredictionRow, Resolution } from './types';
@@ -51,6 +52,8 @@ export async function resolveBySource(
       return resolveBlackmarble(row, supabase);
     case 'refinery-rc':
       return resolveRefineryRc(row, supabase);
+    case 's1-anchorage':
+      return resolveS1Anchorage(row, supabase);
     case 'manual': {
       const track = await trackOf(row, supabase);
       if (track === null) return null;                     // lookup failed — retry, never assume
