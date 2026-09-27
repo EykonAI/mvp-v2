@@ -292,6 +292,12 @@ function RuleMeta({ rule }: { rule: Rule }) {
     filterSummary = cfg.predicates
       .map(p => p.tool ?? '?')
       .join(' + ');
+  } else if ((rule.rule_type as string) === 'imagery_change') {
+    // IMG-8 (mig 191): satellite reading vs the site's own median. The Rule
+    // type above predates aggregate/firms_proximity too, hence the cast.
+    const ic = rule.config as { sensor?: string; aoi_id?: string | null; kind?: string | null; direction?: string; min_change_pct?: number };
+    toolSummary = `${ic.sensor === 's1_grd' ? 'Sentinel-1 radar' : 'Sentinel-2 NDVI'} · ${ic.direction ?? 'either'} ≥ ${ic.min_change_pct ?? '?'} %`;
+    filterSummary = ic.aoi_id ?? (ic.kind ? `any ${ic.kind.replace(/_/g, ' ')}` : '');
   } else if (rule.rule_type === 'outcome_ai' || rule.rule_type === 'cross_data_ai') {
     const aiCfg = rule.config as { outcome_statement?: string; buckets?: string[] };
     const buckets = Array.isArray(aiCfg.buckets) ? aiCfg.buckets : [];

@@ -38,7 +38,7 @@ interface VerifiedChannel {
   label: string | null;
 }
 
-type RuleMode = 'single_event' | 'multi_event' | 'outcome_ai' | 'cross_data_ai' | 'firms_proximity';
+type RuleMode = 'single_event' | 'multi_event' | 'outcome_ai' | 'cross_data_ai' | 'firms_proximity' | 'imagery_change';
 
 interface PredicateState {
   tool: SingleEventToolId;
@@ -59,6 +59,28 @@ interface FirmsState {
   minDetections: number;
   significantOnly: boolean;
 }
+
+/** Imagery-change config, mirroring ImageryChangeConfig in
+ *  lib/notifications/imagery-change.ts (mig 191). Same bounds as the API. */
+interface ImageryState {
+  sensor: 's2_l2a' | 's1_grd';
+  target: 'kind' | 'site';
+  kind: string;
+  aoiId: string;
+  direction: 'up' | 'down' | 'either';
+  minChangePct: number;
+}
+
+const DEFAULT_IMAGERY: ImageryState = {
+  sensor: 's2_l2a',
+  target: 'kind',
+  kind: 'mine',
+  aoiId: '',
+  direction: 'either',
+  // 20 %: on 2026-09-27 two of 35 baselined Sentinel-2 mine looks moved
+  // that far from their own median — rare enough to be worth an interrupt.
+  minChangePct: 20,
+};
 
 const FIRMS_RADIUS_MIN_KM = 0.1;
 const FIRMS_RADIUS_MAX_KM = 5;
@@ -105,6 +127,9 @@ export function RuleBuilder({ persona, onCreated, onCancel, prefill }: RuleBuild
   // so an ungated rule fires forever and trains the reader to ignore the
   // channel. The user can turn it off deliberately.
   const [firms, setFirms] = useState<FirmsState>(initial.firms);
+
+  // Imagery-change state (rule_type='imagery_change', migration 191).
+  const [imagery, setImagery] = useState<ImageryState>(DEFAULT_IMAGERY);
 
   // AI rules state
   const [outcomeStatement, setOutcomeStatement] = useState(initial.outcomeStatement);
@@ -168,8 +193,13 @@ export function RuleBuilder({ persona, onCreated, onCancel, prefill }: RuleBuild
           : 'monitored facilities');
       return `${firms.significantOnly ? 'Significant thermal' : 'Thermal'} activity — ${what}`;
     }
+    if (mode === 'imagery_change') {
+      const what = imagery.target === 'site' ? imagery.aoiId.trim() || '(site id)' : `any ${imagery.kind.replace(/_/g, ' ')}`;
+      const verb = imagery.direction === 'up' ? 'rises' : imagery.direction === 'down' ? 'falls' : 'moves';
+      return `${imagery.sensor === 's2_l2a' ? 'Sentinel-2 median NDVI' : 'Sentinel-1 radar'} ${verb} ≥ ${imagery.minChangePct} % · ${what}`;
+    }
     return suggestAiRuleName(mode, outcomeStatement || '(outcome statement)');
-  }, [mode, tool, filters, predicates, windowHours, outcomeStatement, firms]);
+  }, [mode, tool, filters, predicates, windowHours, outcomeStatement, firms, imagery]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -177,7 +207,15 @@ export function RuleBuilder({ persona, onCreated, onCancel, prefill }: RuleBuild
     setError(null);
     try {
       const config =
-        mode === 'firms_proximity'
+        mode === 'imagery_change'
+          ? {
+              sensor: imagery.sensor,
+              aoi_id: imagery.target === 'site' ? imagery.aoiId.trim() || null : null,
+              kind: imagery.target === 'kind' ? imagery.kind : null,
+              direction: imagery.direction,
+              min_change_pct: imagery.minChangePct,
+            }
+          : mode === 'firms_proximity'
           ? {
               facility_type: firms.facilityType || null,
               country: firms.country.trim() || null,
@@ -298,6 +336,10 @@ export function RuleBuilder({ persona, onCreated, onCancel, prefill }: RuleBuild
         <FirmsProximityFields value={firms} onChange={setFirms} />
       )}
 
+      {mode === 'imagery_change' && (
+        <ImageryChangeFields value={imagery} onChange={setImagery} />
+      )}
+
       {(mode === 'outcome_ai' || mode === 'cross_data_ai') && (
         <AiFields
           mode={mode}
@@ -415,6 +457,7 @@ function ModeSelector({ mode, onChange }: { mode: RuleMode; onChange: (m: RuleMo
       <ModeTab label="Outcome AI" active={mode === 'outcome_ai'} onClick={() => onChange('outcome_ai')} />
       <ModeTab label="Cross-data AI" active={mode === 'cross_data_ai'} onClick={() => onChange('cross_data_ai')} />
       <ModeTab label="Thermal proximity" active={mode === 'firms_proximity'} onClick={() => onChange('firms_proximity')} />
+      <ModeTab label="Satellite change" active={mode === 'imagery_change'} onClick={() => onChange('imagery_change')} />
     </div>
   );
 }
@@ -847,6 +890,82 @@ function derivePrefill(suggestion: Suggestion | undefined): DerivedPrefill {
  * honest thing is to make the constrained inputs obvious here rather
  * than let the user discover them via a rejection.
  */
+function ImageryChangeFields({
+  value,
+  onChange,
+}: {
+  value: ImageryState;
+  onChange: (v: ImageryState) => void;
+}) {
+  const set = <K extends keyof ImageryState>(k: K, v: ImageryState[K]) => onChange({ ...value, [k]: v });
+  return (
+    <div className="imagery-rule-fields">
+      <p className="imagery-rule-intro">
+        Alerts when a watched site&apos;s satellite reading moves from its OWN median of earlier clear
+        looks. A cloudy or missed look is logged as VOID and never fires — it is not zero. Sentinel-2
+        median NDVI is a reading of surface cover, not a tonnage or an activity level.
+      </p>
+
+      <label style={fieldLabel}>
+        Sensor
+        <select value={value.sensor} onChange={e => set('sensor', e.target.value as ImageryState['sensor'])} style={inputStyle}>
+          <option value="s2_l2a">Sentinel-2 · median NDVI (optical)</option>
+          <option value="s1_grd">Sentinel-1 · radar (only once admitted)</option>
+        </select>
+      </label>
+
+      <label style={fieldLabel}>
+        Watch
+        <select value={value.target} onChange={e => set('target', e.target.value as ImageryState['target'])} style={inputStyle}>
+          <option value="kind">Every site of a kind</option>
+          <option value="site">One site (by id)</option>
+        </select>
+      </label>
+
+      {value.target === 'kind' ? (
+        <label style={fieldLabel}>
+          Site kind
+          <select value={value.kind} onChange={e => set('kind', e.target.value)} style={inputStyle}>
+            <option value="mine">Critical-mineral mines</option>
+            <option value="port">Ports</option>
+            <option value="refinery_complex">Refinery complexes</option>
+            <option value="lng_terminal">LNG terminals</option>
+            <option value="anchorage">Anchorages (radar)</option>
+            <option value="chokepoint">Strait windows (radar)</option>
+          </select>
+        </label>
+      ) : (
+        <label style={fieldLabel}>
+          Site id <span style={hintStyle}>as shown on the globe card, e.g. mine:…</span>
+          <input type="text" value={value.aoiId} onChange={e => set('aoiId', e.target.value)} placeholder="mine:…" style={inputStyle} />
+        </label>
+      )}
+
+      <label style={fieldLabel}>
+        Direction
+        <select value={value.direction} onChange={e => set('direction', e.target.value as ImageryState['direction'])} style={inputStyle}>
+          <option value="either">Either way</option>
+          <option value="up">Rises</option>
+          <option value="down">Falls</option>
+        </select>
+      </label>
+
+      <label style={fieldLabel}>
+        Minimum change (%) <span style={hintStyle}>10–500, against the site&apos;s own median (needs 3 earlier clear looks)</span>
+        <input
+          type="number"
+          min={10}
+          max={500}
+          step={1}
+          value={value.minChangePct}
+          onChange={e => set('minChangePct', Math.min(500, Math.max(10, Number(e.target.value) || 10)))}
+          style={inputStyle}
+        />
+      </label>
+    </div>
+  );
+}
+
 function FirmsProximityFields({
   value,
   onChange,

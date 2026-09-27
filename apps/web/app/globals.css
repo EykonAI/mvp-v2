@@ -612,3 +612,7 @@ body.intel-view {
 .s1-pass-void { color: var(--ink-faint); font-style: italic; }
 .s1-pass-raised { color: var(--amber); }
 .s1-strip-credit { margin-top: 6px; font-size: 10px; color: var(--ink-faint); }
+
+/* ─── IMG-8 satellite-change rule fields (RuleBuilder) ────────────────── */
+.imagery-rule-fields { display: flex; flex-direction: column; gap: 10px; }
+.imagery-rule-intro { font-size: 12px; color: var(--ink-dim); line-height: 1.55; margin: 0; }

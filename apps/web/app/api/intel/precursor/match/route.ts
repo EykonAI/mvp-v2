@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase-server';
 import precursor from '@/lib/fixtures/precursor_library.json';
 import { THEATRE_SLUGS, resolveTheatreSlug } from '@/lib/theatres';
 import posture from '@/lib/fixtures/posture_seed.json';
-import { storedComposite } from '@/lib/intel/postureComposite';
+import { fourDomainComposite } from '@/lib/intel/postureComposite';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,7 +50,7 @@ async function buildLiveCurrent(
   // days of daily averages.
   const { data, error } = await supabase
     .from('posture_scores')
-    .select('composite, imagery, computed_at')
+    .select('composite, imagery, composite_formula, air, sea, conflict, grid, computed_at')
     .eq('theatre_slug', theatreSlug)
     .gte('computed_at', since)
     .order('computed_at', { ascending: false })
@@ -60,10 +60,12 @@ async function buildLiveCurrent(
   // Daily average of composite, keyed by UTC day.
   const byDay = new Map<string, { sum: number; n: number }>();
   for (const row of data) {
-    // storedComposite() puts pre-IMG-0 rows on today's formula, so the
-    // 30-day series has no step on the deploy day; a missing composite is
-    // skipped rather than averaged in as 0.
-    const composite = storedComposite(row.composite, row.imagery);
+    // fourDomainComposite() keeps the series on the FOUR-domain formula the
+    // precursor library is built on: pre-IMG-0 rows are reconstructed, and
+    // five-domain-v3 rows (IMG-8) are recomputed from their four domains, so
+    // a theatre gaining a measured imagery term does not step its series. A
+    // missing composite is skipped rather than averaged in as 0.
+    const composite = fourDomainComposite(row);
     if (composite === null) continue;
     const day = String(row.computed_at).slice(0, 10);
     const agg = byDay.get(day) ?? { sum: 0, n: 0 };

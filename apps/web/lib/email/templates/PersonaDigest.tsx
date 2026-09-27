@@ -1,4 +1,4 @@
-import { Button, Link, Text } from '@react-email/components';
+import { Button, Img, Link, Text } from '@react-email/components';
 import { EmailLayout, styles } from './EmailLayout';
 import { APP_URL } from '@/lib/url';
 import type { DigestData } from '@/lib/notifications/digest';
@@ -24,6 +24,12 @@ const SEVERITY_COLORS: Record<string, string> = {
 function severityColor(severity: string | null | undefined): string {
   return SEVERITY_COLORS[(severity || '').toLowerCase()] ?? '#8BA3B8';
 }
+
+// IMG-8 weekly imagery item — named objects, not inline literals (a11y budget).
+const imageryItemStyle = { color: '#B8C4D6', fontSize: 13, lineHeight: 1.55, margin: '0 0 10px' };
+const imageryStrongStyle = { color: '#E6EDF7' };
+const imageryChipStyle = { display: 'block', marginTop: 6, borderRadius: 2 };
+const imageryCreditStyle = { color: '#8791A4', fontSize: 11, margin: 0 };
 
 function arrow(delta: number): string {
   return delta > 0 ? '▲' : delta < 0 ? '▼' : '·';
@@ -130,6 +136,32 @@ export function PersonaDigest({ data, unsubscribeUrl }: PersonaDigestProps) {
                 {m.from.toFixed(2)} → {m.to.toFixed(2)}
               </span>
             ))}
+          </Text>
+        </div>
+      ) : null}
+
+      {data.imageryMovements.length > 0 ? (
+        <div style={styles.panel}>
+          <Text style={styles.panelLabel}>·· Satellite readings that moved this week ··</Text>
+          {data.imageryMovements.map((m, i) => (
+            <Text key={i} style={imageryItemStyle}>
+              <strong style={imageryStrongStyle}>{m.site}</strong> · {m.sensorLabel}{' '}
+              {m.changePct > 0 ? '+' : ''}
+              {m.changePct} % vs its own median of {m.baselineN} earlier clear looks · clear look of {m.date}
+              {m.chipUrl ? (
+                <>
+                  <br />
+                  <Img src={m.chipUrl} alt={`Sentinel-2 true-colour chip of ${m.site}, ${m.date}`} width="240" style={imageryChipStyle} />
+                </>
+              ) : null}
+              <br />
+              <span style={imageryCreditStyle}>{m.credit}</span>
+            </Text>
+          ))}
+          <Text style={imageryCreditStyle}>
+            Only cloud-free looks are compared, each with its own site&apos;s median. Sites whose looks this
+            week were cloudy or missed are left out — not reported as unchanged. NDVI is a reading of surface
+            cover, not a tonnage or an activity level.
           </Text>
         </div>
       ) : null}

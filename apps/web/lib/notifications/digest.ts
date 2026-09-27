@@ -81,8 +81,33 @@ export interface DigestSources {
     fatalities: number | null;
     event_date: string | null;
   }>;
-  postureRows: Array<{ theatre_slug: string; composite: number | null; computed_at: string }>;
+  postureRows: Array<{ theatre_slug: string; composite: number | null; formula?: string | null; computed_at: string }>;
+  /** IMG-8: weekly only — imagery_weekly_movements(7, 20) (mig 191). Empty on daily. */
+  imageryMovements: Array<{
+    aoi_id: string;
+    name: string | null;
+    kind: string | null;
+    sensor: string;
+    acquired_at: string;
+    metric_name: string | null;
+    value: number | null;
+    baseline_n: number | null;
+    change_pct: number | null;
+    chip_url: string | null;
+  }>;
   errors: string[];
+}
+
+/** One weekly-brief imagery item: a clear look that moved from its site's own median. */
+export interface DigestImageryMovement {
+  site: string;
+  aoiId: string;
+  sensorLabel: string;
+  date: string;
+  changePct: number;
+  baselineN: number;
+  chipUrl: string | null;
+  credit: string;
 }
 
 export interface DigestData {
@@ -95,6 +120,8 @@ export interface DigestData {
   infraIncidents: DigestInfraIncident[];
   conflictTop: DigestConflict[];
   postureMovers: DigestPostureMover[];
+  /** Weekly only. Nothing from a VOID look can appear (mig 191). */
+  imageryMovements: DigestImageryMovement[];
   totals: { anomalies: number; infraIncidents: number; conflictEvents: number };
   isEmpty: boolean;
 }
@@ -157,7 +184,8 @@ export async function fetchDigestSources(
   const sinceIso = new Date(Date.now() - windowHours * 3600_000).toISOString();
   const errors: string[] = [];
 
-  const [anomaliesRes, convergencesRes, infraRes, conflictRes, postureRes] = await Promise.all([
+  const weekly = windowHours >= 168;
+  const [anomaliesRes, convergencesRes, infraRes, conflictRes, postureRes, imageryRes] = await Promise.all([
     supabase
       .from('anomaly_flags')
       .select('domain, flag_type, severity, payload, created_at')
@@ -184,10 +212,16 @@ export async function fetchDigestSources(
       .limit(60),
     supabase
       .from('posture_scores')
-      .select('theatre_slug, composite, imagery, computed_at')
+      .select('theatre_slug, composite, imagery, composite_formula, computed_at')
       .gte('computed_at', sinceIso)
       .order('computed_at', { ascending: false })
       .limit(2000),
+    // IMG-8: the weekly imagery item. Daily digests skip it — Sentinel-2
+    // revisits every ~5 days, so a daily "no movement" would mostly mean
+    // "not looked at".
+    weekly
+      ? supabase.rpc('imagery_weekly_movements', { p_days: 7, p_min_change_pct: 20 })
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   if (anomaliesRes.error) errors.push(`anomaly_flags: ${anomaliesRes.error.message}`);
@@ -195,6 +229,7 @@ export async function fetchDigestSources(
   if (infraRes.error) errors.push(`infrastructure_events: ${infraRes.error.message}`);
   if (conflictRes.error) errors.push(`conflict_events: ${conflictRes.error.message}`);
   if (postureRes.error) errors.push(`posture_scores: ${postureRes.error.message}`);
+  if (imageryRes.error) errors.push(`imagery_weekly_movements: ${imageryRes.error.message}`);
 
   return {
     windowHours,
@@ -206,13 +241,47 @@ export async function fetchDigestSources(
     // Every composite goes through storedComposite(): rows written before
     // IMG-0 carry the fixture imagery term, and comparing them with rows
     // written after it would report a mover that is only a formula change.
-    postureRows: ((postureRes.data as Array<{ theatre_slug: string; composite: unknown; imagery: unknown; computed_at: string }> | null) ?? []).map(r => ({
+    postureRows: ((postureRes.data as Array<{ theatre_slug: string; composite: unknown; imagery: unknown; composite_formula: unknown; computed_at: string }> | null) ?? []).map(r => ({
       theatre_slug: r.theatre_slug,
-      composite: storedComposite(r.composite, r.imagery),
+      composite: storedComposite(r.composite, r.imagery, r.composite_formula),
+      formula: typeof r.composite_formula === 'string' ? r.composite_formula : null,
       computed_at: r.computed_at,
+    })),
+    imageryMovements: ((imageryRes.data as Array<Record<string, any>> | null) ?? []).map(r => ({
+      aoi_id: String(r.aoi_id),
+      name: r.name ?? null,
+      kind: r.kind ?? null,
+      sensor: String(r.sensor),
+      acquired_at: String(r.acquired_at),
+      metric_name: r.metric_name ?? null,
+      value: typeof r.value === 'number' ? r.value : null,
+      baseline_n: typeof r.baseline_n === 'number' ? r.baseline_n : null,
+      change_pct: typeof r.change_pct === 'number' ? r.change_pct : null,
+      chip_url: r.chip_path ? supabase.storage.from('sentinel').getPublicUrl(String(r.chip_path)).data.publicUrl : null,
     })),
     errors,
   };
+}
+
+/**
+ * Weekly imagery items (IMG-8). The SQL already returns only clear,
+ * baselined looks; this repeats the rule so a VOID look — no value, no
+ * change — can never reach a reader as a figure.
+ */
+export function composeImageryMovements(rows: DigestSources['imageryMovements']): DigestImageryMovement[] {
+  return rows
+    .filter(r => r.value !== null && r.change_pct !== null && (r.baseline_n ?? 0) >= 3)
+    .slice(0, 6)
+    .map(r => ({
+      site: r.name ?? r.aoi_id,
+      aoiId: r.aoi_id,
+      sensorLabel: r.sensor === 's1_grd' ? 'Sentinel-1 radar bright-return area' : 'Sentinel-2 median NDVI',
+      date: r.acquired_at.slice(0, 10),
+      changePct: r.change_pct as number,
+      baselineN: r.baseline_n as number,
+      chipUrl: r.chip_url,
+      credit: `Contains modified Copernicus Sentinel data ${r.acquired_at.slice(0, 4)}`,
+    }));
 }
 
 // ─── Compose (once per persona) ──────────────────────────────────
@@ -295,14 +364,21 @@ export function composeDigest(
   // window. Rows arrive newest-first, so first-seen = `to` and the last
   // row seen per theatre = `from`. Theatres with a single datapoint
   // can't move and are dropped.
-  const postureByTheatre = new Map<string, { to: number; toAt: string; from: number; points: number }>();
+  // IMG-8: a mover compares rows of ONE formula — the newest row's. A
+  // theatre that gained (or lost) a measured imagery term mid-window would
+  // otherwise report the formula change as movement. Rows with no formula
+  // (pre-191) are on the four-domain scale via storedComposite.
+  const postureByTheatre = new Map<string, { to: number; toAt: string; from: number; points: number; formula: string }>();
   for (const row of sources.postureRows) {
     if (typeof row.composite !== 'number') continue;
+    const f = row.formula ?? 'four-domain-v2';
     const existing = postureByTheatre.get(row.theatre_slug);
     if (!existing) {
       postureByTheatre.set(row.theatre_slug, {
-        to: row.composite, toAt: row.computed_at, from: row.composite, points: 1,
+        to: row.composite, toAt: row.computed_at, from: row.composite, points: 1, formula: f,
       });
+    } else if (existing.formula !== f) {
+      continue;
     } else {
       existing.from = row.composite; // keeps updating until the oldest row wins
       existing.points += 1;
@@ -326,7 +402,9 @@ export function composeDigest(
     infraIncidents: infraDeduped.length,
     conflictEvents: sources.conflictEvents.length,
   };
+  const imageryMovements = cadence === 'weekly' ? composeImageryMovements(sources.imageryMovements) : [];
   const isEmpty =
+    imageryMovements.length === 0 &&
     convergences.length === 0 &&
     anomalies.length === 0 &&
     infraIncidents.length === 0 &&
@@ -342,6 +420,7 @@ export function composeDigest(
     infraIncidents,
     conflictTop,
     postureMovers,
+    imageryMovements,
     totals,
     isEmpty,
   };

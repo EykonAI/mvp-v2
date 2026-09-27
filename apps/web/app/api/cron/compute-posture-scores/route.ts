@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
 import seed from '@/lib/fixtures/posture_seed.json';
-import { compositeFromDomains } from '@/lib/intel/postureComposite';
+import { compositeFromDomains, compositeWithImagery, FORMULA_FIVE_DOMAIN, FORMULA_FOUR_DOMAIN } from '@/lib/intel/postureComposite';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -25,7 +25,8 @@ export async function POST(req: NextRequest) {
   const now = new Date();
   const since = new Date(now.getTime() - 30 * 60_000).toISOString();
 
-  const results: Array<{ theatre: string; composite: number }> = [];
+  const results: Array<{ theatre: string; composite: number; formula: string; imagery: number | null; imagery_sites: number }> = [];
+  const imageryErrors: string[] = [];
 
   for (const t of seed.theatres) {
     try {
@@ -68,19 +69,38 @@ export async function POST(req: NextRequest) {
       const sea = saturate((seaRes.count ?? 0) / 50);
       const conflict = saturate((confRes.count ?? 0) / 6);
       const grid = saturate((gridRes.count ?? 0) / 30);
-      const composite = compositeFromDomains(air, sea, conflict, grid);
+      // IMG-8: the imagery term exists only where admitted Sentinel-1 sites
+      // inside the theatre had a clear, baselined look in the last 14 days
+      // (imagery_theatre_term, mig 191). Otherwise NULL and four domains —
+      // absence of a look is not a zero.
+      let imagery: number | null = null;
+      let imagerySites = 0;
+      const { data: term, error: termErr } = await supabase.rpc('imagery_theatre_term', {
+        p_lat_min: bbox.lat_min, p_lat_max: bbox.lat_max, p_lon_min: bbox.lon_min, p_lon_max: bbox.lon_max, p_days: 14,
+      });
+      if (termErr) imageryErrors.push(`${t.slug}: ${termErr.message}`);
+      else {
+        const row = (term as Array<{ sites_seen: number; share: number | null }> | null)?.[0];
+        imagerySites = Number(row?.sites_seen ?? 0);
+        if (row && row.share !== null && Number.isFinite(Number(row.share)) && imagerySites > 0) imagery = Number(row.share);
+      }
+      const formula = imagery === null ? FORMULA_FOUR_DOMAIN : FORMULA_FIVE_DOMAIN;
+      const composite = imagery === null
+        ? compositeFromDomains(air, sea, conflict, grid)
+        : compositeWithImagery(air, sea, conflict, grid, imagery);
 
       const { error: insertError } = await supabase.from('posture_scores').insert({
         theatre_slug: t.slug,
         composite,
         air, sea, conflict, grid,
-        imagery: null,
+        imagery,
+        composite_formula: formula,
         computed_at: now.toISOString(),
       });
       // Fail loud: a tick that reports a composite it never stored is the
       // "ok:true having written nothing" failure (brief §0.2).
       if (insertError) throw new Error(`posture_scores insert: ${insertError.message}`);
-      results.push({ theatre: t.slug, composite });
+      results.push({ theatre: t.slug, composite, formula, imagery, imagery_sites: imagerySites });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'unknown';
       console.error(`compute-posture-scores failed for ${t.slug}:`, message);
@@ -92,7 +112,8 @@ export async function POST(req: NextRequest) {
   return NextResponse.json(
     {
       ok: results.length > 0,
-      formula: 'four-domain-v2 (no imagery term)',
+      formula: 'four-domain-v2; five-domain-v3 only where admitted Sentinel-1 sites had a clear look (IMG-8)',
+      imagery_errors: imageryErrors,
       computed: results,
       computed_at: now.toISOString(),
     },
