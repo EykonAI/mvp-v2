@@ -25,7 +25,24 @@
  *
  * The imagery domain returns when real observations exist
  * (Imagery Layer build prompt, IMG-8) — not before.
+ *
+ * IMG-8 (mig 191): it returns ONLY where it is measured. The term is the
+ * theatre's share of ADMITTED Sentinel-1 sites whose latest clear look is
+ * ≥ 1.5× their own median (imagery_theatre_term). Where it exists the
+ * row is written with the original five weights (they sum to 1):
+ *
+ *   five-domain-v3 = 0.25·air + 0.25·sea + 0.25·conflict + 0.15·grid + 0.10·imagery
+ *
+ * and where it does not — every theatre until the S1 study is admitted —
+ * the four-domain-v2 formula above, imagery NULL. Every row now records
+ * its formula in posture_scores.composite_formula, so readers stop
+ * inferring it from whether imagery is NULL; only rows with no formula
+ * (written before 191) go through the legacy reconstruction.
  */
+
+export const FORMULA_FOUR_DOMAIN = 'four-domain-v2';
+export const FORMULA_FIVE_DOMAIN = 'five-domain-v3';
+const W_IMAGERY = 0.10;
 
 const W_AIR = 0.25;
 const W_SEA = 0.25;
@@ -39,16 +56,23 @@ export function compositeFromDomains(air: number, sea: number, conflict: number,
   return round3((W_AIR * air + W_SEA * sea + W_CONFLICT * conflict + W_GRID * grid) / W_MEASURED);
 }
 
+/** Composite with a MEASURED imagery term (five-domain-v3), on a 0–1 scale. */
+export function compositeWithImagery(air: number, sea: number, conflict: number, grid: number, imagery: number): number {
+  return round3(W_AIR * air + W_SEA * sea + W_CONFLICT * conflict + W_GRID * grid + W_IMAGERY * imagery);
+}
+
 /**
  * A stored posture_scores composite, expressed in the current formula.
  * Rows with imagery IS NULL are already current; rows carrying the legacy
  * fixture imagery value have it removed and are renormalised. Returns null
  * — never 0 — when the row has no composite.
  */
-export function storedComposite(composite: unknown, imagery: unknown): number | null {
+export function storedComposite(composite: unknown, imagery: unknown, formula?: unknown): number | null {
   if (composite === null || composite === undefined || composite === '') return null;
   const c = Number(composite);
   if (!Number.isFinite(c)) return null;
+  // A row that names its formula (mig 191 onward) is stored as written.
+  if (typeof formula === 'string' && formula.length > 0) return c;
   if (imagery === null || imagery === undefined || imagery === '') return c;
   const i = Number(imagery);
   if (!Number.isFinite(i)) return c;
@@ -57,4 +81,21 @@ export function storedComposite(composite: unknown, imagery: unknown): number | 
 
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
+}
+
+/**
+ * The FOUR-domain composite of any stored row — for readers whose history
+ * is four-domain (the precursor library's 30-day vectors), so a theatre
+ * gaining a measured imagery term does not step their series.
+ */
+export function fourDomainComposite(row: {
+  composite: unknown; imagery: unknown; composite_formula?: unknown;
+  air?: unknown; sea?: unknown; conflict?: unknown; grid?: unknown;
+}): number | null {
+  if (row.composite_formula === FORMULA_FIVE_DOMAIN) {
+    const d = [row.air, row.sea, row.conflict, row.grid].map(v => (v === null || v === undefined || v === '' ? NaN : Number(v)));
+    if (d.every(Number.isFinite)) return compositeFromDomains(d[0], d[1], d[2], d[3]);
+    return null;
+  }
+  return storedComposite(row.composite, row.imagery, row.composite_formula);
 }

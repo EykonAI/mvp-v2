@@ -19,7 +19,8 @@ export type NotificationFiredProps = {
     | 'outcome_ai'
     | 'cross_data_ai'
     | 'aggregate'
-    | 'firms_proximity';
+    | 'firms_proximity'
+    | 'imagery_change';
   summary: string;
   detailLines?: string[];
   rationale?: string | null;

@@ -20,6 +20,11 @@ import {
   evaluateFirmsProximityRule,
   type FirmsProximityResult,
 } from '@/lib/notifications/firms-proximity';
+import {
+  buildImageryChangeFirePayload,
+  evaluateImageryChangeRule,
+  type ImageryChangeResult,
+} from '@/lib/notifications/imagery-change';
 import { dispatchWithCap } from '@/lib/notifications/dispatch-with-cap';
 import { findRecentFireCount, PER_RULE_PER_DAY_FIRE_LIMIT } from '@/lib/notifications/cap';
 import type { Tier } from '@/lib/auth/session';
@@ -40,9 +45,9 @@ export const maxDuration = 60;
 const MAX_RULES_PER_TICK = 200;
 
 type ProcessResult =
-  | { state: 'fired'; ruleId: string; logId: string | null }
+  | { state: 'fired'; ruleId: string; logId: string | null; voidLooks?: number }
   | { state: 'cooldown'; ruleId: string }
-  | { state: 'no_match'; ruleId: string }
+  | { state: 'no_match'; ruleId: string; voidLooks?: number }
   | { state: 'rate_limited'; ruleId: string }
   | { state: 'error'; ruleId: string; error: string };
 
@@ -61,7 +66,7 @@ export async function POST(req: NextRequest) {
       'id, user_id, name, rule_type, config, channel_ids, active, cooldown_minutes, last_fired_at, created_at',
     )
     .eq('active', true)
-    .in('rule_type', ['single_event', 'multi_event', 'aggregate', 'firms_proximity'])
+    .in('rule_type', ['single_event', 'multi_event', 'aggregate', 'firms_proximity', 'imagery_change'])
     .order('last_fired_at', { ascending: true, nullsFirst: true })
     .limit(MAX_RULES_PER_TICK);
 
@@ -91,6 +96,12 @@ export async function POST(req: NextRequest) {
     no_match: results.filter(r => r.state === 'no_match').length,
     rate_limited: results.filter(r => r.state === 'rate_limited').length,
     errors: results.filter(r => r.state === 'error').length,
+    // imagery_change: looks that did not see their site this tick — logged
+    // in imagery_rule_evaluations as 'void', never fired, never zero (mig 191)
+    imagery_void_looks_logged: results.reduce(
+      (n, r) => n + ((r.state === 'no_match' || r.state === 'fired') && r.voidLooks ? r.voidLooks : 0),
+      0,
+    ),
   };
   return NextResponse.json(summary);
 }
@@ -118,7 +129,9 @@ async function processRule(
     | { kind: 'multi'; result: MultiEventMatchResult }
     | { kind: 'aggregate'; result: AggregateResult }
     | { kind: 'firms'; result: FirmsProximityResult }
+    | { kind: 'imagery'; result: ImageryChangeResult }
     | null = null;
+  let voidLooks = 0;
   if (rule.rule_type === 'single_event') {
     const match = await findSingleEventMatch(admin, rule);
     if (match) firePayloadInput = { kind: 'single', match };
@@ -138,9 +151,16 @@ async function processRule(
     // nothing NEW was claimed.
     const result = await evaluateFirmsProximityRule(admin, rule);
     if (result) firePayloadInput = { kind: 'firms', result };
+  } else if (rule.rule_type === 'imagery_change') {
+    // Satellite reading vs the site's own median (IMG-8, mig 191). Every
+    // new look is judged once in imagery_rule_evaluations — a look that
+    // did not see the site is logged as 'void' and never fires.
+    const ev = await evaluateImageryChangeRule(admin, rule);
+    voidLooks = ev.voidLooks;
+    if (ev.result) firePayloadInput = { kind: 'imagery', result: ev.result };
   }
   if (!firePayloadInput) {
-    return { state: 'no_match', ruleId: rule.id };
+    return { state: 'no_match', ruleId: rule.id, voidLooks };
   }
 
   // Resolve channel ids → verified, active rows. dispatchWithCap
@@ -165,6 +185,8 @@ async function processRule(
       ? buildMultiEventFirePayload(rule, firePayloadInput.result, firedAtIso)
       : firePayloadInput.kind === 'firms'
       ? buildFirmsProximityFirePayload(rule, firePayloadInput.result, firedAtIso)
+      : firePayloadInput.kind === 'imagery'
+      ? buildImageryChangeFirePayload(rule, firePayloadInput.result, firedAtIso)
       : buildAggregateFirePayload(rule, firePayloadInput.result, firedAtIso);
 
   const userTier = await getUserTier(admin, rule.user_id);
@@ -195,6 +217,12 @@ async function processRule(
       ? {
           match_rows: firePayloadInput.result.matches.map(m => m.row),
           matched_at: firePayloadInput.result.matchedAtIso,
+        }
+      : firePayloadInput.kind === 'imagery'
+      ? {
+          // The looks this fire is about (clear, baselined, over threshold).
+          imagery_looks: firePayloadInput.result.fired,
+          imagery_void_looks: firePayloadInput.result.voidLooks,
         }
       : firePayloadInput.kind === 'firms'
       ? {
@@ -244,7 +272,7 @@ async function processRule(
     .update({ last_fired_at: firedAtIso, updated_at: firedAtIso })
     .eq('id', rule.id);
 
-  return { state: 'fired', ruleId: rule.id, logId: logRow?.id ?? null };
+  return { state: 'fired', ruleId: rule.id, logId: logRow?.id ?? null, voidLooks };
 }
 
 // ─── User lookups (service-role only) ────────────────────────────

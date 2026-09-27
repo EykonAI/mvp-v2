@@ -77,3 +77,8 @@ jobs:
       # a VOID row is never a number or a sum, webcams leave as proxy links.
       - name: Imagery analyst tools (hard gate)
         run: node apps/web/scripts/intel/test-imagery-tools.mjs
+      # IMG-8: imagery alerts, the weekly brief item and the posture term —
+      # a VOID look never alerts, the brief is weekly-only and clear-only,
+      # a formula change is never a posture mover. SQL half: img8_guards.sql.
+      - name: Imagery alerts, brief and posture (hard gate)
+        run: node apps/web/scripts/intel/test-imagery-notif.mjs

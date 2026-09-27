@@ -19,7 +19,7 @@ export async function GET(_req: NextRequest) {
     const since = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
     const { data, error } = await supabase
       .from('posture_scores')
-      .select('theatre_slug, composite, imagery, computed_at')
+      .select('theatre_slug, composite, imagery, composite_formula, computed_at')
       .gte('computed_at', since)
       .order('computed_at', { ascending: false })
       .limit(200);
@@ -36,7 +36,7 @@ export async function GET(_req: NextRequest) {
       // Through storedComposite so a row written under the old five-term
       // formula reads on today's scale; a missing composite is skipped,
       // never shown as 0.
-      const composite = storedComposite(row.composite, row.imagery);
+      const composite = storedComposite(row.composite, row.imagery, row.composite_formula);
       if (composite === null) continue;
       latest.set(slug, { slug, composite, computed_at: String(row.computed_at) });
     }

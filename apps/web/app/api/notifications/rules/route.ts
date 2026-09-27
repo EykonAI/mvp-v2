@@ -47,6 +47,7 @@ import {
   type FirmsProximityConfig,
 } from '@/lib/notifications/firms-proximity';
 import { createServerSupabase } from '@/lib/supabase-server';
+import { normaliseImageryChangeConfig, suggestImageryRuleName } from '@/lib/notifications/imagery-change';
 import { isValidPersona } from '@/lib/intelligence-analyst/personas';
 
 // /api/notifications/rules — list and create rules.
@@ -69,6 +70,7 @@ const ALLOWED_RULE_TYPES = new Set([
   'cross_data_ai',
   'aggregate',
   'firms_proximity',
+  'imagery_change',
 ]);
 
 export async function GET(_req: NextRequest) {
@@ -126,6 +128,12 @@ interface CreateBody {
     radius_km?: unknown;
     min_frp?: unknown;
     min_detections?: unknown;
+    // imagery_change (191)
+    sensor?: unknown;
+    aoi_id?: unknown;
+    kind?: unknown;
+    direction?: unknown;
+    min_change_pct?: unknown;
   };
 }
 
@@ -314,6 +322,55 @@ export async function POST(req: NextRequest) {
       },
     };
     derivedName = suggestFirmsRuleName(firmsConfig);
+  } else if (body.rule_type === 'imagery_change') {
+    // ─── Satellite reading vs the site's own median (IMG-8, mig 191) ───
+    const parsed = normaliseImageryChangeConfig(body.config as Record<string, unknown> | undefined);
+    if ('error' in parsed) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
+    }
+    const ic = parsed.config;
+    // Coverage gate, as for firms_proximity: refuse a rule that can never
+    // fire because nothing it names is being looked at.
+    const admin = createServerSupabase();
+    if (ic.sensor === 's1_grd') {
+      const { data: st, error: stErr } = await admin.rpc('imagery_s1_status');
+      if (stErr) return NextResponse.json({ error: 'coverage_check_failed' }, { status: 503 });
+      const state = String((st as Array<{ state: string }> | null)?.[0]?.state ?? 'no admission recorded');
+      if (state !== 'admitted') {
+        return NextResponse.json(
+          {
+            error: 'sentinel1_not_admitted',
+            hint: 'Sentinel-1 radar readings are not served until the measurement study admits them. A rule on them could not fire.',
+          },
+          { status: 400 },
+        );
+      }
+    }
+    let q = admin
+      .from('imagery_aois')
+      .select('aoi_id', { count: 'exact', head: true })
+      .is('retired_at', null)
+      .contains('sensors_enabled', [ic.sensor]);
+    q = ic.aoi_id ? q.eq('aoi_id', ic.aoi_id) : q.eq('kind', ic.kind!);
+    const { count, error: covErr } = await q;
+    if (covErr) return NextResponse.json({ error: 'coverage_check_failed' }, { status: 503 });
+    if (!count) {
+      return NextResponse.json(
+        {
+          error: 'no_watched_sites_match',
+          watched_sites: 0,
+          hint: ic.aoi_id
+            ? `The site ${ic.aoi_id} does not exist or is not imaged by this sensor, so the rule would never see a look.`
+            : `No ${ic.kind} site is imaged by this sensor today, so the rule would never see a look.`,
+        },
+        { status: 400 },
+      );
+    }
+    savedConfig = {
+      ...(ic as unknown as Record<string, unknown>),
+      coverage_at_creation: { watched_sites: count, checked_at: new Date().toISOString() },
+    };
+    derivedName = suggestImageryRuleName(ic);
   } else {
     // aggregate (PR 5)
     const bucket = body.config?.bucket;

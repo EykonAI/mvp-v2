@@ -36,7 +36,8 @@ export interface RuleRow {
     | 'outcome_ai'
     | 'cross_data_ai'
     | 'aggregate'
-    | 'firms_proximity';
+    | 'firms_proximity'
+    | 'imagery_change';
   config: SingleEventConfig | Record<string, unknown>;
   channel_ids: string[];
   active: boolean;
