@@ -29,6 +29,8 @@ interface MapViewProps {
   nightlights: any[];
   /** Sentinel-2 latest look per watched site (IMG-2) — a look, dated; never "now". */
   imagery?: any[];
+  /** Live public cameras (IMG-5) — frames come through /api/webcams/<id>/image, never the upstream. */
+  webcams?: any[];
   /** Switched-on context raster sub-layers (IMG-4): 'imagery.truecolor' / 'imagery.geostationary'. */
   contextSublayers?: string[];
   /** Fired ~500ms after the user stops panning/zooming, with the visible bbox. */
@@ -46,6 +48,7 @@ interface MapViewProps {
 // Stable default so an absent prop does not rebuild the layer every render.
 const NO_IMAGERY: any[] = [];
 const NO_CONTEXT: string[] = [];
+const NO_WEBCAMS: any[] = [];
 
 interface ContextRaster {
   id: string;
@@ -222,6 +225,7 @@ export default function MapView({
   thermal,
   nightlights,
   imagery = NO_IMAGERY,
+  webcams = NO_WEBCAMS,
   contextSublayers = NO_CONTEXT,
   onViewportChange,
 }: MapViewProps) {
@@ -397,6 +401,23 @@ export default function MapView({
         })),
     [activeContext],
   );
+
+  // ─── Public cameras (IMG-5) — live government cameras only ───
+  const webcamLayer = useMemo(() => new ScatterplotLayer({
+    id: 'webcams',
+    data: webcams,
+    getPosition: (d: any) => [Number(d.longitude), Number(d.latitude)],
+    getFillColor: [56, 189, 248, 200],
+    getLineColor: [15, 23, 42, 230],
+    getRadius: 400,
+    radiusMinPixels: 2.5,
+    radiusMaxPixels: 7,
+    stroked: true,
+    lineWidthMinPixels: 1,
+    pickable: true,
+    onHover: (info: any) => setHoverInfo(info.object ? { ...info, type: 'webcam' } : null),
+    updateTriggers: { getPosition: webcams.length },
+  }), [webcams]);
 
   // ─── Satellite imagery Layer (Sentinel-2 latest look per watched site) ───
   // HONESTY: a filled ring = the latest look was clear; a hollow ring = the
@@ -604,7 +625,7 @@ export default function MapView({
   // Pipelines render under everything else (lines as background); LNG
   // terminals sit alongside other point markers. Hover-pick order is
   // last → first, so terminals win over pipelines when overlapping.
-  const layers = [...contextLayers, pipelineLayer, vesselLayer, aircraftLayer, imageryLayer, nightlightsLayer, thermalLayer, conflictLayer, refineryLayer, mineLayer, powerPlantLayer, nuclearLayer, airportLayer, portLayer, lngTerminalLayer];
+  const layers = [...contextLayers, pipelineLayer, vesselLayer, aircraftLayer, imageryLayer, webcamLayer, nightlightsLayer, thermalLayer, conflictLayer, refineryLayer, mineLayer, powerPlantLayer, nuclearLayer, airportLayer, portLayer, lngTerminalLayer];
 
   // ─── Tooltip Renderer ───
   const renderTooltip = useCallback(() => {
@@ -719,6 +740,25 @@ export default function MapView({
               Emitted light measured from orbit (VIIRS Black Marble) — not power
               state and not a confirmed outage. Clear nights only; a cloudy
               facility simply has no reading. Any cause is inference.
+            </div>
+          </div>
+        );
+        break;
+      }
+      case 'webcam': {
+        const ok = object.last_ok_at ? String(object.last_ok_at).slice(0, 16).replace('T', ' ') + ' UTC' : '—';
+        content = (
+          <div className="webcam-card">
+            <div className="webcam-card-title">{object.name}</div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={object.image_url} alt={`Public camera: ${object.name}`} width={280} height={158} className="webcam-card-img" />
+            <div className="webcam-card-credit">{object.attribution_text}</div>
+            <div className="webcam-card-meta">
+              Frame as stamped by the operator · confirmed live {ok}
+              {object.nearest_aoi_name ? ` · near ${object.nearest_aoi_name}` : ''}
+            </div>
+            <div className="webcam-card-note">
+              A public camera&apos;s picture — nothing is recognised in it and nothing is recorded.
             </div>
           </div>
         );
