@@ -4,6 +4,7 @@ import { getAnthropic } from '@/lib/anthropic';
 import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { safeError } from '@/lib/log';
 import { SYNTHESIS_SYSTEM_PROMPT, synthesisOverclaims } from '@/lib/intel/convergenceSynthesis';
+import { clusterFlags } from '@/lib/intel/convergenceCluster';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 180;
@@ -17,32 +18,6 @@ const WINDOW_MS = 72 * 3600_000;
 const CELL_DEG = 10;
 const CELL_HALF = CELL_DEG / 2;
 const FLAG_LIMIT = 2000; // 72h of flags fits easily; headroom so an energy flood can't truncate the rare conflict/maritime flags.
-
-// Independence, not domain count, is what makes a convergence mean anything.
-// Conflict (ACLED) and Energy (GDELT) are BOTH media-derived: one news wave
-// lights up both, so "two domains" can be one source of evidence. Thermal
-// (FIRMS radiometry) and Maritime (AIS) are PHYSICALLY independent witnesses —
-// a satellite hot pixel and a vessel track don't move with a headline. The
-// score below counts distinct SOURCE CLASSES, so redundant media flags no
-// longer inflate significance, and a sensor agreeing with the news is what
-// actually earns a low p. A domain not in this map counts as its own class.
-const SOURCE_CLASS: Record<string, string> = {
-  Conflict: 'media',
-  Energy: 'media',
-  Maritime: 'sensor-ais',
-  Thermal: 'sensor-firms',
-  // VIIRS night-lights. A SEPARATE class from thermal because it is a
-  // different physical measurement: FIRMS measures mid-infrared radiant
-  // power from combustion, Black Marble measures visible-band emitted light,
-  // and a refinery can stop flaring while its grid stays lit. They are NOT
-  // independent instruments — both are NASA VIIRS-family and the same clouds
-  // blind both — and inside one 10° cell neither corroborates the other or
-  // anything else; they co-occur (rev H PR-10).
-  Nightlights: 'sensor-viirs-dnb',
-};
-function sourceClass(domain: string): string {
-  return SOURCE_CLASS[domain] ?? `other:${domain}`;
-}
 
 /**
  * Compute-convergences · every 15 min. Clusters anomaly_flags from the last 72h
@@ -86,41 +61,14 @@ export async function POST(req: NextRequest) {
       .filter((k): k is string => k !== null),
   );
 
-  // Group flags into 5°×5° spatial bins keyed on domain union size.
-  const bins = new Map<string, Array<any>>();
-  for (const f of flags ?? []) {
-    const lat = Number(f.payload?.latitude);
-    const lon = Number(f.payload?.longitude);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-    const key = `${Math.floor(lat / CELL_DEG) * CELL_DEG}:${Math.floor(lon / CELL_DEG) * CELL_DEG}`;
-    if (!bins.has(key)) bins.set(key, []);
-    bins.get(key)!.push(f);
-  }
-
   const writes: any[] = [];
 
-  for (const [key, cluster] of bins) {
-    const domains = new Set<string>(cluster.map(c => c.domain));
-    if (domains.size < 2) continue; // need at least two distinct domains to even consider a convergence
-    if (occupied.has(key)) continue; // already emitted a convergence for this cell in-window
-    occupied.add(key);
+  // The clustering rules live in lib/intel/convergenceCluster.ts (tested by
+  // scripts/intel/test-convergence-cluster.mjs); the route adds the prose.
+  for (const c of clusterFlags(flags ?? [], occupied, CELL_DEG)) {
+    const { lat, lon, flags: cluster, domains, classes, joint_p_value, corroboration_level } = c;
 
-    // Independence-weighted score. Distinct SOURCE CLASSES — not the raw
-    // flag count — drive the p-value, so ten correlated media flags no
-    // longer read as stronger than two genuinely independent signals.
-    //   K = 1 → 0.30  (single-source: same evidence twice; barely a convergence)
-    //   K = 2 → 0.15
-    //   K = 3 → 0.10
-    const classSet = new Set<string>(Array.from(domains).map(sourceClass));
-    const classes = Array.from(classSet).sort();
-    const K = classSet.size;
-    const joint_p_value = Math.min(0.5, 0.3 / Math.max(K, 1));
-    const hasSensor = classes.some(c => c.startsWith('sensor'));
-    const corroboration_level =
-      K >= 2 && hasSensor ? 'sensor-confirmed' : K >= 2 ? 'multi-source' : 'single-source';
-    const [lat, lon] = key.split(':').map(Number);
-
-    let synthesis = `Cluster of ${cluster.length} anomalies across ${Array.from(domains).join(', ')} within a ${CELL_DEG}°×${CELL_DEG}° cell around (${lat + CELL_HALF}, ${lon + CELL_HALF}).`;
+    let synthesis = `Cluster of ${cluster.length} anomalies across ${domains.join(', ')} within a ${CELL_DEG}°×${CELL_DEG}° cell around (${lat + CELL_HALF}, ${lon + CELL_HALF}).`;
     try {
       const anthropic = getAnthropic();
       const r = await anthropic.messages.create({

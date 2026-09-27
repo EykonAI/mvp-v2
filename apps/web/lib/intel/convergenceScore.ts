@@ -3,8 +3,9 @@
  *
  * convergence_events.joint_p_value is not a p-value. compute-convergences
  * sets it to 0.3 / K, where K is the number of distinct SOURCE CLASSES in
- * the cluster (media, sensor-firms, sensor-viirs-dnb, sensor-ais), so it
- * takes four values — 0.3, 0.15, 0.1, 0.075 — and no test statistic, null
+ * the cluster (media, sensor-firms, sensor-viirs-dnb, sensor-ais and, from
+ * IMG-6, sensor-s1-sar — only once the S1 method is admitted), so it takes
+ * one of five values — 0.3, 0.15, 0.1, 0.075, 0.06 — and no test statistic, null
  * distribution or sample stands behind any of them. Printing it as
  * "p < 0.150" dressed a lookup up as a significance test, on four surfaces,
  * one of them public (/c/[id]). Rev H, PR-10.
@@ -31,5 +32,5 @@ export function convergenceScoreLabel(sourceClasses: unknown): string | null {
 
 /** Tooltip text for the label — what it is and, as importantly, what it is not. */
 export const CONVERGENCE_SCORE_TITLE =
-  'Distinct source classes that co-occurred in this cell (media, FIRMS thermal, night-lights, AIS). ' +
+  'Distinct source classes that co-occurred in this cell (media, FIRMS thermal, night-lights, AIS, Sentinel-1 radar). ' +
   'A count, not a statistical test and not a p-value.';

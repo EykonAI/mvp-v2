@@ -25,7 +25,7 @@ export const SYNTHESIS_SYSTEM_PROMPT =
   'NEVER write that one signal corroborates, confirms, verifies, validates or proves another, and never call anything "sensor-confirmed" or "corroborated". ' +
   'A FIRMS detection is a thermal hot pixel — usually a routine gas flare — never a confirmed fire, strike, attack, explosion, damage or shutdown. Night-lights radiance is not power state. ' +
   'Media-derived signals (ACLED/GDELT) describe REPORTED activity: say "reported", never state a strike or attack as fact. ' +
-  'source_classes lists which kinds of source are present; name them plainly (media reports, FIRMS thermal, night-lights, AIS). Do not infer intent, coordination or causation.';
+  'source_classes lists which kinds of source are present; name them plainly (media reports, FIRMS thermal, night-lights, AIS, Sentinel-1 radar). Do not infer intent, coordination or causation.';
 
 // Corroboration / confirmation vocabulary a synthesis must never carry.
 // "unconfirmed" is allowed: \bconfirm does not match inside it.

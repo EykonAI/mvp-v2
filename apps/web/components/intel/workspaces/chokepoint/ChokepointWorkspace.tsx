@@ -3,6 +3,7 @@ import { useState } from 'react';
 import ScenarioLayout from '@/components/intel/shared/ScenarioLayout';
 import IllustrativeBadge from '@/components/intel/shared/IllustrativeBadge';
 import Sparkline from '@/components/intel/shared/Sparkline';
+import S1StraitStrip from '@/components/imagery/S1StraitStrip';
 import type { ChokepointOutput, ClosureType } from '@/lib/intel/chokepoint';
 
 const CHOKEPOINTS = [
@@ -160,6 +161,9 @@ export default function ChokepointWorkspace() {
       }
       right={
         <div className="flex flex-col" style={{ gap: 16 }}>
+          <PanelHead>Sentinel-1 radar at the straits</PanelHead>
+          <S1StraitStrip />
+
           <PanelHead>Consequence Summary</PanelHead>
           <p style={{ color: 'var(--ink-dim)', fontSize: 12, lineHeight: 1.55 }}>
             {result
