@@ -50,7 +50,7 @@ const CLOCK_LAG = { firms: { doc: 1, cadence: 0 }, blackmarble: { doc: 9, cadenc
 // table only says which plan RPC explains which feature.
 //   app/api/cron/issue-eia-weekly            source 'eia'            feature 'eia_weekly_inventory'   (Mondays 09:00 UTC)
 //   app/api/cron/issue-chokepoint-weekly     source 'ais'            feature 'ais_chokepoint_weekly'  (Mondays 09:00 UTC)
-export const ISSUER_SOURCES = ['ais-darkgap', 'firms-recovery', 'blackmarble', 'eia', 'ais'] as const;
+export const ISSUER_SOURCES = ['ais-darkgap', 'firms-recovery', 'blackmarble', 'eia', 'ais', 's1-anchorage'] as const;
 type IssuerSource = (typeof ISSUER_SOURCES)[number];
 // Railway schedules as set by the founder, and the ages at which a missing
 // run row is a warning / a fault. Hourly issuers: 2 h / 4 h. Daily (after the
@@ -65,6 +65,9 @@ const ISSUER_CADENCE: Record<IssuerSource, { schedule: string; warn_h: number; c
   blackmarble:      { schedule: 'daily ~10:24 UTC',    warn_h: 48,  crit_h: 96,  silent_h: 48 },
   eia:              { schedule: 'Mondays 09:00 UTC',   warn_h: 192, crit_h: 336, silent_h: 192 },
   ais:              { schedule: 'Mondays 09:00 UTC',   warn_h: 192, crit_h: 336, silent_h: 192 },
+  // IMG-10: runs inside the daily Sentinel-1 cron; it records a run every day
+  // (with its reason when it issues nothing), and claims weekly.
+  's1-anchorage':   { schedule: 'daily (Sentinel-1 cron)', warn_h: 48, crit_h: 96, silent_h: 192 },
 };
 
 export interface Filters {

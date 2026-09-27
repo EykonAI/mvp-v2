@@ -68,6 +68,11 @@ jobs:
       # string the board can render. The database half is pr6_guards.sql.
       - name: Reality Check board rules (hard gate)
         run: node apps/web/scripts/reality-check/test-rc-board.mjs
+      # IMG-10: the s1:anchorage_count claim family — rows only from an
+      # issuing plan, next-week claims with their VOID rules, a resolver that
+      # never guesses. SQL half (backtest, Calibrating, VOID): img10_guards.sql.
+      - name: Sentinel-1 anchorage claims (hard gate)
+        run: node apps/web/scripts/intel/test-s1-claims.mjs
       # IMG-6: the convergence clustering rules with the Sentinel-1 radar
       # class — a VOID pass contributes nothing (fixture cluster), a raised
       # admitted pass co-occurs. The database half is img6_guards.sql.

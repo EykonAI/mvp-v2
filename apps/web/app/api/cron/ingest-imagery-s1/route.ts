@@ -5,6 +5,7 @@ import { fetchCdseToken } from '@/lib/imagery/cdse';
 import { S1_ENGINE_VERSION, S1_PARAMS, catalogPasses, readPass, type S1Row } from '@/lib/imagery/s1';
 import type { DueAoi } from '@/lib/imagery/s2';
 import { S1_FLAG_SOURCE, s1FlagsFromCandidates, type S1Candidate } from '@/lib/imagery/s1-flags';
+import { issueS1AnchorageClaims } from '@/lib/imagery/s1-claims';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -157,8 +158,14 @@ async function handle(req: NextRequest) {
     errors.push(`s1-flags: ${err instanceof Error ? err.message : String(err)}`);
   }
 
+  // ─── Calibration claims (IMG-10, mig 193) ───
+  // Issues nothing until the S1 method is admitted and the walk-forward
+  // backtest has >= 30 judged weeks; every run records why in issuance_runs.
+  const claims = await issueS1AnchorageClaims(supabase);
+  if (claims.error) errors.push(`s1-claims: ${claims.error}`);
+
   // a failed flag step is a failed run: silence here would read as "nothing seen"
-  const ok = (aois.length === 0 || aoisOk > 0) && !errors.some(e => e.startsWith('s1-flags:'));
+  const ok = (aois.length === 0 || aoisOk > 0) && !errors.some(e => e.startsWith('s1-flags:') || e.startsWith('s1-claims:'));
   return NextResponse.json(
     {
       ok,
@@ -170,6 +177,7 @@ async function handle(req: NextRequest) {
       pu_estimate: Math.round(puTotal * 10000) / 10000,
       pu_note: 'estimated from the documented PU definition (orthorectification factor assumed); CDSE reports no metered figure per request',
       flags,
+      claims: { issuing: claims.issuing, reason: claims.reason, issued: claims.issued, family_status: claims.family_status, backtest: claims.backtest },
       results,
       errors,
       elapsed_ms: Date.now() - startedAt,
