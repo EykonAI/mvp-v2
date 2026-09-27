@@ -4,6 +4,7 @@ import { requireCronSecret } from '@/lib/intel/cronAuth';
 import { fetchCdseToken } from '@/lib/imagery/cdse';
 import { S1_ENGINE_VERSION, S1_PARAMS, catalogPasses, readPass, type S1Row } from '@/lib/imagery/s1';
 import type { DueAoi } from '@/lib/imagery/s2';
+import { S1_FLAG_SOURCE, s1FlagsFromCandidates, type S1Candidate } from '@/lib/imagery/s1-flags';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -11,15 +12,20 @@ export const fetchCache = 'force-no-store';
 export const maxDuration = 300;
 
 /**
- * Sentinel-1 measurement study · daily (Imagery Layer IMG-3, mig 185).
+ * Sentinel-1 · daily (Imagery Layer IMG-3 study, mig 185; IMG-6 go-live, mig 189).
  *
- * NO USER SURFACE. For each anchorage AOI with s1_grd switched on
- * (imagery_enable_s1_study — by hand, after three days of hourly AIS
- * counts), it lists the IW passes over the polygon with their exact sensing
- * times (Catalog API), reads each pass's bright-target area (Statistical
- * API), writes one row per pass through imagery_upsert_obs('s1_grd', …) and
- * logs the check. imagery_s1_study() pairs those rows with ais_aoi_counts
- * and decides admission; until a reading is admitted nothing reads it.
+ * For each AOI with s1_grd switched on it lists the IW passes over the
+ * polygon with their exact sensing times (Catalog API), reads each pass's
+ * bright-target area (Statistical API), writes one row per pass through
+ * imagery_upsert_obs('s1_grd', …) and logs the check. Which AOIs are on:
+ *   · study anchorages — imagery_enable_s1_study, by hand (IMG-3);
+ *   · the six chokepoint windows — ONLY while the latest recorded admission
+ *     passed (imagery_s1_record_admission, by hand; mig 189).
+ *
+ * Then it writes convergence flags: imagery_s1_flag_candidates() returns
+ * admitted, clear, baselined readings ≥ 1.5× their median — nothing at all
+ * until an admission passed — and new ones become anomaly_flags (domain
+ * 'SAR'). A VOID pass is never a flag.
  *
  * Fails loud: 503 unconfigured, 502 when every AOI failed. Echoes the engine
  * version and every pinned parameter so a stale deploy is visible.
@@ -34,7 +40,7 @@ async function handle(req: NextRequest) {
   const p = req.nextUrl.searchParams;
   const limit = Math.min(Math.max(parseInt(p.get('limit') || String(DEFAULT_LIMIT)) || DEFAULT_LIMIT, 1), 40);
   const minAgeHours = Math.max(parseInt(p.get('min_age_hours') || '20') || 20, 1);
-  const echo = { engine: S1_ENGINE_VERSION, params: S1_PARAMS, limit, min_age_hours: minAgeHours, surface: 'none — study only' };
+  const echo = { engine: S1_ENGINE_VERSION, params: S1_PARAMS, limit, min_age_hours: minAgeHours, surface: 'gated — readings and flags only after a recorded admission (mig 189)' };
 
   const clientId = process.env.CDSE_CLIENT_ID;
   const clientSecret = process.env.CDSE_CLIENT_SECRET;
@@ -118,7 +124,41 @@ async function handle(req: NextRequest) {
     }
   }
 
-  const ok = aois.length === 0 || aoisOk > 0;
+  // ─── Convergence flags (empty unless the S1 method is admitted) ───
+  const flags = { candidates: 0, inserted: 0, s1_state: 'unknown' as string };
+  try {
+    const { data: st, error: stErr } = await supabase.rpc('imagery_s1_status');
+    if (stErr) throw new Error(`imagery_s1_status: ${stErr.message}`);
+    flags.s1_state = String((st as Array<{ state: string }> | null)?.[0]?.state ?? 'unknown');
+    const since = new Date(Date.now() - 14 * 86400_000).toISOString();
+    const { data: cands, error: cErr } = await supabase.rpc('imagery_s1_flag_candidates', { p_since: since });
+    if (cErr) throw new Error(`imagery_s1_flag_candidates: ${cErr.message}`);
+    const list = (cands ?? []) as S1Candidate[];
+    flags.candidates = list.length;
+    if (list.length > 0) {
+      const { data: prior, error: pErr } = await supabase
+        .from('anomaly_flags')
+        .select('payload')
+        .eq('source', S1_FLAG_SOURCE)
+        .gte('created_at', new Date(Date.now() - 30 * 86400_000).toISOString())
+        .limit(5000);
+      if (pErr) throw new Error(`anomaly_flags read: ${pErr.message}`);
+      const seen = new Set<string>(
+        (prior ?? []).map(r => (r as { payload?: { site_key?: string } | null }).payload?.site_key).filter((k): k is string => !!k),
+      );
+      const toInsert = s1FlagsFromCandidates(list, seen);
+      if (toInsert.length > 0) {
+        const { error: insErr } = await supabase.from('anomaly_flags').insert(toInsert);
+        if (insErr) throw new Error(`anomaly_flags insert: ${insErr.message}`);
+      }
+      flags.inserted = toInsert.length;
+    }
+  } catch (err) {
+    errors.push(`s1-flags: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // a failed flag step is a failed run: silence here would read as "nothing seen"
+  const ok = (aois.length === 0 || aoisOk > 0) && !errors.some(e => e.startsWith('s1-flags:'));
   return NextResponse.json(
     {
       ok,
@@ -129,6 +169,7 @@ async function handle(req: NextRequest) {
       rows_written: rowsWritten,
       pu_estimate: Math.round(puTotal * 10000) / 10000,
       pu_note: 'estimated from the documented PU definition (orthorectification factor assumed); CDSE reports no metered figure per request',
+      flags,
       results,
       errors,
       elapsed_ms: Date.now() - startedAt,

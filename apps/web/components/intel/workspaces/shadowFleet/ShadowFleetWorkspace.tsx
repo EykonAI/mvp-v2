@@ -3,6 +3,7 @@ import ChartFigure from '@/components/intel/shared/ChartFigure';
 import { useEffect, useMemo, useState } from 'react';
 import weights from '@/lib/fixtures/shadow_fleet_weights.json';
 import { AIS_BOXES } from '@/lib/intel/aisCoverage';
+import S1StraitStrip from '@/components/imagery/S1StraitStrip';
 
 /**
  * The Dark Contact Board — events, not vessels.
@@ -187,6 +188,7 @@ export default function ShadowFleetWorkspace() {
   return (
     <div className="flex flex-col" style={{ height: 'calc(100vh - 235px)', minHeight: 560 }}>
       <BoardStrip coverage={coverage} summary={summary} dataClock={dataClock} feedLag={feedLag} domain={domain} onDomain={setDomain} />
+      <S1StraitStrip />
 
       <div
         className="grid flex-1"

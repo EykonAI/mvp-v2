@@ -599,3 +599,16 @@ body.intel-view {
 .webcam-card-credit { font-size: 10px; color: #cbd5e1; margin-top: 4px; }
 .webcam-card-meta { font-size: 11px; color: #94a3b8; margin-top: 2px; }
 .webcam-card-note { font-size: 10.5px; color: #64748b; margin-top: 6px; line-height: 1.35; }
+
+/* ─── IMG-6 Sentinel-1 strait strip (Shadow Fleet, Chokepoint) ───────── */
+.s1-strip { padding: 8px 12px; border-bottom: 1px solid var(--rule-soft); font-size: 11px; color: var(--ink-dim); }
+.s1-strip-muted { color: var(--ink-faint); }
+.s1-strip-head { font-weight: 600; color: var(--ink); margin-bottom: 6px; }
+.s1-sites { display: flex; flex-wrap: wrap; gap: 14px; }
+.s1-site { min-width: 180px; }
+.s1-site-name { color: var(--ink); }
+.s1-passes { list-style: none; margin: 2px 0 0; padding: 0; }
+.s1-pass { font-variant-numeric: tabular-nums; }
+.s1-pass-void { color: var(--ink-faint); font-style: italic; }
+.s1-pass-raised { color: var(--amber); }
+.s1-strip-credit { margin-top: 6px; font-size: 10px; color: var(--ink-faint); }

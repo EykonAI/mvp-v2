@@ -68,3 +68,8 @@ jobs:
       # string the board can render. The database half is pr6_guards.sql.
       - name: Reality Check board rules (hard gate)
         run: node apps/web/scripts/reality-check/test-rc-board.mjs
+      # IMG-6: the convergence clustering rules with the Sentinel-1 radar
+      # class — a VOID pass contributes nothing (fixture cluster), a raised
+      # admitted pass co-occurs. The database half is img6_guards.sql.
+      - name: Convergence clustering rules (hard gate)
+        run: node apps/web/scripts/intel/test-convergence-cluster.mjs
