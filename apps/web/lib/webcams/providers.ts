@@ -14,6 +14,27 @@
  * endpoint would be scraping. USGS cameras flagged faaInd = 'Y' are FAA
  * weather cameras and not covered by the USGS public-domain licence.
  *
+ * Wave 2 (IMG-9, mig 192) — each behind its own licence row AND its own
+ * API key; the registry skips a provider whose licence is not 'ok' or whose
+ * key is not set, and says which:
+ *
+ *   ny_511      511NY getcameras (NYSDOT)                     2,933 listed,
+ *               1,877 not Disabled on 2026-09-27. Image = the feed's Url
+ *               (511ny.org/map/Cctv/<n>, PNG). The Developer's Access
+ *               Agreement lets a company "redistribute, enhance, repackage,
+ *               or otherwise add value", integrity preserved, and requires a
+ *               registered developer key (NY511_API_KEY).
+ *   ohio_ohgo   OHGO public API /api/v1/cameras (ODOT)        key required
+ *               (OHGO_API_KEY); one row per camera VIEW (a site can hold
+ *               several). Field names from the published model (Id,
+ *               Latitude, Longitude, Location, Description, CameraViews[
+ *               Direction, SmallUrl, LargeUrl, MainRoute]) — not yet read
+ *               live: no key on 2026-09-27.
+ *
+ * Not in wave 2: Taiwan TDX (client credentials not yet issued, and its
+ * CCTV fields could not be read without them), DGT Spain (licence
+ * 'confirm_in_writing', F-4), Windy (F-1 not taken).
+ *
  * A fetcher returns rows; it never decides liveness. A camera becomes live
  * only after a real fetch of its image (see liveness.ts, migration 187).
  */
@@ -29,7 +50,7 @@ export interface CamRow {
   upstream_url: string;
 }
 
-export type ProviderId = 'tfl_jamcams' | 'hk_td' | 'sg_lta' | 'caltrans_cctv' | 'usgs_ashcam';
+export type ProviderId = 'tfl_jamcams' | 'hk_td' | 'sg_lta' | 'caltrans_cctv' | 'usgs_ashcam' | 'ny_511' | 'ohio_ohgo';
 
 const UA = { 'User-Agent': 'eYKON-webcams/1 (+https://eykon.ai)' };
 
@@ -153,10 +174,73 @@ async function usgs(): Promise<CamRow[]> {
     }));
 }
 
+/** Thrown when a provider's API key is not configured — a skip, not a failure. */
+export class MissingKeyError extends Error {
+  constructor(public readonly envVar: string) {
+    super(`${envVar} not set`);
+  }
+}
+
+function requireKey(envVar: string): string {
+  const k = process.env[envVar];
+  if (!k) throw new MissingKeyError(envVar);
+  return k;
+}
+
+async function ny511(): Promise<CamRow[]> {
+  const key = requireKey('NY511_API_KEY');
+  const list = (await getJson(`https://511ny.org/api/getcameras?key=${encodeURIComponent(key)}&format=json`)) as Array<any>;
+  return list.flatMap(c => {
+    // Disabled cameras serve one shared "unavailable" PNG — not a camera.
+    if (c.Disabled === true || c.Blocked === true || !c.Url) return [];
+    return [{
+      provider_cam_id: String(c.ID),
+      name: String(c.Name ?? c.ID),
+      latitude: num(c.Latitude),
+      longitude: num(c.Longitude),
+      heading_deg: HEADINGS[String(c.DirectionOfTravel ?? '').toLowerCase().replace(/[^a-z]/g, '').replace(/bound$/, '')] ?? null,
+      category: 'traffic' as const,
+      media_type: 'image' as const,
+      upstream_url: String(c.Url),
+    }];
+  });
+}
+
+async function ohgo(): Promise<CamRow[]> {
+  const key = requireKey('OHGO_API_KEY');
+  // page-all=true returns every camera in one response (OHGO "Filters" docs).
+  const res = await fetch('https://publicapi.ohgo.com/api/v1/cameras?page-all=true', {
+    headers: { ...UA, Authorization: `APIKEY ${key}` }, cache: 'no-store', signal: AbortSignal.timeout(60_000),
+  });
+  if (!res.ok) throw new Error(`OHGO cameras: HTTP ${res.status}`);
+  const j = (await res.json()) as { results?: any[]; Results?: any[] };
+  const out: CamRow[] = [];
+  for (const c of j.results ?? j.Results ?? []) {
+    (c.cameraViews ?? c.CameraViews ?? []).forEach((v: any, i: number) => {
+      const url = v.largeUrl ?? v.LargeUrl ?? v.smallUrl ?? v.SmallUrl;
+      if (!url) return;
+      const dir = v.direction ?? v.Direction;
+      out.push({
+        provider_cam_id: `${c.id ?? c.Id}-${i}`,
+        name: `${c.location ?? c.Location ?? c.description ?? c.Description ?? 'OHGO camera'}${dir ? ` (${dir})` : ''}`,
+        latitude: num(c.latitude ?? c.Latitude),
+        longitude: num(c.longitude ?? c.Longitude),
+        heading_deg: HEADINGS[String(dir ?? '').toLowerCase().replace(/[^a-z]/g, '').replace(/bound$/, '')] ?? null,
+        category: 'traffic',
+        media_type: 'image',
+        upstream_url: String(url),
+      });
+    });
+  }
+  return out;
+}
+
 export const PROVIDERS: Record<ProviderId, () => Promise<CamRow[]>> = {
   tfl_jamcams: tfl,
   hk_td: hk,
   sg_lta: sg,
   caltrans_cctv: caltrans,
   usgs_ashcam: usgs,
+  ny_511: ny511,
+  ohio_ohgo: ohgo,
 };

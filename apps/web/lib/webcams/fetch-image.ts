@@ -15,6 +15,16 @@ import { resolveSgImage, SG_API } from './providers';
  */
 
 export const STALE_HOURS = 24;
+
+/**
+ * Known "camera unavailable" images, by SHA-256. A placeholder is served
+ * with HTTP 200 and a valid PNG, so the magic-byte check passes it; it is
+ * not a camera frame, so it is a decode_error. Read live 2026-09-27:
+ *   511NY /map/Cctv/<n> for a Disabled camera — 15,136-byte PNG, no Last-Modified.
+ */
+export const PLACEHOLDER_SHA256 = new Set<string>([
+  'e608c39b77e5480ce13682b571638e4246ff519dd6c79402c393db5e273aab19',
+]);
 const MAX_BYTES = 5 * 1024 * 1024;
 const UA = { 'User-Agent': 'eYKON-webcams/1 (+https://eykon.ai)' };
 
@@ -48,6 +58,8 @@ export async function fetchCameraImage(upstreamUrl: string, now = Date.now()): P
     const bytes = Buffer.from(await res.arrayBuffer());
     const contentType = bytes.length <= MAX_BYTES ? sniff(bytes) : null;
     if (!contentType) return { outcome: 'decode_error', httpStatus: res.status, ...empty };
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    if (PLACEHOLDER_SHA256.has(sha256)) return { outcome: 'decode_error', httpStatus: res.status, ...empty };
     const lastModified = res.headers.get('last-modified');
     const lm = lastModified ? Date.parse(lastModified) : NaN;
     const stale = Number.isFinite(lm) && now - lm > STALE_HOURS * 3600_000;
@@ -56,7 +68,7 @@ export async function fetchCameraImage(upstreamUrl: string, now = Date.now()): P
       httpStatus: res.status,
       bytes,
       contentType,
-      sha256: createHash('sha256').update(bytes).digest('hex'),
+      sha256,
       lastModified,
     };
   } catch (err) {
