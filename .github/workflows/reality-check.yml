@@ -82,3 +82,7 @@ jobs:
       # a formula change is never a posture mover. SQL half: img8_guards.sql.
       - name: Imagery alerts, brief and posture (hard gate)
         run: node apps/web/scripts/intel/test-imagery-notif.mjs
+      # IMG-9: webcam wave-2 fetchers (511NY, OHGO) with fetch stubbed — key
+      # required, Disabled/placeholder images never a frame. SQL: img9_guards.sql.
+      - name: Webcams wave 2 fetchers (hard gate)
+        run: node apps/web/scripts/intel/test-webcams-w2.mjs
