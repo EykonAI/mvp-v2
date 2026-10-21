@@ -4,6 +4,7 @@ import { createServerSupabase } from '@/lib/supabase-server';
 import { verifyTurnstileToken } from '@/lib/grow/turnstile';
 import { captureServer } from '@/lib/analytics/server';
 import { resolveRequestCountry } from '@/lib/geo/request-country';
+import { claimFieldFor } from '@/lib/closing/personas';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,6 +58,28 @@ const NEEDS = new Set([
   'audited-record',
   'community',
 ]);
+
+/**
+ * `need` — one column, two shapes (rev H §10, PR-9).
+ *
+ * Most personas answer the week-one question with one of the NEEDS slugs
+ * above. The OSINT analyst answers it in prose instead: its one-pager
+ * ends on "send us a claim — a facility and a date", and the claim lands
+ * here. closing_leads.need is plain nullable text with no CHECK
+ * (migration 108; re-read in production 2026-09-20), so prose stores
+ * where a slug used to and no migration is needed.
+ *
+ * Which shape applies is derived from the persona slug we are about to
+ * STORE, never from the client's word for it — claimFieldFor() is the
+ * same record the form renders from, so the two cannot drift, and free
+ * text posted against a chip persona is still discarded to null exactly
+ * as it was before this change.
+ */
+function readNeed(persona: string, raw: unknown): string | null {
+  const claim = claimFieldFor(persona);
+  if (!claim) return typeof raw === 'string' && NEEDS.has(raw) ? raw : null;
+  return str(raw, claim.maxLength);
+}
 
 const PAY = new Set(['crypto_today', 'fiat_waiting', 'unsure']);
 const PUBLISHES = new Set(['no', 'under_10k', 'over_10k']);
@@ -138,7 +161,12 @@ async function mirrorToFiatWaitlist(
   // Context for whoever works this list months from now. Prose, not a token —
   // it also has to survive the bot-note guard on /api/waitlist.
   const noteParts = [`via /start · persona: ${input.persona}`];
-  if (input.need) noteParts.push(`needs: ${input.need}`);
+  // `need` carries a slug for most personas and a typed claim for the
+  // OSINT analyst — label it for whichever it is, so the person working
+  // this list months from now is not reading "needs: Kirishi refinery".
+  if (input.need) {
+    noteParts.push(`${claimFieldFor(input.persona) ? 'claim' : 'needs'}: ${input.need}`);
+  }
   if (input.theatres.length) noteParts.push(`watching: ${input.theatres.join(', ')}`);
   const note = noteParts.join(' · ').slice(0, 500);
 
@@ -192,7 +220,7 @@ export async function POST(request: NextRequest) {
   const markets = marketsRaw
     .filter((m): m is string => typeof m === 'string' && MARKETS.has(m))
     .slice(0, 3);
-  const need = typeof b.need === 'string' && NEEDS.has(b.need) ? b.need : null;
+  const need = readNeed(persona, b.need);
   const pay = typeof b.pay === 'string' && PAY.has(b.pay) ? b.pay : null;
   const publishes =
     typeof b.publishes === 'string' && PUBLISHES.has(b.publishes) ? b.publishes : null;
@@ -332,6 +360,10 @@ export async function POST(request: NextRequest) {
     theatres,
     utm_source: firstTouch.utm_source,
     has_tools: currentTools != null,
+    // Whether the OSINT offer was taken up — a boolean, never the text.
+    // The claim itself stays in closing_leads; it is a prospect's own
+    // research question and does not belong in a product-analytics event.
+    has_claim: claimFieldFor(persona) != null && need != null,
     lead_hash: leadHash,
     // Records WHICH identity was used, so a future funnel reading low is
     // diagnosable rather than merely disappointing.
