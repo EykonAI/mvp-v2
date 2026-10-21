@@ -163,8 +163,12 @@ check('P3 the limits name the capacity state rather than a figure',
   B.KNOWN_LIMITS.some((l) => /capacity is not established/i.test(l)));
 check('P4 the limits say recall is not measured (D-10)',
   B.KNOWN_LIMITS.some((l) => /recall is not measured/i.test(l)));
-check('P5 the limits say the two sensors are the same VIIRS family',
-  B.KNOWN_LIMITS.some((l) => /VIIRS-family/i.test(l)));
+// FIRMS is VIIRS AND MODIS (lib/firms/client.ts ingests MODIS_NRT), so "both
+// VIIRS-family" was false — and both W37 one-pagers say so: rev G "NASA FIRMS
+// (VIIRS and MODIS)", rev C "partly from the same VIIRS instrument".
+check('P5 the limits say the sensors share clouds and partly an instrument — FIRMS is VIIRS and MODIS',
+  B.KNOWN_LIMITS.some((l) => /partly from the same instrument/i.test(l) && /FIRMS \(VIIRS and MODIS\)/.test(l))
+  && !B.KNOWN_LIMITS.some((l) => /VIIRS-family/i.test(l)));
 
 // ── 6 · the funnel the board renders ────────────────────────────────────
 const tick = {
@@ -218,7 +222,23 @@ const flipped = {
 };
 const rn = B.robustnessNote(flipped);
 check('R2 a flipping verdict is named on the board', rn.includes('RFC-31-47-1') && rn.includes('Lead') && rn.includes('Refuted'), rn);
-check('R3 the note states the consequence, not just the fact', /lead, not a conclusion/.test(rn), rn);
+check('R3 a flipping LEAD gets D-13\'s line, in its words',
+  rn.includes('light drop holds on the single-pixel retrieval, not on the stricter 3×3 one — a lead, not a conclusion.'), rn);
+// "lead" is a §2.2 term (heat AND light down). W37 flips 7 verdicts, 1 of
+// them a lead; the old note called every one of them "a lead".
+const nonLead = B.robustnessNote({ ...tick, parameters: { ...tick.parameters, light_column: 'radiance' },
+  robustness: { ...tick.robustness, not_robust: [
+    { cluster_key: 'RFC-N26-E053-1', verdict: 'LIGHT_DOWN_ONLY', robustness_verdict: 'STEADY' },
+    { cluster_key: 'RFC-N30-E046-2', verdict: 'STEADY', robustness_verdict: 'LIGHT_DOWN_ONLY' }] } });
+check('R4 a flip that is not a lead is never called one',
+  !/\blead\b/i.test(nonLead) && nonLead.includes('is not a conclusion'), nonLead);
+const proNamed = B.robustnessNote({ ...flipped, parameters: { ...tick.parameters, light_column: 'radiance' },
+  rows: [{ cluster_key: 'RFC-31-47-1', site_name: 'Superior Refinery' }] });
+check('R5 Pro reads the lead by its name in the D-13 line (the pages name it)',
+  proNamed.includes('Superior Refinery’s light drop holds on the single-pixel retrieval'), proNamed);
+check('R6 a lead the check cannot read (VOID) gets no "light drop does not hold" claim',
+  !B.leadLightLost('LEAD', 'VOID_INSUFFICIENT_NIGHTS') && B.leadLightLost('LEAD', 'REFUTED')
+  && !B.leadLightLost('LIGHT_DOWN_ONLY', 'STEADY'));
 
 // ── 8 · the claims line (D-7) ───────────────────────────────────────────
 const fam = (o) => ({ issued: 0, judged: 0, k: 0, void: 0, open: 0, skill: null, status: 'calibrating', ...o });
@@ -271,6 +291,247 @@ check('A5 only refineries is live', B.ASSET_STATES.refineries.tone === 'live'
 check('W1 windowLabel renders both endpoints', B.windowLabel('2026-07-18', '2026-08-17') === '07-18 → 08-17');
 check('W2 no board string says "30-day" or "14-night"',
   !strings.some((s) => /\b(30-day|14-night)\b/i.test(String(s))));
+
+// ── 11 · the lead mask below Pro (migration 182, §5, D-12) ─────────────
+const masked = {
+  ...tick,
+  robustness: {
+    ...tick.robustness,
+    not_robust: [
+      { cluster_key: null, verdict: 'LEAD', robustness_verdict: 'REFUTED', name_masked: true },
+      { cluster_key: 'RFC-N26-E053-1', verdict: 'LIGHT_DOWN_ONLY', robustness_verdict: 'STEADY', name_masked: false },
+    ],
+  },
+};
+const mn = B.robustnessNote(masked);
+check('M1 a masked lead flip is counted and described, never identified',
+  mn.startsWith('2 verdicts change') && mn.includes('a lead, identity withheld below Pro') && !mn.includes('null'), mn);
+check('M2 a non-lead flip is still named', mn.includes('RFC-N26-E053-1'), mn);
+// The stored list is key-ordered, so a masked entry left in place brackets
+// its key between its neighbours' (W37: between N32 and N50).
+check('M5 a masked flip is listed after every identified one, whatever order the payload carries',
+  mn.indexOf('RFC-N26-E053-1') < mn.indexOf('a lead, identity withheld below Pro'), mn);
+check('M6 a masked lead\'s D-13 line never names it', mn.includes('One lead’s light drop holds') && !mn.includes('null’s'), mn);
+const rowsMasked = [
+  { row_key: 'withheld-lead-2', cluster_key: null, verdict: 'LEAD' },
+  { row_key: 'RFC-b', cluster_key: 'RFC-b', verdict: 'REFUTED' },
+  { row_key: 'withheld-lead-1', cluster_key: null, verdict: 'LEAD' },
+];
+const sm = B.sortRows(rowsMasked).map((r) => B.rowKey(r));
+check('M3 rows sort and key on row_key, so a masked lead never collides with another',
+  JSON.stringify(sm) === JSON.stringify(['RFC-b', 'withheld-lead-1', 'withheld-lead-2']), sm);
+check('M4 rowKey falls back to the cluster key on a payload from before migration 182',
+  B.rowKey({ cluster_key: 'RFC-x' }) === 'RFC-x');
+
+// ── 12 · the Location cell prints no US state, for any row ──────────────
+check('K1 placeLabel is city, country — no US state even when the payload carries one',
+  B.placeLabel({ city: 'Baytown', us_state: 'TX', country: 'United States', iso_country: 'US' }) === 'Baytown, United States',
+  B.placeLabel({ city: 'Baytown', us_state: 'TX', country: 'United States', iso_country: 'US' }));
+check('K2 placeLabel falls back to the ISO code and is null with nothing to print',
+  B.placeLabel({ city: null, country: null, iso_country: 'NL' }) === 'NL' && B.placeLabel(null) === null
+  && B.placeLabel({ city: null, country: null, iso_country: null }) === null);
+
+// ── 13 · copy rendered from the tick, never typed (tick 2026-W37) ───────
+const w37 = {
+  tick: '2026-W37',
+  parameters: { heat_observable_floor: 0.20, heat_down_ratio: 0.60, min_baseline_nights: 5, min_window_nights: 3 },
+  funnel: {
+    counted_by: 'complex',
+    watched: { complexes: 295, rows: 353 }, observed: { complexes: 228, rows: 277 },
+    heat_observable: { complexes: 87, rows: 122 }, thermally_dark: { complexes: 19, rows: 24 },
+    refuted: { complexes: 17, rows: 22 }, lead: { complexes: 2, rows: 2 }, withheld: { complexes: 0, rows: 0 },
+  },
+  heat_not_observable: { complexes: 141, rows: 155, with_baseline_detection: 63, without_baseline_detection: 78, floor: 0.20, rule: '' },
+  claims: { issued_on_this_tick: 55, at_publication: null, live: null,
+    on_register: { claims: 55, complexes: 19, verdicts_without_claims: 276, rule: '' } },
+  robustness: { column: 'radiance_3x3', min_px_hq: 5, not_robust: [] },
+};
+const hno = B.heatNotObservableText(w37);
+check('T1 heat-not-observable is a RATE at or below the floor, with the split from the tick',
+  hno.startsWith('141 observed complexes have a baseline heat-detection rate of 0.20 or less')
+  && hno.includes('63 of them had detection days in the baseline and 78 had none')
+  && hno.includes('never as heat steady'), hno);
+check('T2 the heat line follows the tick, not a constant',
+  B.heatNotObservableText({ ...w37, heat_not_observable: { ...w37.heat_not_observable, complexes: 7, with_baseline_detection: 2, without_baseline_detection: 5 } })
+    .startsWith('7 observed complexes'));
+check('T3 with nothing heat-not-observable there is no line',
+  B.heatNotObservableText({ ...w37, heat_not_observable: { ...w37.heat_not_observable, complexes: 0, with_baseline_detection: 0, without_baseline_detection: 0 } }) === null);
+check('T4 a payload from before migration 182 still gets a true line (no split, no "no baseline")',
+  /^141 observed complexes have a baseline heat-detection rate of 0\.20 or less — too little heat/.test(
+    B.heatNotObservableText({ ...w37, heat_not_observable: undefined, funnel: { ...w37.funnel } }) ?? ''),
+  B.heatNotObservableText({ ...w37, heat_not_observable: undefined }));
+const cc = B.claimsCoverageText(w37);
+check('T5 the claims line says who carries a claim, with every count from the tick and the register',
+  cc === 'Claims are issued only on the thermally dark complexes. Tick 2026-W37 issued 55 claims on 19 complexes; the other 276 of its 295 verdicts carry none.', cc);
+check('T6 a tick that issued no claims says so, and why',
+  /^Tick 2026-W38 issued no claims: claims issue on alternate ticks only/.test(
+    B.claimsCoverageText({ ...w37, tick: '2026-W38', claims: { ...w37.claims, issued_on_this_tick: null } })));
+check('T7 a register that disagrees with the frozen count is shown, not hidden',
+  B.claimsCoverageText({ ...w37, claims: { ...w37.claims, on_register: { ...w37.claims.on_register, claims: 54 } } })
+    .includes('(the register holds 54)'));
+check('T8 the funnel notes print the floor and ratio the way the pages do (0.20, 0.60)',
+  B.funnelSteps(w37)[2].note.includes('0.20') && B.funnelSteps(w37)[3].note.includes('0.60'));
+// A superseding tick (e.g. 2026-W37-r2) never issues: tick.ts issues on new
+// ticks only. "Alternate ticks" would give it the wrong reason.
+const r2 = { ...w37, tick: '2026-W37-r2', claims: { ...w37.claims, issued_on_this_tick: null,
+  on_register: { ...w37.claims.on_register, claims: 0, complexes: 0, verdicts_without_claims: 295 } },
+  supersession: { current: true, superseded_by: null, supersedes: '2026-W37' } };
+const ccr2 = B.claimsCoverageText(r2);
+check('T9 a superseding tick says it supersedes and issues none of its own — never "alternate ticks"',
+  ccr2 === 'Tick 2026-W37-r2 supersedes tick 2026-W37 and, like every superseding tick, issues no claims of its own. Its 295 verdicts are published without one.',
+  ccr2);
+// W37 has no complex without a usable FIRMS day; a tick that has some must
+// not count them under "a rate of 0.20 or less".
+const hnoGap = B.heatNotObservableText({ ...w37, heat_not_observable: { ...w37.heat_not_observable,
+  complexes: 150, with_baseline_detection: 63, without_baseline_detection: 78, without_usable_firms_days: 9 } });
+check('T10 complexes with no usable FIRMS day are not counted as "a rate of 0.20 or less"',
+  hnoGap.startsWith('141 observed complexes have a baseline heat-detection rate of 0.20 or less')
+  && hnoGap.endsWith('9 observed complexes had no usable FIRMS day in the baseline or the window, so no heat-detection rate to read: also reported as heat not observable, never as heat steady.'),
+  hnoGap);
+check('T11 W37 (no FIRMS gap) renders exactly the sentence the pages agree with',
+  B.heatNotObservableText({ ...w37, heat_not_observable: { ...w37.heat_not_observable, without_usable_firms_days: 0 } })
+    === '141 observed complexes have a baseline heat-detection rate of 0.20 or less — 63 of them had detection days in the baseline and 78 had none. Either way that is too little heat to fall from: reported as heat not observable, never as heat steady.');
+
+// ── 14 · no rendered sentence contradicts the published tick ────────────
+// The W37 agents flagged these; the board must not say them again. Scanned
+// over every string board.ts can render AND the board component's JSX text
+// (comments stripped — the rule is about what reaches a screen).
+const BOARD_TSX = readFileSync(join(WEB, 'components/intel/workspaces/realityCheck/RefineryBoard.tsx'), 'utf8')
+  .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/^\s*\/\/.*$/gm, '');
+const rendered = [
+  ...strings, hno, cc,
+  B.claimsCoverageText({ ...w37, claims: { ...w37.claims, issued_on_this_tick: null } }),
+  ccr2, hnoGap,
+  B.robustnessNote(masked), B.robustnessNote(flipped), ...B.funnelSteps(w37).map((f) => f.note),
+  BOARD_TSX,
+  // the workspace around the board speaks too (its empty and error states)
+  readFileSync(join(WEB, 'components/intel/workspaces/realityCheck/RealityCheckWorkspace.tsx'), 'utf8')
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, ''),
+].map((x) => String(x).toLowerCase().replace(/\s+/g, ' '));
+for (const phrase of ['this week', 'stopped flaring', 'forward-testable claim', 'no thermal baseline',
+                      'every verdict on this board', 'quiet week', 'went quiet', 'us_state', 'empty week',
+                      'viirs-family', 'does not hold on both retrievals is a lead',
+                      'not the other is a lead']) {
+  check(`B1 no board sentence says "${phrase}"`, !rendered.some((x) => x.includes(phrase)), phrase);
+}
+check('B2 the refutation is described in §2.2 terms ("heat detections fell")',
+  B.VERDICTS.REFUTED.gloss.startsWith('Heat detections fell') && BOARD_TSX.includes('heat detections fell while the site stayed lit'));
+check('B3 the board names the tick by its slug where it used to say "this week"',
+  BOARD_TSX.includes('On tick {t.tick} a thermal-only feed')
+  && BOARD_TSX.includes('Nothing was thermally dark on tick {t.tick}'));
+
+// ── 15 · the verdict column stays on screen (fix 5) ─────────────────────
+const CSS = readFileSync(join(WEB, 'app/globals.css'), 'utf8');
+check('F10 the Verdict header and cell carry the pinned-column class',
+  (BOARD_TSX.match(/className="rc-col-verdict"/g) ?? []).length === 2);
+check('F11 the pinned column is sticky at the scroller\'s right edge over an opaque background',
+  /\.rc-table \.rc-col-verdict \{[^}]*position: sticky;[^}]*right: 0;[^}]*background: var\(--bg-navy\)/.test(CSS));
+check('F12 row hover and selection still out-rank the pinned background (specificity)',
+  /\.rc-table tbody tr:hover td \{ background: var\(--bg-raised\); \}/.test(CSS)
+  && CSS.indexOf('.rc-table .rc-col-verdict {') < CSS.indexOf('.rc-table tbody tr:hover td'));
+
+// ── 16 · numbers printed the way the pages print them ───────────────────
+check('Q1 a stored ratio prints with two decimals everywhere (0.6 → 0.60, 0.2 → 0.20)',
+  B.paramNum(0.6) === '0.60' && B.paramNum(0.2) === '0.20' && B.paramNum('0.60') === '0.60');
+check('Q2 a parameter stored with more decimals is never rounded away', B.paramNum(0.125) === '0.125', B.paramNum(0.125));
+check('Q3 a missing parameter is an em dash, never a constant', B.paramNum(null) === '—' && B.paramNum(undefined) === '—' && B.paramNum('') === '—');
+check('Q4 coordinates print in the pages\' hemisphere form, at the precision the accessor sends',
+  B.coordLabel(35.0648, -106.652) === '35.0648 N, 106.6520 W' && B.coordLabel(-6.7672, 111.9556) === '6.7672 S, 111.9556 E', B.coordLabel(35.0648, -106.652));
+check('Q5 no coordinates, no label', B.coordLabel(null, 1) === null && B.coordLabel(1, undefined) === null);
+
+// ── 17 · the rendered board (react-dom/server over the real component) ──
+// A synthetic payload shaped exactly like the accessor's: one refuted named
+// complex, one sourced name on three members, one unnamed site, and a lead
+// that is masked (member tier). What reaches the HTML — text, aria, title and
+// data attributes alike — is what is checked.
+{
+  const React = require('react');
+  const { renderToStaticMarkup } = require('react-dom/server');
+  const loadTsx = (file) => {
+    if (cache.has(file)) return cache.get(file).exports;
+    const out = ts.transpileModule(readFileSync(file, 'utf8'), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true, jsx: ts.JsxEmit.ReactJSX },
+    }).outputText;
+    const m = { exports: {} };
+    cache.set(file, m);
+    const req = (id) => {
+      if (id.startsWith('@/') || id.startsWith('.')) {
+        const base = id.startsWith('@/') ? join(WEB, id.slice(2)) : resolve(dirname(file), id);
+        const f = resolveTs(base);
+        if (f) return f.endsWith('.tsx') ? loadTsx(f) : load(f);
+      }
+      return require(id);
+    };
+    new Function('module', 'exports', 'require', out)(m, m.exports, req);
+    return m.exports;
+  };
+  const Board = loadTsx(join(WEB, 'components/intel/workspaces/realityCheck/RefineryBoard.tsx')).default;
+  const row = (o) => ({
+    row_key: o.cluster_key, name_masked: false, name_sources: null, member_count: 1, member_names: null, members: null,
+    coverage_state: 'OBSERVED', heat_state: 'HEAT_DOWN',
+    location: { iso_country: 'NL', country: 'Netherlands', city: null, multi_country: false, latitude: 51.9369, longitude: 4.1553, note: '' },
+    light: { baseline_nights: 10, window_nights: 6, baseline_median: 47.81, window_median: 37.89, baseline_min: 20.66, baseline_max: 70.18,
+      window_min: 29.68, window_max: 66.4, ratio: 0.79, distributions_overlap: true },
+    heat: { baseline_firms_days: 31, baseline_heat_days: 18, window_firms_days: 15, window_heat_days: 5, baseline_rate: 0.58, window_rate: 0.33 },
+    robustness: { verdict: o.verdict, robust_to_retrieval: true, baseline_nights: 10, window_nights: 6, baseline_median: 44.3, window_median: 38.0, ratio: 0.86 },
+    stability: { tested: false, d: null, p: null },
+    capacity: { established: false, label: 'Capacity not established', reason: 'No sourced capacity record exists for this site.' },
+    ...o,
+  });
+  const LEAD_KEY = 'RFC-N46-W093-1';
+  const payload = {
+    ...w37, published: true, tier: 'member', asset_class: 'refinery', revision: 1,
+    published_at: '2026-09-21T10:23:33Z', data_clock_night: '2026-09-10',
+    windows: { baseline_start: '2026-07-27', baseline_end: '2026-08-26', window_start: '2026-08-27', window_end: '2026-09-10',
+      baseline_nights: 31, window_nights: 15, rule: 'Both windows are inclusive.' },
+    parameters: { ...w37.parameters, statistic: 'median', light_column: 'radiance', light_down_ratio: 0.6, complex_linkage_m: 5000 },
+    robustness: { column: 'radiance_3x3', min_px_hq: 5, not_robust: [
+      { cluster_key: 'RFC-N32-E044-1', verdict: 'LIGHT_DOWN_ONLY', robustness_verdict: 'STEADY', name_masked: false },
+      { cluster_key: null, verdict: 'LEAD', robustness_verdict: 'REFUTED', name_masked: true },
+      { cluster_key: 'RFC-N50-W105-1', verdict: 'LIGHT_DOWN_ONLY', robustness_verdict: 'VOID_INSUFFICIENT_NIGHTS', name_masked: false }] },
+    coverage: { bm_nights_used: [], firms_days_used: [], calendar_nights: 0, note: '' },
+    integrity: { content_hash: 'c843ad1e162d6850', hash_matches: true, frozen: true, covers: '', not_covered: '' },
+    supersession: { current: true, superseded_by: null, supersedes: null },
+    archive: [], counts_by_verdict: {}, as_of: '2026-09-22T00:00:00Z',
+    mask: { tier: 'member', lead_names: 'count only', lead_identity: 'withheld', drilldown: 'pro only', archive: 'current tick only' },
+    rows: [
+      row({ cluster_key: 'RFC-N51-E004-3', verdict: 'REFUTED', site_name: 'Gunvor Energy Rotterdam + BP Raffinaderij Rotterdam', member_count: 3 }),
+      row({ cluster_key: 'RFC-S07-E111-1', verdict: 'REFUTED', site_name: 'Transpacific Petrochemical Indotama', member_count: 3,
+        name_sources: ['OSM way:604190258 — encloses every vertex'],
+        location: { iso_country: 'ID', country: 'Indonesia', city: null, multi_country: false, latitude: -6.7672, longitude: 111.9556, note: '' } }),
+      row({ cluster_key: 'RFC-N35-W107-1', verdict: 'REFUTED', site_name: 'Unnamed site (35.065 N, 106.652 W)',
+        location: { iso_country: 'US', country: 'United States', city: null, multi_country: false, latitude: 35.0648, longitude: -106.652, note: '' } }),
+      row({ row_key: 'withheld-lead-1', cluster_key: null, verdict: 'LEAD', site_name: null, name_masked: true, location: null,
+        robustness: { verdict: 'REFUTED', robust_to_retrieval: false, baseline_nights: 13, window_nights: 6, baseline_median: 34.5, window_median: 32.3, ratio: 0.94 } }),
+    ],
+  };
+  const render = (selected) => renderToStaticMarkup(React.createElement(Board, { data: payload, selected, onSelect() {}, onTick() {} }));
+  const htmlA = render('RFC-N51-E004-3');
+  const htmlL = render('withheld-lead-1');
+  const text = (h) => h.replace(/<[^>]+>/g, ' ').replace(/&#x27;|&apos;/g, "'").replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+  check('D1 the board renders a masked-lead payload', htmlA.includes('Name withheld below Pro') && htmlL.includes('Name withheld below Pro'));
+  check('D2 below Pro no lead key, name or coordinate reaches the HTML (text, aria, title, data attributes)',
+    ![htmlA, htmlL].some((h) => h.includes(LEAD_KEY) || h.includes('Superior') || h.includes('46.69') || h.includes('92.06')));
+  check('D3 a masked lead\'s Location says it is withheld, never "not in the registry"',
+    (text(htmlA).match(/withheld below Pro/g) ?? []).length >= 1 && !text(htmlA).includes('not in the registry'), text(htmlA).slice(0, 400));
+  check('D4 below Pro the drill-down says the strips are a Pro view instead of inviting a click that cannot load them',
+    text(htmlL).includes('sensor strips are a Pro view') && !text(htmlL).includes('Select a row to load'));
+  check('D5 the Location cell prints one form of the coordinates the name uses (hemisphere letters, no signed decimal)',
+    text(htmlA).includes('35.0648 N, 106.6520 W') && !text(htmlA).includes('-106.65'));
+  check('D6 a sourced name says so on its row', text(htmlA).includes('RFC-S07-E111-1 · 3 sites, counted once · name sourced outside the registry'));
+  check('D7 the rendered robustness note lists the masked flip last and calls only the lead a lead',
+    /RFC-N50-W105-1 \(Light down only → Insufficient nights\), a lead, identity withheld below Pro \(Lead → Refuted\)/.test(text(htmlA))
+    && text(htmlA).includes('One lead’s light drop holds on the single-pixel retrieval'), text(htmlA).match(/\d verdicts change[^.]*\./)?.[0]);
+  check('D8 the tick band, the drill-down and the method print the threshold as the pages do (0.60), never 0.6',
+    text(htmlA).includes('threshold 0.60') && text(htmlA).includes('Ratio against the 0.60 threshold')
+    && text(htmlA).includes('below 0.60 × the baseline median') && text(htmlA).includes('baseline heat-detection rate above 0.20')
+    && !/\b0\.6\b(?!\d)/.test(text(htmlA)), text(htmlA).match(/.{40}\b0\.6\b(?!\d).{20}/)?.[0]);
+  check('D9 the Verdict header and every verdict cell carry the pinned-column class',
+    (htmlA.match(/rc-col-verdict/g) ?? []).length === payload.rows.length + 1);
+  check('D10 §3.4 is rendered verbatim between the board and the drill-down', htmlA.includes(STANDING.replace(/'/g, '&#x27;')) || text(htmlA).includes(STANDING));
+}
 
 // ── report ──────────────────────────────────────────────────────────────
 if (fails.length) {
